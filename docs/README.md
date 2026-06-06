@@ -12,6 +12,9 @@ Schritt und ist bewusst für Leser **ohne** tiefe IT-Vorbildung geschrieben.
   - [M1 — Der Simulator](milestones/M1-simulator.md)
 - **[decisions/](decisions/)** — Entscheidungs-Logbuch (ADRs): welche wichtige
   Weichenstellung *warum* getroffen wurde.
+- **[requirements/](requirements/)** — Anforderungs-Register mit
+  Rückverfolgbarkeit (Anforderung → Code → Test). Kern der
+  Zertifizierungs-Fähigkeit.
 
 ## Wie wir arbeiten
 

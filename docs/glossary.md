@@ -229,3 +229,143 @@ verrauschten Szenarien reproduzierbar.
 **ADR** (*Architecture Decision Record*)
 Eine kurze Notiz, die eine wichtige Entscheidung samt Begründung festhält —
 damit man später nachvollziehen kann, *warum* etwas so gebaut wurde.
+
+---
+
+## Cloud & Betrieb
+
+**Cloud-nativ**
+Software, die *für* die Cloud gebaut ist statt nur *in* die Cloud verschoben:
+Sie nimmt an, dass Recheninstanzen jederzeit verschwinden können, dass skaliert
+wird und dass Ausfälle normal sind — und kommt damit klar.
+
+**Lift & Shift**
+Das Gegenteil: eine alte Anwendung unverändert in einen Container packen und in
+der Cloud betreiben. Läuft, nutzt aber keine Cloud-Stärken und „kämpft" oft
+gegen die Umgebung.
+
+**Container**
+Ein abgeschlossenes „Paket" mit Anwendung und allem, was sie zum Laufen braucht.
+Läuft überall gleich, unabhängig vom Wirts-System.
+
+**Kubernetes**
+Ein „Dirigent" für Container: startet, überwacht, skaliert und ersetzt sie
+automatisch über viele Maschinen hinweg. Anbieter-neutral (läuft bei allen
+großen Clouds und On-Prem).
+
+**Anbieter-neutral / On-Prem / Souveräne Cloud**
+- *Anbieter-neutral:* nicht an einen Cloud-Konzern gebunden.
+- *On-Prem:* im eigenen Rechenzentrum betrieben.
+- *Souveräne Cloud:* Betrieb unter rechtlicher/territorialer Kontrolle (z. B.
+  EU-/national), für Datensouveränität — bei ANSP oft relevant.
+
+**Zustandsbehaftet (*stateful*) vs. zustandslos (*stateless*)**
+Ein *zustandsloser* Dienst kann jederzeit neu gestartet werden, ohne etwas zu
+„vergessen". Ein *zustandsbehafteter* Dienst (wie ein Tracker, der Tracks über
+die Zeit führt) merkt sich etwas — und genau dieses Gedächtnis muss in der Cloud
+wiederherstellbar gemacht werden.
+
+**Datenzeit (*Event-Time*) vs. Verarbeitungszeit**
+- *Datenzeit:* der Zeitstempel, der *in* der Meldung steht (wann die Messung
+  wirklich war).
+- *Verarbeitungszeit:* wann der Rechner sie zufällig bearbeitet.
+Wir rechnen nach Datenzeit — das macht das Ergebnis reproduzierbar und
+unabhängig von Server-Launen.
+
+**Snapshot / Replay**
+- *Snapshot:* ein gespeicherter Stand des Zustands zu einem Zeitpunkt.
+- *Replay:* das erneute Abspielen des Eingangsstroms ab einem Snapshot, um den
+  Zustand exakt wiederherzustellen — die Grundlage für Ausfallsicherheit.
+
+**Message Bus / Datenstrom**
+Ein „Förderband" für Nachrichten zwischen Bausteinen (z. B. Sensoren →
+Tracker → Anzeige). Entkoppelt die Teile, erlaubt Skalierung, Puffern und
+Wiederabspielen.
+
+**Back-Pressure (Lastpuffer/Gegendruck)**
+Mechanismus, der einen überlasteten Empfänger schützt, indem der Sender
+gebremst wird — statt dass etwas abstürzt oder Daten verloren gehen.
+
+**12-Factor**
+Eine bekannte Sammlung von Bau-Prinzipien für cloud-taugliche Dienste (z. B.
+Konfiguration über Umgebungsvariablen statt fest im Code).
+
+**Health-/Readiness-Probe**
+Kleine Selbstauskünfte eines Dienstes: „Lebe ich noch?" (health) und „Bin ich
+bereit, Last anzunehmen?" (readiness). Kubernetes nutzt sie zum Steuern.
+
+**Observability (Beobachtbarkeit)**
+Die Fähigkeit, von außen zu verstehen, was ein laufendes System tut — über
+**Logs** (Ereignis-Protokolle), **Metriken** (Messzahlen) und **Tracing**
+(Verfolgen einer Anfrage durch das System). Dient Betrieb *und* Audit.
+
+**Latenz**
+Die Verzögerung zwischen Eingang einer Meldung und fertiger Reaktion. Bei
+Luftlage soft-echtzeitkritisch — sie muss klein *und vorhersagbar* sein.
+
+---
+
+## Zertifizierung & Assurance
+
+**Zertifizierung / Audit**
+Der formale Nachweis (und seine Prüfung), dass ein System die geltenden Vorgaben
+erfüllt und sicher betrieben werden darf. Bei ANS überwacht durch
+Aufsichtsbehörden.
+
+**Zertifizierungs-*fähig* (unsere Haltung)**
+So gebaut und dokumentiert, dass das System in ein Zertifizierungsprogramm
+*hineingehen* kann — ohne zu behaupten, das Lernprojekt sei selbst zertifiziert.
+
+**EU 2017/373**
+EU-Verordnung mit gemeinsamen Anforderungen an die Erbringung von Flugsicherung.
+
+**ED-153**
+EUROCONTROL/EUROCAE-Leitfaden zur Software-Sicherheitsabsicherung; legt das
+**SWAL** fest.
+
+**SWAL** (*Software Assurance Level*) / **Assurance Level (AL)**
+Eine Einstufung, *wie streng* ein Stück Software abgesichert werden muss —
+abhängig davon, wie schlimm ein Fehler wäre. Höhere Stufe = mehr Nachweise.
+
+**ED-109A / DO-278A**
+Der maßgebliche Standard für die Software-Integrität von CNS/ATM-*Boden*systemen
+(das Boden-Pendant zum Flugzeug-Standard DO-178C). Verlangt u. a. lückenlose
+Rückverfolgbarkeit und Verifikationsnachweise.
+
+**Rückverfolgbarkeit (*Traceability*)**
+Die durchgehende, in beide Richtungen prüfbare Kette Anforderung → Design →
+Code → Test. Kernforderung jedes Audits.
+
+**Verifikation & Validierung (V&V)**
+- *Verifikation:* „Bauen wir das System richtig?" (erfüllt es die Anforderungen?)
+- *Validierung:* „Bauen wir das richtige System?" (sind es die richtigen
+  Anforderungen?)
+
+**Code-Abdeckung (*Coverage*)**
+Maß dafür, welcher Anteil des Codes von Tests durchlaufen wird. Höhere
+Assurance-Stufen verlangen strengere Abdeckungsarten (bis hin zu *MC-DC*).
+
+**Konfigurationsmanagement (CM)**
+Diszipliniertes Verwalten von Versionen, Baselines und Änderungen, sodass
+jederzeit klar ist, *welcher* Stand wann galt. (Bei uns: Git, Tags, ADRs.)
+
+**Baseline**
+Ein festgehaltener, benannter Stand (z. B. „M1 fertig"), auf den man sich
+verlässlich beziehen kann.
+
+**Safety Case**
+Eine strukturierte, belegte Argumentation, dass ein System hinreichend sicher
+ist. Organisatorisch, nicht bloß technisch.
+
+**FHA / PSSA / SSA** (Sicherheitsbewertung)
+Schritte einer Gefährdungs-/Sicherheitsanalyse: *Functional Hazard Assessment*
+(welche Fehlfunktionen sind wie schlimm?), *Preliminary/System Safety
+Assessment*. Liefert u. a. die nötige Assurance-Stufe.
+
+**Part-IS / ED-205**
+Regelwerke zur **Informationssicherheit** in der Luftfahrt (Cyber-Security) am
+Boden — zunehmend Pflichtbestandteil.
+
+**`unsafe` (in Rust)**
+Ein Schlüsselwort, mit dem man die Sicherheitsgarantien der Sprache bewusst
+aushebelt. Wir vermeiden es — sein Fehlen ist ein starkes Assurance-Argument.
