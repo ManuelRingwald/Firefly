@@ -6,8 +6,8 @@
 
 - **Zuletzt aktualisiert:** 2026-06-06
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M2 Häppchen 2.1 — Converted Measurement (Plot → kartesisch
-  + Kovarianz) in neuer Crate `firefly-track`.
+- **Letzter Commit:** M2 Häppchen 2.2 — Kalman-Filter (Constant-Velocity) in
+  `firefly-track`.
 - **PR:** #1 (offen).
 
 ---
@@ -16,10 +16,11 @@
 
 - **M1 (Simulator) ist fertig** und gepusht: Workspace + drei Crates
   (`firefly-geo`, `firefly-core`, `firefly-sim`).
-- **M2 läuft:** Häppchen **2.1 erledigt** — Crate `firefly-track` mit
-  Converted-Measurement (polarer Plot → kartesische Messung + Kovarianz),
-  erste externe Abhängigkeit `nalgebra` (ADR 0005).
-- Qualität: **29 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
+- **M2 läuft:** Häppchen **2.1 + 2.2 erledigt** — Crate `firefly-track` mit
+  Converted-Measurement (Plot → kartesisch + Kovarianz) und Kalman-Filter
+  (Constant-Velocity, Predict/Update, Joseph-Form). Erste externe Abhängigkeit
+  `nalgebra` (ADR 0005).
+- Qualität: **33 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
 - **Dokumentation** aufgebaut: Glossar, M1-Erklärung, ADRs 0001–0004,
@@ -39,20 +40,20 @@
 
 ## 3. Nächster Schritt (hier geht es weiter!)
 
-➡️ **Häppchen 2.2 — Kalman-Filter (Constant-Velocity).** Claude wartet auf das
-**Go**, um es zuerst zu *erklären* (noch kein Code):
+➡️ **Häppchen 2.3 — Gating (Mahalanobis-Validierungsregion).** Claude wartet auf
+das **Go**, um es zuerst zu *erklären* (noch kein Code):
 
-> Fachlich: Wie glättet der Filter verrauschte Messungen über die Zeit und
-> schätzt zugleich Geschwindigkeit? Technisch: Zustand `[Ost, Nord, v_Ost,
-> v_Nord]`, Prädiktion (Bewegungsmodell + Prozessrauschen Q) und Update
-> (Messung via 2.1 einrechnen, Kalman-Gain).
+> Fachlich: Welche Plots kommen für einen Track überhaupt in Frage? Statt „alle"
+> grenzen wir mit einem Plausibilitäts-„Tor" ein. Technisch: Innovation `y` und
+> ihre Kovarianz `S` (haben wir aus 2.2), Mahalanobis-Distanz `y'·S⁻¹·y`,
+> χ²-Schwelle für das Gate.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
 ## 4. M2-Plan in Häppchen (so zerlegen wir den Tracker)
 
 - [x] **2.1** Plot → kartesische Messung + Mess-Kovarianz (Converted Measurement)
-- [ ] **2.2** Kalman-Filter mit Constant-Velocity-Modell (Prädiktion + Update); `nalgebra`
+- [x] **2.2** Kalman-Filter mit Constant-Velocity-Modell (Prädiktion + Update); `nalgebra`
 - [ ] **2.3** Gating: Validierungsregion über Mahalanobis-/χ²-Distanz
 - [ ] **2.4** Datenassoziation: GNN (global beste Zuordnung mehrerer Plots↔Tracks)
 - [ ] **2.5** Track-Lifecycle: Initiierung (M-aus-N), Bestätigung, Coasting, Löschung

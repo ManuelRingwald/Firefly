@@ -52,6 +52,7 @@ nächsten Anfassen nachgezogen; seine Nachweise stehen bereits in der Tabelle.
 | FR-SIM-006 | Der Plot-Strom ist nach Zeit geordnet. | umgesetzt | `firefly-sim`: `plots_are_time_ordered` |
 | FR-TRK-001 | *(M2)* Der Tracker bildet aus Plots bestätigte Tracks (Gating, Assoziation, Filter, Lifecycle). | geplant | — |
 | FR-TRK-002 | Polarer Plot wird in eine kartesische Messung mit Kovarianz umgerechnet (Converted Measurement via Jacobi-Matrix). | verifiziert | `firefly-track`: `position_matches_geo_conventions`, `elevation_projects_to_ground_range`, `covariance_is_cigar_shaped`, `cross_range_variance_grows_with_range`, `covariance_is_symmetric_and_positive_definite` |
+| FR-TRK-003 | Kalman-Filter (Constant-Velocity) schätzt Position + Geschwindigkeit; Prädiktion vergrößert, Update verkleinert die Unsicherheit; glättet besser als die Rohmessung. | verifiziert | `firefly-track`: `predict_moves_position_and_grows_uncertainty`, `update_reduces_uncertainty`, `gain_respects_measurement_precision`, `covariance_stays_valid`, `tracking::filter_smooths_and_recovers_velocity` |
 
 ### Nicht-funktional (NFR)
 

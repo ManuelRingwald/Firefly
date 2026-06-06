@@ -57,5 +57,51 @@ Realität auseinanderlaufen.
 ### Was noch fehlt (→ 2.2)
 
 Wir haben jetzt eine saubere, kartesische Messung mit korrekter Unsicherheit —
-aber noch keinen Filter, der über die Zeit glättet. Das ist Häppchen 2.2: der
-**Kalman-Filter** auf einem Constant-Velocity-Bewegungsmodell.
+aber noch keinen Filter, der über die Zeit glättet. Das ist Häppchen 2.2.
+
+---
+
+## Häppchen 2.2 — Der Kalman-Filter (Constant-Velocity)
+
+**Status:** ✅ umgesetzt · Anforderung `FR-TRK-003`
+
+### Die Idee (fachlich)
+
+Eine Einzelmessung ist verrauscht und kennt keine Geschwindigkeit. Der
+**Kalman-Filter** macht aus der Folge von Messungen eine geglättete, durchgehende
+Schätzung von **Position *und* Geschwindigkeit** — indem er in jedem Schritt
+**Vorhersage und Messung nach ihrer jeweiligen Unsicherheit gewichtet** verrechnet.
+
+Zwei Schritte im Wechsel:
+- **Prädiktion:** „Wenn das Ziel so weiterfliegt — wo ist es beim nächsten Scan?"
+  Die Unsicherheit *wächst* dabei.
+- **Update:** Neuer Plot kommt rein, wird mit der Vorhersage verschmolzen; die
+  Unsicherheit *schrumpft*.
+
+### Die Bausteine (technisch)
+
+- **Zustand** `x = [Ost, Nord, v_Ost, v_Nord]`, **Zustands-Kovarianz** `P` (4×4).
+- **Constant-Velocity-Modell** über die Übergangsmatrix `F`: neue Position = alte
+  Position + Geschwindigkeit · Δt.
+- **Prozessrauschen `Q`** (das „Manöver-Budget"): erlaubt Abweichungen vom
+  geraden Flug. Hier als *kontinuierliches Weißes-Beschleunigungs-Rauschen*,
+  parametriert über eine Beschleunigungs-Intensität.
+- **Update** mit der Messung aus 2.1: Innovation `y = z − H·x` (die „Überraschung"),
+  Kalman-Gain `K` (der „Vertrauens-Hebel" zwischen Messung und Vorhersage),
+  dann `x ← x + K·y` und ein schrumpfendes `P`.
+- **Joseph-Form** für das `P`-Update: numerisch stabil, hält `P` gültig
+  (symmetrisch & positiv definit) — Sorgfalt im Sinne der Assurance (ADR 0004).
+
+### Der Beweis, dass es wirklich glättet
+
+Der End-to-End-Test füttert den Filter mit den verrauschten Plots eines
+gleichförmig fliegenden Ziels (aus dem M1-Simulator) und prüft: der
+**Positionsfehler des Filters ist kleiner als der der Rohmessungen**, und die
+**geschätzte Geschwindigkeit konvergiert** nahe an die Wahrheit (≈ 150 m/s nach
+Norden) — obwohl das Radar Geschwindigkeit nie misst.
+
+### Was noch fehlt (→ 2.3)
+
+Bisher nehmen wir an, dass jeder Plot zu *diesem einen* Track gehört. Bei mehreren
+Zielen/Plots braucht es ein **Gating** (welche Plots sind überhaupt plausibel?) —
+Häppchen 2.3, über die Mahalanobis-Distanz.

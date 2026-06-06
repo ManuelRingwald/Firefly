@@ -118,6 +118,31 @@ eine bessere Schätzung als jede der beiden allein. Analogie: ein erfahrener
 Beobachter, der seine Erwartung und das, was er gerade sieht, klug
 zusammenbringt.
 
+**Zustand / Zustandsvektor**
+Die Größen, die der Tracker über ein Ziel schätzt und mitführt — bei uns
+`[Ost, Nord, Geschwindigkeit-Ost, Geschwindigkeit-Nord]`. Die „aktuelle
+Annahme", wo das Ziel ist und wohin es fliegt.
+
+**Prozessrauschen `Q` (Manöver-Budget)**
+Der Regler dafür, wie sehr der Filter dem Bewegungsmodell misstraut. Echte
+Flugzeuge fliegen nicht perfekt gleichförmig — `Q` lässt Abweichungen zu. Zu
+klein: der Filter „klebt" stur an der Geraden und verliert Kurven. Zu groß: er
+zappelt dem Rauschen hinterher. Eine zentrale Stellschraube der Track-Güte.
+
+**Innovation**
+Die „Überraschung" eines neuen Plots: die Differenz zwischen dem, was gemessen
+wurde, und dem, was der Filter vorhergesagt hatte (`y = Messung − Vorhersage`).
+
+**Kalman-Gain (Vertrauens-Hebel)**
+Bestimmt, wie stark eine neue Messung die Schätzung korrigiert. Präzise Messung
+(kleines `R`) → großer Hebel, der Filter folgt der Messung; grobe Messung →
+kleiner Hebel, der Filter bleibt eher bei seiner Vorhersage.
+
+**Joseph-Form**
+Eine besonders stabile Rechenform für das Aktualisieren der Unsicherheit `P` im
+Kalman-Filter. Sie hält `P` auch bei Rundungsfehlern gültig (symmetrisch und
+positiv definit) — wichtig für verlässliche, prüfbare Numerik.
+
 **Bewegungsmodell**
 Die Annahme darüber, *wie* ein Ziel sich bewegt:
 - **CV** (*Constant Velocity*): gleichförmig geradeaus.
