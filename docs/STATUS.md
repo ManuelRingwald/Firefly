@@ -50,21 +50,31 @@ wartet auf das **Go**, um es zuerst zu *erklären* (noch kein Code):
 > (tentative) Tracks gebärt (M-aus-N-Logik). Zustand explizit & serialisierbar
 > (NFR-CLOUD-001/002/003).
 
+**Komplexität: S4 → Opus 4.8 empfohlen** (Integration, Zustandsmaschine, viele
+Tests inkl. kreuzende Ziele). Skala: siehe `CLAUDE.md` §2.
+
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
-## 4. M2-Plan in Häppchen (so zerlegen wir den Tracker)
+## 4. M2-Plan in Häppchen (mit Komplexität / Modell)
 
-- [x] **2.1** Plot → kartesische Messung + Mess-Kovarianz (Converted Measurement)
-- [x] **2.2** Kalman-Filter mit Constant-Velocity-Modell (Prädiktion + Update); `nalgebra`
-- [x] **2.3** Gating: Validierungsregion über Mahalanobis-/χ²-Distanz
-- [x] **2.4** Datenassoziation: GNN (global beste Zuordnung mehrerer Plots↔Tracks)
-- [ ] **2.5** Track-Lifecycle: Initiierung (M-aus-N), Bestätigung, Coasting, Löschung
-- [ ] **2.6** Tracker als reine, deterministische Funktion + serialisierbarer Zustand
-       (erfüllt NFR-CLOUD-001/002/003)
-- [ ] **2.7** Güte-Metriken gegen die Ground Truth (RMSE, Track-Kontinuität)
+- [x] **2.1** Converted Measurement (Plot → kartesisch + Kovarianz) — *S3 · Sonnet*
+- [x] **2.2** Kalman-Filter (Constant-Velocity, Predict/Update) — *S4 · Opus*
+- [x] **2.3** Gating (Mahalanobis-/χ²-Validierungsregion) — *S3 · Sonnet*
+- [x] **2.4** Datenassoziation GNN (Ungarische Methode) — *S4 · Opus*
+- [ ] **2.5** Track-Lebenszyklus (M-aus-N, Bestätigung, Coasting, Löschung) — *S4 · Opus*
+- [ ] **2.6** Tracker als reine, deterministische Funktion + serialisierbarer Zustand — *S3 · Sonnet*
+- [ ] **2.7** Güte-Metriken gegen Ground Truth (RMSE, Track-Kontinuität) — *S3 · Sonnet*
 
 Jeder Haken wird erst gesetzt, wenn die Qualitäts-Gates (CLAUDE.md §5) erfüllt
 sind und die Anforderung im Register rückverfolgbar steht.
+
+### Komplexität künftiger Meilensteine (grobe Orientierung)
+
+- **M1.5** ASTERIX CAT048-Codec — *S3 · Sonnet* (viel Code, aber mechanisch).
+- **M3** WebSocket-Server/Cloud-Anbindung — *S4 · Opus*; Map-Frontend (JS) — *S3 · Sonnet*.
+- **M4** Multi-Radar-Fusion + SSR/ADS-B-Korrelation — *S5 · Opus*.
+- **M5** IMM / JPDA — *S5 · Opus*.
+- Reine Doku-/Nachbereitungs-Schritte — *S1–S2 · Haiku*.
 
 ## 5. Offene Punkte / später entscheiden
 

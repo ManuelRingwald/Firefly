@@ -39,6 +39,8 @@ Arbeitsschritt gilt dieser Ablauf:
      aus Sicht der Luftlage?)
    - **Technisch** (*Wie* setzen wir es um? Welche Bausteine, welche Mathematik,
      welche Dateien?)
+   - **Komplexität** (Einstufung **S1–S5** mit Modell-Empfehlung, siehe unten —
+     damit der Projektverantwortliche das passende Modell wählen kann.)
 2. **Begriffe klären** — Jeder neue Fachbegriff wird beim ersten Auftreten
    erklärt und in `docs/glossary.md` aufgenommen. Keine unerklärten Abkürzungen.
 3. **Freigabe abwarten** — Claude hält an und wartet auf Rückfragen oder ein
@@ -50,6 +52,24 @@ Arbeitsschritt gilt dieser Ablauf:
 
 **Verboten:** „Durchrattern" — also mehrere Bausteine ungefragt
 hintereinanderweg bauen, ohne Erklärung und Freigabe dazwischen.
+
+### Komplexitäts-Skala (für die Modellwahl)
+
+Jeder angekündigte Schritt bekommt eine Einstufung. Sie schätzt, *wie
+anspruchsvoll* das saubere Erklären **und** Umsetzen des Schritts ist (Mathe,
+Algorithmik, Architektur-Abwägung, Testumfang) — nicht bloß die Zeilenzahl.
+
+| Stufe | Bedeutung | Modell-Empfehlung |
+|-------|-----------|-------------------|
+| **S1** | Trivial/mechanisch (Doku-Kleinkram, Umbenennen, Tippen) | Haiku 4.5 |
+| **S2** | Leicht (klar umrissen, wenig Logik) | Haiku 4.5 / Sonnet 4.6 |
+| **S3** | Mittel (etwas Mathe/Logik, überschaubarer Umfang) | Sonnet 4.6 |
+| **S4** | Anspruchsvoll (subtile Mathe/Algorithmen, Architektur, viele Tests) | Opus 4.8 |
+| **S5** | Sehr anspruchsvoll (tiefe Mathe, Fusion, große Architektur-Abwägungen) | Opus 4.8 |
+
+Faustregel: **S1–S2 → Haiku**, **S3 → Sonnet**, **S4–S5 → Opus**. In einem
+Lernprojekt, in dem die *Erklärung* zählt, bei Grenzfällen lieber das stärkere
+Modell wählen.
 
 ---
 
