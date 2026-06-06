@@ -145,5 +145,39 @@ abgelehnt — Mahalanobis ≠ Euklidisch. Genau dafür ist das Tor zigarrenförm
 ### Was noch fehlt (→ 2.4)
 
 Das Gate sagt, welche Plots *möglich* sind. Wenn mehrere Tracks und mehrere Plots
-sich überschneiden, müssen wir die **beste Gesamtzuordnung** finden — Häppchen 2.4
-(Global Nearest Neighbor).
+sich überschneiden, müssen wir die **beste Gesamtzuordnung** finden — Häppchen 2.4.
+
+---
+
+## Häppchen 2.4 — Datenassoziation (Global Nearest Neighbor)
+
+**Status:** ✅ umgesetzt · Anforderung `FR-TRK-005`
+
+### Die Idee (fachlich)
+
+Nach dem Gating kann ein Plot für mehrere Tracks plausibel sein. Es braucht eine
+eindeutige **1:1-Zuordnung**. „Jeder Track nimmt seinen nächsten Plot" (gierig)
+ist global oft falsch — bei kreuzenden Flugzeugen vertauscht es die Identitäten.
+**GNN** minimiert stattdessen die **Gesamtkosten über alle Paare gleichzeitig**.
+
+### Die Umsetzung (technisch)
+
+- **Kostenmatrix:** Zeilen = Tracks, Spalten = Plots, Eintrag = gegatete
+  Mahalanobis-Distanz `d²` (außerhalb des Gates: verboten).
+- **Ungarische Methode** (Kuhn–Munkres, `O(n³)`) findet die exakt
+  kostenminimale Zuordnung — selbst implementiert, ohne neue Abhängigkeit.
+- **Reste sauber abgebildet:** über Dummy-Optionen (Track/Plot „unzugeordnet" zu
+  Kosten γ). Ergebnis: `pairs`, `unassigned_tracks`, `unassigned_measurements`.
+
+### Der Kern-Nachweis
+
+`hungarian_beats_greedy` zeigt einen Fall, in dem die gierige Wahl
+(Gesamtkosten 10) verliert und die Methode die „gekreuzte", global beste Lösung
+(Gesamtkosten 4) findet. Dazu: korrekte Zuordnung gegateter Plots, ungegatete
+Plots und „ausgehungerte" Tracks bleiben übrig, ungleiche Anzahlen funktionieren.
+
+### Was noch fehlt (→ 2.5)
+
+Jetzt haben wir alle Bausteine — Messung, Filter, Gate, Zuordnung. Häppchen 2.5
+fügt sie zum **Track-Lebenszyklus** zusammen: Geburt (M-aus-N), Bestätigung,
+Coasting bei Fehldetektion, Löschung — die eigentliche Pro-Scan-Orchestrierung.

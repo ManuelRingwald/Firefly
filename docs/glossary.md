@@ -153,6 +153,15 @@ Die Annahme darüber, *wie* ein Ziel sich bewegt:
 Lässt mehrere Bewegungsmodelle parallel laufen und gewichtet sie laufend — gut
 für Flugzeuge, die mal geradeaus fliegen, mal Kurven fliegen.
 
+**Zuordnungsproblem (*assignment problem*)**
+Die Aufgabe, Zeilen (Tracks) und Spalten (Plots) einer Kostentabelle so paarweise
+zuzuordnen, dass die Gesamtkosten minimal werden — jede Zeile/Spalte höchstens
+einmal. Das mathematische Gerüst hinter GNN.
+
+**Ungarische Methode (Kuhn–Munkres)**
+Ein Standard-Algorithmus, der das Zuordnungsproblem **exakt und effizient**
+(`O(n³)`) löst — global optimal statt gierig.
+
 **Multi-Radar-Fusion**
 Mehrere Radare sehen dasselbe Ziel. Fusion bedeutet, ihre Meldungen zeitlich
 abzugleichen, systematische Messfehler (Bias) zu korrigieren und zu *einem*

@@ -6,8 +6,8 @@
 
 - **Zuletzt aktualisiert:** 2026-06-06
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M2 Häppchen 2.3 — Gating (Mahalanobis/χ²) in
-  `firefly-track`.
+- **Letzter Commit:** M2 Häppchen 2.4 — Datenassoziation (GNN / Ungarische
+  Methode) in `firefly-track`.
 - **PR:** #1 (offen).
 
 ---
@@ -16,12 +16,12 @@
 
 - **M1 (Simulator) ist fertig** und gepusht: Workspace + drei Crates
   (`firefly-geo`, `firefly-core`, `firefly-sim`).
-- **M2 läuft:** Häppchen **2.1 + 2.2 + 2.3 erledigt** — Crate `firefly-track` mit
+- **M2 läuft:** Häppchen **2.1–2.4 erledigt** — Crate `firefly-track` mit
   Converted-Measurement (Plot → kartesisch + Kovarianz), Kalman-Filter
-  (Constant-Velocity, Predict/Update, Joseph-Form) und Gating
-  (Mahalanobis-Distanz, χ²-Schwelle für 2 DOF). Erste externe Abhängigkeit
-  `nalgebra` (ADR 0005).
-- Qualität: **37 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
+  (Constant-Velocity, Predict/Update, Joseph-Form), Gating (Mahalanobis/χ², 2 DOF)
+  und Datenassoziation (GNN via Ungarischer Methode, selbst implementiert).
+  Erste externe Abhängigkeit `nalgebra` (ADR 0005).
+- Qualität: **43 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
 - **Dokumentation** aufgebaut: Glossar, M1-Erklärung, ADRs 0001–0004,
@@ -41,13 +41,14 @@
 
 ## 3. Nächster Schritt (hier geht es weiter!)
 
-➡️ **Häppchen 2.4 — Datenassoziation (Global Nearest Neighbor).** Claude wartet
-auf das **Go**, um es zuerst zu *erklären* (noch kein Code):
+➡️ **Häppchen 2.5 — Track-Lebenszyklus (die Pro-Scan-Orchestrierung).** Claude
+wartet auf das **Go**, um es zuerst zu *erklären* (noch kein Code):
 
-> Fachlich: Wenn mehrere Tracks und mehrere Plots sich überschneiden — welche
-> Gesamtzuordnung ist die beste? Technisch: Kostenmatrix aus den
-> Mahalanobis-Distanzen (gated), und eine global optimale 1:1-Zuordnung
-> (Auktions-/Ungarische-Methode) statt gieriger Einzelwahl.
+> Fachlich: Wie entstehen, bestätigen, „coasten" und sterben Tracks? Technisch:
+> ein `Tracker`, der pro Scan alle Tracks prädiziert, via 2.4 zuordnet, zugeordnete
+> Tracks updatet, unzugeordnete coastet/löscht und aus übrigen Plots neue
+> (tentative) Tracks gebärt (M-aus-N-Logik). Zustand explizit & serialisierbar
+> (NFR-CLOUD-001/002/003).
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
@@ -56,7 +57,7 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 - [x] **2.1** Plot → kartesische Messung + Mess-Kovarianz (Converted Measurement)
 - [x] **2.2** Kalman-Filter mit Constant-Velocity-Modell (Prädiktion + Update); `nalgebra`
 - [x] **2.3** Gating: Validierungsregion über Mahalanobis-/χ²-Distanz
-- [ ] **2.4** Datenassoziation: GNN (global beste Zuordnung mehrerer Plots↔Tracks)
+- [x] **2.4** Datenassoziation: GNN (global beste Zuordnung mehrerer Plots↔Tracks)
 - [ ] **2.5** Track-Lifecycle: Initiierung (M-aus-N), Bestätigung, Coasting, Löschung
 - [ ] **2.6** Tracker als reine, deterministische Funktion + serialisierbarer Zustand
        (erfüllt NFR-CLOUD-001/002/003)
