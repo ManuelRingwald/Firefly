@@ -6,7 +6,7 @@
 
 - **Zuletzt aktualisiert:** 2026-06-06
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M2 Häppchen 2.2 — Kalman-Filter (Constant-Velocity) in
+- **Letzter Commit:** M2 Häppchen 2.3 — Gating (Mahalanobis/χ²) in
   `firefly-track`.
 - **PR:** #1 (offen).
 
@@ -16,11 +16,12 @@
 
 - **M1 (Simulator) ist fertig** und gepusht: Workspace + drei Crates
   (`firefly-geo`, `firefly-core`, `firefly-sim`).
-- **M2 läuft:** Häppchen **2.1 + 2.2 erledigt** — Crate `firefly-track` mit
-  Converted-Measurement (Plot → kartesisch + Kovarianz) und Kalman-Filter
-  (Constant-Velocity, Predict/Update, Joseph-Form). Erste externe Abhängigkeit
+- **M2 läuft:** Häppchen **2.1 + 2.2 + 2.3 erledigt** — Crate `firefly-track` mit
+  Converted-Measurement (Plot → kartesisch + Kovarianz), Kalman-Filter
+  (Constant-Velocity, Predict/Update, Joseph-Form) und Gating
+  (Mahalanobis-Distanz, χ²-Schwelle für 2 DOF). Erste externe Abhängigkeit
   `nalgebra` (ADR 0005).
-- Qualität: **33 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
+- Qualität: **37 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
 - **Dokumentation** aufgebaut: Glossar, M1-Erklärung, ADRs 0001–0004,
@@ -40,13 +41,13 @@
 
 ## 3. Nächster Schritt (hier geht es weiter!)
 
-➡️ **Häppchen 2.3 — Gating (Mahalanobis-Validierungsregion).** Claude wartet auf
-das **Go**, um es zuerst zu *erklären* (noch kein Code):
+➡️ **Häppchen 2.4 — Datenassoziation (Global Nearest Neighbor).** Claude wartet
+auf das **Go**, um es zuerst zu *erklären* (noch kein Code):
 
-> Fachlich: Welche Plots kommen für einen Track überhaupt in Frage? Statt „alle"
-> grenzen wir mit einem Plausibilitäts-„Tor" ein. Technisch: Innovation `y` und
-> ihre Kovarianz `S` (haben wir aus 2.2), Mahalanobis-Distanz `y'·S⁻¹·y`,
-> χ²-Schwelle für das Gate.
+> Fachlich: Wenn mehrere Tracks und mehrere Plots sich überschneiden — welche
+> Gesamtzuordnung ist die beste? Technisch: Kostenmatrix aus den
+> Mahalanobis-Distanzen (gated), und eine global optimale 1:1-Zuordnung
+> (Auktions-/Ungarische-Methode) statt gieriger Einzelwahl.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
@@ -54,7 +55,7 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
 - [x] **2.1** Plot → kartesische Messung + Mess-Kovarianz (Converted Measurement)
 - [x] **2.2** Kalman-Filter mit Constant-Velocity-Modell (Prädiktion + Update); `nalgebra`
-- [ ] **2.3** Gating: Validierungsregion über Mahalanobis-/χ²-Distanz
+- [x] **2.3** Gating: Validierungsregion über Mahalanobis-/χ²-Distanz
 - [ ] **2.4** Datenassoziation: GNN (global beste Zuordnung mehrerer Plots↔Tracks)
 - [ ] **2.5** Track-Lifecycle: Initiierung (M-aus-N), Bestätigung, Coasting, Löschung
 - [ ] **2.6** Tracker als reine, deterministische Funktion + serialisierbarer Zustand

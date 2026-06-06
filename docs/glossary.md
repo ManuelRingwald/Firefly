@@ -230,6 +230,16 @@ kartesische x/y zu übersetzen — *samt* ihrer Unsicherheit, die über die
 Jacobi-Matrix in die richtige (zigarrenförmige, gekippte) Ellipse umgerechnet
 wird.
 
+**χ²-Verteilung (Chi-Quadrat) & Freiheitsgrade**
+Die Verteilung, der die quadrierte Mahalanobis-Distanz folgt, wenn die Modelle
+stimmen. Die *Freiheitsgrade* entsprechen der Zahl der Messdimensionen (bei uns
+2: Ost/Nord). Aus ihr leiten wir die Gate-Schwelle ab.
+
+**Gate-Wahrscheinlichkeit `P_G`**
+Die Chance, dass ein *echter* Plot innerhalb des Gates landet. Größer = weniger
+verpasste echte Plots, aber mehr hereingelassener Clutter. Bestimmt die
+χ²-Schwelle `γ` (für 2 Freiheitsgrade: `γ = −2·ln(1−P_G)`).
+
 **RMSE** (*Root Mean Square Error*, Wurzel des mittleren quadratischen Fehlers)
 Eine Kennzahl, wie weit die Schätzung im Schnitt von der Wahrheit abweicht.
 Damit messen wir später, *ob* der Tracker gut funktioniert.

@@ -89,6 +89,31 @@ impl LinearKalman {
         )
     }
 
+    /// The innovation `y = z − H·x` and its covariance `S = H·P·Hᵀ + R`.
+    ///
+    /// Shared by gating and the measurement update, so there is one source of
+    /// truth for "how far is this plot from the prediction, and how uncertain
+    /// is that offset?".
+    pub fn innovation(&self, m: &CartesianMeasurement) -> (Vector2<f64>, Matrix2<f64>) {
+        let h = Self::measurement_matrix();
+        let y = m.z - h * self.x;
+        let s = h * self.p * h.transpose() + m.r;
+        (y, s)
+    }
+
+    /// Squared Mahalanobis distance of a measurement from the prediction:
+    /// `d² = yᵀ·S⁻¹·y`. A single "how many sigmas away" number that respects
+    /// the elliptical uncertainty — the basis of gating.
+    ///
+    /// REQ: FR-TRK-004
+    pub fn mahalanobis_squared(&self, m: &CartesianMeasurement) -> f64 {
+        let (y, s) = self.innovation(m);
+        let s_inv = s
+            .try_inverse()
+            .expect("innovation covariance must be invertible (R is positive definite)");
+        (y.transpose() * s_inv * y)[(0, 0)]
+    }
+
     /// Initialise a fresh filter from the first measurement: position from the
     /// plot, velocity unknown (zero, with a large `initial_velocity_std`).
     ///
@@ -137,8 +162,7 @@ impl LinearKalman {
     pub fn update(&mut self, m: &CartesianMeasurement) {
         let h = Self::measurement_matrix();
 
-        let innovation = m.z - h * self.x; // y = z - H x
-        let s = h * self.p * h.transpose() + m.r; // innovation covariance
+        let (innovation, s) = self.innovation(m);
         let s_inv = s
             .try_inverse()
             .expect("innovation covariance must be invertible (R is positive definite)");

@@ -4,8 +4,8 @@
 //!
 //! - **2.1:** converting a polar plot into a Cartesian measurement with a
 //!   proper covariance ([`measurement`]).
-//! - **2.2 (here):** a Kalman filter on a constant-velocity model ([`kalman`]).
-//! - 2.3: gating (a Mahalanobis validation region).
+//! - **2.2:** a Kalman filter on a constant-velocity model ([`kalman`]).
+//! - **2.3 (here):** gating — a Mahalanobis validation region ([`gating`]).
 //! - 2.4: data association (global nearest neighbour).
 //! - 2.5: the track lifecycle (initiation, confirmation, coasting, deletion).
 //!
@@ -13,8 +13,10 @@
 //! deterministic function of its inputs — no wall clock, no I/O — so it is
 //! replayable, testable and cloud-recoverable.
 
+mod gating;
 mod kalman;
 mod measurement;
 
+pub use gating::Gate;
 pub use kalman::{LinearKalman, ProcessNoise};
 pub use measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};

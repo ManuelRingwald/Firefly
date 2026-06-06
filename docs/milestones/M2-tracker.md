@@ -103,5 +103,47 @@ Norden) — obwohl das Radar Geschwindigkeit nie misst.
 ### Was noch fehlt (→ 2.3)
 
 Bisher nehmen wir an, dass jeder Plot zu *diesem einen* Track gehört. Bei mehreren
-Zielen/Plots braucht es ein **Gating** (welche Plots sind überhaupt plausibel?) —
-Häppchen 2.3, über die Mahalanobis-Distanz.
+Zielen/Plots braucht es ein **Gating** — Häppchen 2.3.
+
+---
+
+## Häppchen 2.3 — Gating: das Plausibilitäts-Tor
+
+**Status:** ✅ umgesetzt · Anforderung `FR-TRK-004`
+
+### Die Idee (fachlich)
+
+Pro Scan kommen viele Plots (mehrere Flugzeuge) und Falschalarme. Bevor wir
+zuordnen (2.4), schließen wir billig das Unsinnige aus: Für jeden Track zählen nur
+Plots in einem **Plausibilitäts-Fenster** (Gate) um seine Vorhersage. Das spart
+Rechenzeit, verhindert absurde Zuordnungen und ist das Fundament der Assoziation.
+
+Wichtig: Das Tor ist **nicht rund**. Es berücksichtigt die Unsicherheit (Track
+*und* Messung) und hat damit dieselbe **zigarrenförmige** Gestalt wie die
+Innovations-Kovarianz `S`.
+
+### Die Umsetzung (technisch)
+
+Die Zutaten liefert der Filter aus 2.2: Innovation `y = z − H·x` und ihre
+Kovarianz `S`. Daraus die **quadrierte Mahalanobis-Distanz** `d² = yᵀ·S⁻¹·y` —
+eine Zahl, „wie viele Sigma" der Plot entfernt ist. Gate-Regel: `d² ≤ γ`.
+
+Die Schwelle `γ` kommt aus der **χ²-Verteilung** mit 2 Freiheitsgraden (Ost/Nord).
+Für genau 2 Freiheitsgrade gibt es die geschlossene Formel `γ = −2·ln(1 − P_G)`
+mit der Gate-Wahrscheinlichkeit `P_G` (Default 99 % → γ ≈ 9,21). Kein
+Statistik-Paket nötig.
+
+Die Berechnung von `y`/`S` haben wir in eine **gemeinsame Filter-Methode**
+gezogen — Gating und Update teilen sie (eine Quelle der Wahrheit).
+
+### Der Kern-Nachweis
+
+Ein Test zeigt das Entscheidende: **derselbe Abstand** wird *entlang* der
+unsicheren (Quer-)Achse akzeptiert, aber *quer* zur sicheren (Entfernungs-)Achse
+abgelehnt — Mahalanobis ≠ Euklidisch. Genau dafür ist das Tor zigarrenförmig.
+
+### Was noch fehlt (→ 2.4)
+
+Das Gate sagt, welche Plots *möglich* sind. Wenn mehrere Tracks und mehrere Plots
+sich überschneiden, müssen wir die **beste Gesamtzuordnung** finden — Häppchen 2.4
+(Global Nearest Neighbor).
