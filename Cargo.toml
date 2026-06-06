@@ -4,6 +4,7 @@ members = [
     "crates/firefly-geo",
     "crates/firefly-core",
     "crates/firefly-sim",
+    "crates/firefly-track",
 ]
 
 [workspace.package]
@@ -16,3 +17,5 @@ repository = "https://github.com/manuelringwald/firefly"
 [workspace.dependencies]
 firefly-geo = { path = "crates/firefly-geo" }
 firefly-core = { path = "crates/firefly-core" }
+firefly-sim = { path = "crates/firefly-sim" }
+nalgebra = "0.33"

@@ -1,0 +1,18 @@
+//! The Firefly tracker: turning radar plots into clean, continuous tracks.
+//!
+//! This crate is the heart of milestone M2. It grows step by step:
+//!
+//! - **2.1 (here):** converting a polar plot into a Cartesian measurement with
+//!   a proper covariance ([`measurement`]).
+//! - 2.2: a Kalman filter on a constant-velocity model.
+//! - 2.3: gating (a Mahalanobis validation region).
+//! - 2.4: data association (global nearest neighbour).
+//! - 2.5: the track lifecycle (initiation, confirmation, coasting, deletion).
+//!
+//! Design intent (see ADR 0003): the tracking step is kept a pure,
+//! deterministic function of its inputs — no wall clock, no I/O — so it is
+//! replayable, testable and cloud-recoverable.
+
+mod measurement;
+
+pub use measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};

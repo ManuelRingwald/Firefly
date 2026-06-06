@@ -51,6 +51,7 @@ nächsten Anfassen nachgezogen; seine Nachweise stehen bereits in der Tabelle.
 | FR-SIM-005 | SSR-fähige Ziele liefern kombinierte Plots mit Mode-3/A, Flugfläche, ICAO-Adresse. | umgesetzt | `firefly-sim`: `equipped_target_yields_combined_plots_with_ssr` |
 | FR-SIM-006 | Der Plot-Strom ist nach Zeit geordnet. | umgesetzt | `firefly-sim`: `plots_are_time_ordered` |
 | FR-TRK-001 | *(M2)* Der Tracker bildet aus Plots bestätigte Tracks (Gating, Assoziation, Filter, Lifecycle). | geplant | — |
+| FR-TRK-002 | Polarer Plot wird in eine kartesische Messung mit Kovarianz umgerechnet (Converted Measurement via Jacobi-Matrix). | verifiziert | `firefly-track`: `position_matches_geo_conventions`, `elevation_projects_to_ground_range`, `covariance_is_cigar_shaped`, `cross_range_variance_grows_with_range`, `covariance_is_symmetric_and_positive_definite` |
 
 ### Nicht-funktional (NFR)
 

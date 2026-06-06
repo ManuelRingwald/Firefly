@@ -6,8 +6,9 @@
 
 - **Zuletzt aktualisiert:** 2026-06-06
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** Querschnitts-Prinzipien (ADR 0003/0004, Requirements,
-  Glossar) verankert.
+- **Letzter Commit:** M2 Häppchen 2.1 — Converted Measurement (Plot → kartesisch
+  + Kovarianz) in neuer Crate `firefly-track`.
+- **PR:** #1 (offen).
 
 ---
 
@@ -15,7 +16,10 @@
 
 - **M1 (Simulator) ist fertig** und gepusht: Workspace + drei Crates
   (`firefly-geo`, `firefly-core`, `firefly-sim`).
-- Qualität: **24 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
+- **M2 läuft:** Häppchen **2.1 erledigt** — Crate `firefly-track` mit
+  Converted-Measurement (polarer Plot → kartesische Messung + Kovarianz),
+  erste externe Abhängigkeit `nalgebra` (ADR 0005).
+- Qualität: **29 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
 - **Dokumentation** aufgebaut: Glossar, M1-Erklärung, ADRs 0001–0004,
@@ -35,19 +39,19 @@
 
 ## 3. Nächster Schritt (hier geht es weiter!)
 
-➡️ **Wir stehen am Start von M2 (der eigentliche Tracker).** Claude wartet auf
-das **Go**, um *Häppchen 2.1 zu erklären* (noch kein Code):
+➡️ **Häppchen 2.2 — Kalman-Filter (Constant-Velocity).** Claude wartet auf das
+**Go**, um es zuerst zu *erklären* (noch kein Code):
 
-> **Häppchen 2.1 — Vom Plot zur kartesischen Messung mit Unsicherheit.**
-> Fachlich: Warum muss der Tracker die polare Radarmessung „begradigen", und
-> warum ist die Unsicherheit zigarrenförmig? Technisch: Converted-Measurement-
-> Ansatz, Kovarianzmatrix, Einstieg von `nalgebra`.
+> Fachlich: Wie glättet der Filter verrauschte Messungen über die Zeit und
+> schätzt zugleich Geschwindigkeit? Technisch: Zustand `[Ost, Nord, v_Ost,
+> v_Nord]`, Prädiktion (Bewegungsmodell + Prozessrauschen Q) und Update
+> (Messung via 2.1 einrechnen, Kalman-Gain).
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
 ## 4. M2-Plan in Häppchen (so zerlegen wir den Tracker)
 
-- [ ] **2.1** Plot → kartesische Messung + Mess-Kovarianz (Converted Measurement)
+- [x] **2.1** Plot → kartesische Messung + Mess-Kovarianz (Converted Measurement)
 - [ ] **2.2** Kalman-Filter mit Constant-Velocity-Modell (Prädiktion + Update); `nalgebra`
 - [ ] **2.3** Gating: Validierungsregion über Mahalanobis-/χ²-Distanz
 - [ ] **2.4** Datenassoziation: GNN (global beste Zuordnung mehrerer Plots↔Tracks)

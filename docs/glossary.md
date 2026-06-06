@@ -193,6 +193,18 @@ Ein „fairer" Abstand, der die Unsicherheit berücksichtigt: Ein Plot, der in
 Richtung großer Unsicherheit abweicht, zählt als „näher" als einer, der in
 Richtung kleiner Unsicherheit gleich weit weg liegt. Grundlage des Gatings.
 
+**Jacobi-Matrix**
+Beschreibt, wie sich kleine Änderungen am *Eingang* einer Umrechnung auf den
+*Ausgang* auswirken — die „lokale Umrechnungs-Steigung" in mehreren Dimensionen.
+Damit lässt sich eine Unsicherheit von einem Koordinatensystem ins andere
+„mitnehmen": `R_neu = J · R_alt · Jᵀ`.
+
+**Converted Measurement (umgerechnete Messung)**
+Das Standardverfahren, eine polare Radarmessung (Entfernung, Winkel) in
+kartesische x/y zu übersetzen — *samt* ihrer Unsicherheit, die über die
+Jacobi-Matrix in die richtige (zigarrenförmige, gekippte) Ellipse umgerechnet
+wird.
+
 **RMSE** (*Root Mean Square Error*, Wurzel des mittleren quadratischen Fehlers)
 Eine Kennzahl, wie weit die Schätzung im Schnitt von der Wahrheit abweicht.
 Damit messen wir später, *ob* der Tracker gut funktioniert.
@@ -212,6 +224,10 @@ mehreren Crates, jede mit einer klaren Aufgabe.
 **Workspace**
 Ein Verbund mehrerer Crates, die zusammen verwaltet und gebaut werden — wie ein
 Projektordner mit mehreren Teil-Modulen.
+
+**nalgebra**
+Eine etablierte, reine Rust-Bibliothek für lineare Algebra (Vektoren, Matrizen).
+Ab dem Tracker (M2) unsere erste externe Abhängigkeit — siehe ADR 0005.
 
 **Test (Unit-/Integrationstest)**
 Kleines Prüfprogramm, das automatisch nachweist, dass ein Stück Code das

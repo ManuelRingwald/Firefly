@@ -13,6 +13,7 @@ Schritt und ist bewusst für Leser **ohne** tiefe IT-Vorbildung geschrieben.
 - **[milestones/](milestones/)** — Pro Meilenstein eine verständliche Erklärung:
   fachlicher Hintergrund, technische Umsetzung und die Mathematik *in Worten*.
   - [M1 — Der Simulator](milestones/M1-simulator.md)
+  - [M2 — Der Tracker](milestones/M2-tracker.md)
 - **[decisions/](decisions/)** — Entscheidungs-Logbuch (ADRs): welche wichtige
   Weichenstellung *warum* getroffen wurde.
 - **[requirements/](requirements/)** — Anforderungs-Register mit
