@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/firefly-geo",
+    "crates/firefly-core",
+    "crates/firefly-sim",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Firefly contributors"]
+repository = "https://github.com/manuelringwald/firefly"
+
+[workspace.dependencies]
+firefly-geo = { path = "crates/firefly-geo" }
+firefly-core = { path = "crates/firefly-core" }

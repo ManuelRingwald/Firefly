@@ -1,0 +1,12 @@
+[package]
+name = "firefly-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Scenario and radar-plot simulator for the Firefly radar tracker."
+
+[dependencies]
+firefly-geo = { workspace = true }
+firefly-core = { workspace = true }

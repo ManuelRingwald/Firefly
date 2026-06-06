@@ -1,0 +1,10 @@
+[package]
+name = "firefly-geo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Geodesy and coordinate transforms (WGS84 / ECEF / local ENU / polar) for the Firefly radar tracker."
+
+[dependencies]
