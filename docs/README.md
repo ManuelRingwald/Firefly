@@ -5,6 +5,9 @@ Schritt und ist bewusst für Leser **ohne** tiefe IT-Vorbildung geschrieben.
 
 ## Wegweiser
 
+- **[STATUS.md](STATUS.md)** — Arbeitsstand & nächster Schritt. **Hier zuerst
+  schauen**, wenn du (oder Claude) wieder einsteigst — geräteübergreifend.
+
 - **[glossary.md](glossary.md)** — Fachbegriff-Lexikon in einfacher Sprache.
   Wächst mit dem Projekt. Im Zweifel hier zuerst nachschlagen.
 - **[milestones/](milestones/)** — Pro Meilenstein eine verständliche Erklärung:

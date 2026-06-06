@@ -5,6 +5,10 @@
 > diese Datei zu Beginn jeder Sitzung und hält sich an die hier festgelegten
 > Regeln. Es ist zugleich ein menschenlesbares Manifest: *So* arbeiten wir.
 
+> 📌 **Sitzungsstart:** Zuerst `docs/STATUS.md` lesen — dort steht der aktuelle
+> Arbeitsstand und der nächste Schritt (wichtig fürs geräteübergreifende
+> Weiterarbeiten). Am Sitzungsende `docs/STATUS.md` aktualisieren.
+
 ---
 
 ## 1. Worum es geht
