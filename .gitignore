@@ -1,0 +1,11 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+# Backend/editor noise
+*.swp
+.DS_Store
+
+# Node / web frontend (added in M3)
+node_modules/
+dist/
