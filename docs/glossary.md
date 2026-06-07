@@ -97,6 +97,16 @@ muss (oft „M aus N": z. B. in 3 von 4 Scans wiedergesehen).
 Wenn ein bestätigter Track in einem Scan keinen Plot bekommt (Ziel kurz nicht
 gesehen), „segelt" er auf Basis der Vorhersage weiter, statt sofort zu sterben.
 
+**Track-Lebenszyklus (tentativ / bestätigt)**
+Die „Lebensphasen" eines Tracks: Er wird **tentativ** (auf Probe) geboren,
+wird nach Bewährung (M-aus-N) **bestätigt** (*confirmed*) und der Luftlage
+gemeldet, und wird wieder **gelöscht**, wenn er zu lange nicht mehr gesehen
+wird. Verhindert, dass Falschalarme sofort als „echte" Flugzeuge erscheinen.
+
+**M-aus-N**
+Die Bestätigungsregel: Ein tentativer Track wird bestätigt, sobald er in den
+letzten **N** Scans mindestens **M** Treffer hatte (z. B. 3 aus 5).
+
 **Gating**
 Bevor man fragt „Welcher Plot gehört zu welchem Track?", grenzt man den
 Suchbereich ein: Nur Plots in einem plausiblen Fenster um die Vorhersage kommen

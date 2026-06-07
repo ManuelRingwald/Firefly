@@ -179,5 +179,45 @@ Plots und „ausgehungerte" Tracks bleiben übrig, ungleiche Anzahlen funktionie
 ### Was noch fehlt (→ 2.5)
 
 Jetzt haben wir alle Bausteine — Messung, Filter, Gate, Zuordnung. Häppchen 2.5
-fügt sie zum **Track-Lebenszyklus** zusammen: Geburt (M-aus-N), Bestätigung,
-Coasting bei Fehldetektion, Löschung — die eigentliche Pro-Scan-Orchestrierung.
+fügt sie zum **Track-Lebenszyklus** zusammen.
+
+---
+
+## Häppchen 2.5 — Track-Lebenszyklus & Pro-Scan-Orchestrierung
+
+**Status:** ✅ umgesetzt · Anforderungen `FR-TRK-001`, `FR-TRK-006`
+
+### Die Idee (fachlich)
+
+Erst hier wird aus den Einzelteilen ein *laufender Tracker*. Tracks haben einen
+Lebenszyklus: **Geburt** (aus einem Plot ohne Track → zunächst *tentativ*, könnte
+Clutter sein), **Bestätigung** (nach Bewährung über mehrere Scans → *confirmed*
+und der Luftlage gemeldet), **Coasting** (bei Fehldetektion „segelt" der Track auf
+der Vorhersage weiter), **Löschung** (bleibt er zu lange aus). Die Bestätigungs-
+Regel ist **M-aus-N** (Default 3 aus 5); gelöscht wird nach aufeinanderfolgenden
+Fehltreffern (tentativ schneller als bestätigt).
+
+### Die Umsetzung (technisch)
+
+Ein `Tracker` mit `process_scan(time, plots)` führt pro Scan eine feste Abfolge
+aus: **prädizieren → Messungen bilden → zuordnen (Gate+GNN) → Treffer updaten /
+Fehltreffer coasten → bestätigen → löschen → neue Tracks gebären**.
+
+Wichtig: `process_scan` ist eine **reine, datenzeit-getriebene Zustandsänderung**
+(ADR 0003) — keine Wanduhr, kein I/O. Der Track-Zustand (Filter `x`/`P`, Zähler,
+Status) ist einfache, später serialisierbare Daten → Wiederherstellbarkeit
+(NFR-CLOUD-001/002/003).
+
+### Der Höhepunkt: zwei kreuzende Ziele
+
+Der Integrationstest `two_crossing_targets_keep_their_identities` lässt zwei
+Flugzeuge sich kreuzen und prüft: durchgehend **genau zwei** bestätigte Tracks
+mit **entgegengesetzten** Geschwindigkeiten — keine Identitätsvertauschung, keine
+verlorenen oder erfundenen Tracks. Das ist der Beweis, dass M2 als Ganzes trägt.
+
+### Damit ist M2 inhaltlich rund
+
+Der Single-Radar-Tracker steht: Messung → Filter → Gate → Zuordnung →
+Lebenszyklus. Es folgen noch zwei „Veredelungs"-Häppchen: **2.6** (Tracker als
+explizit serialisierbarer, reiner Zustand — Cloud-Härtung) und **2.7**
+(Güte-Metriken gegen die Ground Truth: RMSE, Track-Kontinuität).
