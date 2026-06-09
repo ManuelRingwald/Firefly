@@ -19,3 +19,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0003 — Cloud-native Architektur (anbieter-neutral)](0003-cloud-native-architektur.md)
 - [0004 — Assurance & Zertifizierungs-Fähigkeit](0004-assurance-und-zertifizierungsfaehigkeit.md)
 - [0005 — `nalgebra` als lineare Algebra](0005-nalgebra-als-lineare-algebra.md)
+- [0006 — Integrationsziel Phoenix ASD & CAT062-Ausgabe](0006-integration-phoenix-asd-cat062.md)

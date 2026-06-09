@@ -17,6 +17,19 @@ Systeme, die daraus ein Luftlagebild erzeugen.
 Das Gesamtbild „Wer fliegt gerade wo, wie schnell, in welche Richtung?". Der
 Tracker ist das Rechenherz, das dieses Bild aus rohen Radarmeldungen erzeugt.
 
+**ASD (*Air Situation Display*)**
+Die Lagedarstellung am Lotsenarbeitsplatz — der Bildschirm, der die berechneten
+Tracks zeigt. Ein *Konsument* des Trackers: Firefly soll später genau dieses ASD
+beliefern (siehe ADR 0006).
+
+**EFS (*Electronic Flight Strips*)**
+Elektronische Flugstreifen, die die früheren Papierstreifen ersetzen. Brauchen
+Tracks, die mit Flugplänen/Callsign korreliert sind (→ Identitätsarbeit in M4).
+
+**Phoenix WebInnovation**
+Die cloud-native Plattform des Projektverantwortlichen mit ASD + EFS, heute vom
+Legacy-Phoenix-Tracker gespeist. Zielumgebung, an die Firefly andocken soll.
+
 **Primärradar (PSR, *Primary Surveillance Radar*)**
 Sendet einen Funkimpuls aus und misst das Echo, das vom Flugzeugrumpf
 zurückgeworfen wird — wie eine Taschenlampe, deren Lichtreflex man sieht. Es
@@ -282,6 +295,20 @@ Projektordner mit mehreren Teil-Modulen.
 **nalgebra**
 Eine etablierte, reine Rust-Bibliothek für lineare Algebra (Vektoren, Matrizen).
 Ab dem Tracker (M2) unsere erste externe Abhängigkeit — siehe ADR 0005.
+
+**Ports & Adapters (Hexagonale Architektur)**
+Ein Bauprinzip: Der fachliche *Kern* (hier der Tracker) kennt nur neutrale
+Schnittstellen („Ports") und bleibt unabhängig von der Außenwelt; konkrete
+Anbindungen (Formate wie CAT062, Transporte) stecken in austauschbaren
+*Adaptern*. Hält den Kern testbar, portabel und (für uns) zertifizierungs-
+freundlich entkoppelt.
+
+**System-Track**
+Der *fertige*, aufbereitete Track, wie ihn das Gesamtsystem nach außen gibt
+(Position, Geschwindigkeit, Identität, Qualität, Status). In ASTERIX die
+Kategorie **CAT062**. Abgrenzung: ein *Plot* ist eine Rohmeldung, ein
+*(internal) Track* die laufende Schätzung, der *System-Track* das ausgegebene
+Ergebnis.
 
 **Test (Unit-/Integrationstest)**
 Kleines Prüfprogramm, das automatisch nachweist, dass ein Stück Code das

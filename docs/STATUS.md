@@ -6,8 +6,8 @@
 
 - **Zuletzt aktualisiert:** 2026-06-06
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M2 Häppchen 2.5 — Track-Lebenszyklus (Tracker,
-  Pro-Scan-Orchestrierung) in `firefly-track`.
+- **Letzter Commit:** ADR 0006 — Integrationsziel Phoenix ASD, Ausgabe als
+  ASTERIX CAT062 (Doku).
 - **PR:** #1 (offen).
 
 ---
@@ -39,6 +39,7 @@
 | Sprache | Code Englisch, Doku/Chat Deutsch | ADR 0002 |
 | Architektur | **Cloud-nativ**, Kubernetes, anbieter-neutral | ADR 0003 |
 | Assurance | **Zertifizierungs-fähig**, ED-153 + ED-109A/DO-278A | ADR 0004 |
+| Integration | Andocken an **Phoenix ASD**; Ausgabe **ASTERIX CAT062**; Kern neutral via Ports & Adapters | ADR 0006 |
 
 ## 3. Nächster Schritt (hier geht es weiter!)
 
@@ -78,6 +79,11 @@ sind und die Anforderung im Register rückverfolgbar steht.
 
 ## 5. Offene Punkte / später entscheiden
 
+- **ASD-Integration (ADR 0006):** Transport (UDP-Multicast / Bus / WebSocket)
+  und Koordinatenbezug (WGS84 vs. System-Stereografisch) noch offen. **Design-
+  Hinweis fürs nächste Häppchen:** Der `Tracker` sollte die geodätische
+  Frame-Referenz des Sensors mitführen, damit Tracks später nach **WGS84**
+  ausgegeben werden können (neutraler `SystemTrack` → CAT062-Adapter).
 - **Message-Bus-Technologie** (z. B. NATS/Kafka) — erst relevant ab M3, dann ADR.
 - **Coverage-Werkzeug** (z. B. `cargo llvm-cov`) — einführen, sobald V&V-Nachweise
   greifbar werden.

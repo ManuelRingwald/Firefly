@@ -67,6 +67,8 @@ nächsten Anfassen nachgezogen; seine Nachweise stehen bereits in der Tabelle.
 | NFR-CLOUD-003 | Track-Zustand ist serialisierbar (Snapshot) und damit wiederherstellbar/replizierbar. | geplant (M2) | — |
 | NFR-OBS-001 | Strukturierte Logs, Metriken und Tracing sind vorhanden. | geplant (M3) | — |
 | NFR-SAFE-001 | Kein `unsafe`-Code ohne dokumentierte Begründung. | umgesetzt | Clippy/Review-Gate (CLAUDE.md §5) |
+| NFR-INT-001 | Tracker-Kern ist format-/transport-neutral; Ausgabe erfolgt über einen neutralen `SystemTrack` + Adapter (Ports & Adapters). | geplant | — |
+| NFR-INT-002 | Track-Positionen sind nach WGS84 zurückprojizierbar (geodätische Ausgabe); die Sensor-Frame-Referenz wird mitgeführt. | geplant | — |
 
 ### Randbedingungen (CON)
 
@@ -76,6 +78,7 @@ nächsten Anfassen nachgezogen; seine Nachweise stehen bereits in der Tabelle.
 | CON-002 | Assurance-Orientierung: ED-153 (SWAL) + ED-109A/DO-278A. | ADR 0004 |
 | CON-003 | Eingabe-/Austauschformat: ASTERIX (CAT048/021/062). | ADR 0001 |
 | CON-004 | Code Englisch, Doku/Erklärung Deutsch. | ADR 0002 |
+| CON-005 | Integrationsziel Phoenix WebInnovation (ASD/EFS); Track-Ausgabe als ASTERIX CAT062; Transport/Koordinatenbezug noch offen. | ADR 0006 |
 
 ## Statuswerte
 
