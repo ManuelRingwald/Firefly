@@ -59,17 +59,22 @@ Jeder angekündigte Schritt bekommt eine Einstufung. Sie schätzt, *wie
 anspruchsvoll* das saubere Erklären **und** Umsetzen des Schritts ist (Mathe,
 Algorithmik, Architektur-Abwägung, Testumfang) — nicht bloß die Zeilenzahl.
 
-| Stufe | Bedeutung | Modell-Empfehlung |
-|-------|-----------|-------------------|
-| **S1** | Trivial/mechanisch (Doku-Kleinkram, Umbenennen, Tippen) | Haiku 4.5 |
-| **S2** | Leicht (klar umrissen, wenig Logik) | Haiku 4.5 / Sonnet 4.6 |
-| **S3** | Mittel (etwas Mathe/Logik, überschaubarer Umfang) | Sonnet 4.6 |
-| **S4** | Anspruchsvoll (subtile Mathe/Algorithmen, Architektur, viele Tests) | Opus 4.8 |
-| **S5** | Sehr anspruchsvoll (tiefe Mathe, Fusion, große Architektur-Abwägungen) | Opus 4.8 |
+| Stufe | Bedeutung | Modell-Empfehlung | Effort-Level |
+|-------|-----------|-------------------|--------------|
+| **S1** | Trivial/mechanisch (Doku-Kleinkram, Umbenennen, Tippen) | Haiku 4.5 | niedrig |
+| **S2** | Leicht (klar umrissen, wenig Logik) | Haiku 4.5 / Sonnet 4.6 | niedrig–mittel |
+| **S3** | Mittel (etwas Mathe/Logik, überschaubarer Umfang) | Sonnet 4.6 | mittel |
+| **S4** | Anspruchsvoll (subtile Mathe/Algorithmen, Architektur, viele Tests) | Opus 4.8 / Fable 5 | hoch |
+| **S5** | Sehr anspruchsvoll (tiefe Mathe, Fusion, große Architektur-Abwägungen) | Fable 5 / Opus 4.8 | hoch–max |
 
-Faustregel: **S1–S2 → Haiku**, **S3 → Sonnet**, **S4–S5 → Opus**. In einem
-Lernprojekt, in dem die *Erklärung* zählt, bei Grenzfällen lieber das stärkere
-Modell wählen.
+Faustregel: **S1–S2 → Haiku**, **S3 → Sonnet**, **S4–S5 → Opus 4.8 oder Fable 5**.
+Das **Effort-Level** mit der Stufe mitziehen (niedrig bei S1, max bei S5). In
+einem Lernprojekt, in dem die *Erklärung* zählt, bei Grenzfällen lieber das
+stärkere Modell und das höhere Effort-Level.
+
+> **Hinweis Fable 5:** neues Spitzenmodell der Claude-Familie; ohne belastbare
+> Vergleichswerte hier als Top-Option für S4–S5 geführt, gleichrangig mit
+> Opus 4.8 — nach Erfahrung kalibrieren.
 
 ---
 

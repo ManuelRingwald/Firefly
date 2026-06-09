@@ -52,7 +52,8 @@
 > Scan-Funktion absichern. Voraussichtlich `serde` als Abhängigkeit (→ ADR),
 > plus Snapshot-Roundtrip-Tests.
 
-**Komplexität: S3 → Sonnet 4.6 empfohlen.** Skala: siehe `CLAUDE.md` §2.
+**Komplexität: S3 → Sonnet 4.6, Effort mittel.** (Fable 5 wäre Overkill.) Skala
+inkl. Effort/Fable 5: siehe `CLAUDE.md` §2.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
@@ -63,19 +64,23 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 - [x] **2.3** Gating (Mahalanobis-/χ²-Validierungsregion) — *S3 · Sonnet*
 - [x] **2.4** Datenassoziation GNN (Ungarische Methode) — *S4 · Opus*
 - [x] **2.5** Track-Lebenszyklus (M-aus-N, Bestätigung, Coasting, Löschung) — *S4 · Opus*
-- [ ] **2.6** Tracker als reine, deterministische Funktion + serialisierbarer Zustand — *S3 · Sonnet*
-- [ ] **2.7** Güte-Metriken gegen Ground Truth (RMSE, Track-Kontinuität) — *S3 · Sonnet*
+- [ ] **2.6** Serialisierbarer Zustand (Snapshot/Replay) — *S3 · Sonnet · Effort mittel*
+- [ ] **2.7** Neutraler `SystemTrack`-Output in WGS84 (ASD-Port → CAT062) — *S3 · Sonnet · Effort mittel*
+- [ ] **2.8** Güte-Metriken gegen Ground Truth (RMSE, Track-Kontinuität) — *S3 · Sonnet · Effort mittel*
 
 Jeder Haken wird erst gesetzt, wenn die Qualitäts-Gates (CLAUDE.md §5) erfüllt
 sind und die Anforderung im Register rückverfolgbar steht.
 
-### Komplexität künftiger Meilensteine (grobe Orientierung)
+### Komplexität künftiger Meilensteine (grobe Orientierung, inkl. Effort)
 
-- **M1.5** ASTERIX CAT048-Codec — *S3 · Sonnet* (viel Code, aber mechanisch).
-- **M3** WebSocket-Server/Cloud-Anbindung — *S4 · Opus*; Map-Frontend (JS) — *S3 · Sonnet*.
-- **M4** Multi-Radar-Fusion + SSR/ADS-B-Korrelation — *S5 · Opus*.
-- **M5** IMM / JPDA — *S5 · Opus*.
-- Reine Doku-/Nachbereitungs-Schritte — *S1–S2 · Haiku*.
+- **M1.5** ASTERIX CAT048-Codec — *S3 · Sonnet · Effort hoch* (viel Code, aber
+  bit-genau und fehleranfällig).
+- **M3** WebSocket-Server/Cloud-Anbindung — *S4 · Opus 4.8 / Fable 5 · Effort hoch*;
+  Map-Frontend (JS) — *S3 · Sonnet · Effort mittel*; CAT062-Encoder + Transport-
+  Adapter — *S4 · Opus 4.8 / Fable 5 · Effort hoch*.
+- **M4** Multi-Radar-Fusion + SSR/ADS-B-Korrelation — *S5 · Fable 5 / Opus 4.8 · Effort hoch–max*.
+- **M5** IMM / JPDA — *S5 · Fable 5 / Opus 4.8 · Effort max*.
+- Reine Doku-/Nachbereitungs-Schritte — *S1–S2 · Haiku · Effort niedrig*.
 
 ## 5. Offene Punkte / später entscheiden
 
