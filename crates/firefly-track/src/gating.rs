@@ -20,12 +20,14 @@
 //! probability (the chance a *true* plot lands inside the gate). No statistics
 //! library required.
 
+use serde::{Deserialize, Serialize};
+
 use crate::kalman::LinearKalman;
 use crate::measurement::CartesianMeasurement;
 
 /// A validation gate: accept a plot whose squared Mahalanobis distance from a
 /// track's prediction does not exceed `threshold` (the χ² value `γ`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Gate {
     /// The χ² threshold `γ`.
     pub threshold: f64,

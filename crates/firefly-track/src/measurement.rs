@@ -25,6 +25,7 @@
 
 use firefly_geo::Polar;
 use nalgebra::{Matrix2, Vector2};
+use serde::{Deserialize, Serialize};
 
 /// The tracker's *assumed* model of a sensor's measurement noise.
 ///
@@ -32,7 +33,7 @@ use nalgebra::{Matrix2, Vector2};
 /// tracker never knows the true error, it only believes a model (from a data
 /// sheet or configuration). Keeping the two apart lets us later study what
 /// happens when the believed model and reality disagree.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SensorErrorModel {
     /// Assumed ground-range noise (1σ), metres.
     pub sigma_range: f64,

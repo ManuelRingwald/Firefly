@@ -4,17 +4,19 @@
 //! track id at a call site, which is exactly the kind of mix-up that is painful
 //! to debug once plots from several radars are flowing through one pipeline.
 
+use serde::{Deserialize, Serialize};
+
 /// Identifies a physical sensor (radar site / channel).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SensorId(pub u16);
 
 /// Identifies a confirmed or tentative track maintained by the tracker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TrackId(pub u32);
 
 /// Identifies a ground-truth target inside the simulator. This never leaves the
 /// simulation domain — the tracker must rediscover targets as tracks on its own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TargetId(pub u32);
 
 impl std::fmt::Display for SensorId {

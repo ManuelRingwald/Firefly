@@ -20,3 +20,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0004 — Assurance & Zertifizierungs-Fähigkeit](0004-assurance-und-zertifizierungsfaehigkeit.md)
 - [0005 — `nalgebra` als lineare Algebra](0005-nalgebra-als-lineare-algebra.md)
 - [0006 — Integrationsziel Phoenix ASD & CAT062-Ausgabe](0006-integration-phoenix-asd-cat062.md)
+- [0007 — `serde` für die Zustands-Serialisierung](0007-serde-serialisierung.md)

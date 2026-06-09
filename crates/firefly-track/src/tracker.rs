@@ -17,6 +17,7 @@
 //! ([`Track`] list) is plain, serialisable data (NFR-CLOUD-001/002/003).
 
 use firefly_core::{Plot, Timestamp, TrackId};
+use serde::{Deserialize, Serialize};
 
 use crate::association::associate;
 use crate::gating::Gate;
@@ -25,7 +26,7 @@ use crate::measurement::{convert_plot, SensorErrorModel};
 use crate::track::{Track, TrackStatus};
 
 /// Tunable parameters of the tracker.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TrackerConfig {
     /// The tracker's assumed sensor noise (used to convert plots).
     pub sensor_error_model: SensorErrorModel,
@@ -63,7 +64,7 @@ impl TrackerConfig {
 }
 
 /// A single-radar multi-target tracker.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tracker {
     config: TrackerConfig,
     tracks: Vec<Track>,

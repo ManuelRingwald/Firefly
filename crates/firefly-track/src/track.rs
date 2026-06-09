@@ -12,11 +12,12 @@
 
 use firefly_core::TrackId;
 use nalgebra::Vector2;
+use serde::{Deserialize, Serialize};
 
 use crate::kalman::LinearKalman;
 
 /// Lifecycle status of a track.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TrackStatus {
     /// On probation — not yet trusted.
     Tentative,
@@ -25,7 +26,7 @@ pub enum TrackStatus {
 }
 
 /// A maintained track.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     id: TrackId,
     status: TrackStatus,

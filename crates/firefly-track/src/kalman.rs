@@ -19,6 +19,7 @@
 //! so a run is exactly replayable.
 
 use nalgebra::{Matrix2, Matrix2x4, Matrix4, Vector2, Vector4};
+use serde::{Deserialize, Serialize};
 
 use crate::measurement::CartesianMeasurement;
 
@@ -29,7 +30,7 @@ use crate::measurement::CartesianMeasurement;
 /// by the power spectral density of the acceleration, `accel_psd` (m²/s³).
 /// Larger ⇒ the filter trusts the constant-velocity assumption less and follows
 /// measurements more eagerly (better in turns, noisier on straights).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ProcessNoise {
     /// Acceleration power spectral density, m²/s³.
     pub accel_psd: f64,
@@ -62,7 +63,7 @@ impl ProcessNoise {
 }
 
 /// A 2-D constant-velocity Kalman filter state.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LinearKalman {
     /// State estimate `[east, north, v_east, v_north]`.
     pub x: Vector4<f64>,

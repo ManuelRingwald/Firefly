@@ -296,6 +296,11 @@ Projektordner mit mehreren Teil-Modulen.
 Eine etablierte, reine Rust-Bibliothek für lineare Algebra (Vektoren, Matrizen).
 Ab dem Tracker (M2) unsere erste externe Abhängigkeit — siehe ADR 0005.
 
+**Serialisierung / serde**
+*Serialisieren* = einen Programmzustand in eine speicher-/sendbare Form bringen
+(und *deserialisieren* = zurück). **serde** ist der Rust-Standard dafür,
+format-neutral (JSON, binär, …). Grundlage für Snapshot/Replay (ADR 0007).
+
 **Ports & Adapters (Hexagonale Architektur)**
 Ein Bauprinzip: Der fachliche *Kern* (hier der Tracker) kennt nur neutrale
 Schnittstellen („Ports") und bleibt unabhängig von der Außenwelt; konkrete

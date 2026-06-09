@@ -10,7 +10,9 @@ description = "The Firefly tracker: turning radar plots into clean tracks (gatin
 [dependencies]
 firefly-geo = { workspace = true }
 firefly-core = { workspace = true }
-nalgebra = { workspace = true }
+nalgebra = { workspace = true, features = ["serde-serialize"] }
+serde = { workspace = true }
 
 [dev-dependencies]
 firefly-sim = { workspace = true }
+serde_json = { workspace = true }

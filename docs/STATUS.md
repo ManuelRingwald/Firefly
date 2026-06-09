@@ -6,8 +6,8 @@
 
 - **Zuletzt aktualisiert:** 2026-06-06
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** ADR 0006 — Integrationsziel Phoenix ASD, Ausgabe als
-  ASTERIX CAT062 (Doku).
+- **Letzter Commit:** M2 Häppchen 2.6 — serialisierbarer Zustand (Snapshot/Replay,
+  serde) in `firefly-track`.
 - **PR:** #1 (offen).
 
 ---
@@ -21,8 +21,9 @@
   Datenassoziation (GNN/Ungarische Methode) und **Track-Lebenszyklus** (`Tracker`,
   Pro-Scan-Orchestrierung: Geburt/Bestätigung/Coasting/Löschung). Der
   Single-Radar-Tracker steht — inkl. End-to-End-Test mit zwei kreuzenden Zielen.
-  Externe Abhängigkeit `nalgebra` (ADR 0005).
-- Qualität: **47 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
+  **2.6**: serialisierbarer Zustand mit Snapshot/Replay (serde, ADR 0007).
+  Externe Abhängigkeiten `nalgebra` (ADR 0005), `serde` (ADR 0007).
+- Qualität: **52 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
 - **Dokumentation** aufgebaut: Glossar, M1-Erklärung, ADRs 0001–0004,
@@ -43,17 +44,15 @@
 
 ## 3. Nächster Schritt (hier geht es weiter!)
 
-➡️ **Häppchen 2.6 — Tracker als reine, serialisierbare Zustandsfunktion
-(Cloud-Härtung).** Claude wartet auf das **Go**, um es zuerst zu *erklären*
-(noch kein Code):
+➡️ **Häppchen 2.7 — Neutraler `SystemTrack`-Output in WGS84 (ASD-Port → CAT062).**
+Claude wartet auf das **Go**, um es zuerst zu *erklären* (noch kein Code):
 
-> Fachlich/technisch: den Tracker-Zustand explizit serialisierbar machen
-> (Snapshot/Replay → NFR-CLOUD-003) und die Reinheit/Determinismus der
-> Scan-Funktion absichern. Voraussichtlich `serde` als Abhängigkeit (→ ADR),
-> plus Snapshot-Roundtrip-Tests.
+> Fachlich/technisch: ein neutraler, geodätischer `SystemTrack` als Ausgabe-Port
+> (ID, Position WGS84, Geschwindigkeit, Status, Zeit, …). Der `Tracker` muss
+> dafür die geodätische Frame-Referenz des Sensors mitführen, um die intern
+> lokalen ENU-Tracks nach WGS84 zurückzuprojizieren (NFR-INT-001/002, ADR 0006).
 
-**Komplexität: S3 → Sonnet 4.6, Effort mittel.** (Fable 5 wäre Overkill.) Skala
-inkl. Effort/Fable 5: siehe `CLAUDE.md` §2.
+**Komplexität: S3 → Sonnet 4.6, Effort mittel.** Skala: siehe `CLAUDE.md` §2.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
@@ -64,7 +63,7 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 - [x] **2.3** Gating (Mahalanobis-/χ²-Validierungsregion) — *S3 · Sonnet*
 - [x] **2.4** Datenassoziation GNN (Ungarische Methode) — *S4 · Opus*
 - [x] **2.5** Track-Lebenszyklus (M-aus-N, Bestätigung, Coasting, Löschung) — *S4 · Opus*
-- [ ] **2.6** Serialisierbarer Zustand (Snapshot/Replay) — *S3 · Sonnet · Effort mittel*
+- [x] **2.6** Serialisierbarer Zustand (Snapshot/Replay) — *S3 · Sonnet · Effort mittel*
 - [ ] **2.7** Neutraler `SystemTrack`-Output in WGS84 (ASD-Port → CAT062) — *S3 · Sonnet · Effort mittel*
 - [ ] **2.8** Güte-Metriken gegen Ground Truth (RMSE, Track-Kontinuität) — *S3 · Sonnet · Effort mittel*
 

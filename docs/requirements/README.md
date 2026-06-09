@@ -62,9 +62,9 @@ nächsten Anfassen nachgezogen; seine Nachweise stehen bereits in der Tabelle.
 | ID | Anforderung | Status | Nachweis |
 |----|-------------|--------|----------|
 | NFR-REPRO-001 | Gleicher Seed/Eingang ⇒ exakt gleicher Ausgang (Determinismus). | umgesetzt | `firefly-sim`: `reproducible_from_seed` |
-| NFR-CLOUD-001 | Die Tracker-Kernlogik ist eine reine, deterministische Funktion (Zustand + Plots → Zustand + Tracks); Wanduhr/Netz/Logging bleiben außen. | geplant (M2) | — |
-| NFR-CLOUD-002 | Verarbeitung erfolgt nach Datenzeit (ASTERIX Time-of-Day), nicht nach Server-Uhr. | geplant (M2) | — |
-| NFR-CLOUD-003 | Track-Zustand ist serialisierbar (Snapshot) und damit wiederherstellbar/replizierbar. | geplant (M2) | — |
+| NFR-CLOUD-001 | Die Tracker-Kernlogik ist eine reine, deterministische Funktion (Zustand + Plots → Zustand + Tracks); Wanduhr/Netz/Logging bleiben außen. | verifiziert | `firefly-track`: `snapshot::replay_is_deterministic` |
+| NFR-CLOUD-002 | Verarbeitung erfolgt nach Datenzeit (`dt`/Zeit wird übergeben), nicht nach Server-Uhr. | verifiziert | `firefly-track`: `snapshot::replay_is_deterministic`; `process_scan(time, …)` |
+| NFR-CLOUD-003 | Track-Zustand ist serialisierbar (Snapshot) und damit wiederherstellbar/replizierbar. | verifiziert | `firefly-track`: `snapshot::snapshot_roundtrip_recovers_state`, `snapshot::restored_snapshot_continues_equivalently` |
 | NFR-OBS-001 | Strukturierte Logs, Metriken und Tracing sind vorhanden. | geplant (M3) | — |
 | NFR-SAFE-001 | Kein `unsafe`-Code ohne dokumentierte Begründung. | umgesetzt | Clippy/Review-Gate (CLAUDE.md §5) |
 | NFR-INT-001 | Tracker-Kern ist format-/transport-neutral; Ausgabe erfolgt über einen neutralen `SystemTrack` + Adapter (Ports & Adapters). | geplant | — |

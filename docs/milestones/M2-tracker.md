@@ -218,6 +218,42 @@ verlorenen oder erfundenen Tracks. Das ist der Beweis, dass M2 als Ganzes trägt
 ### Damit ist M2 inhaltlich rund
 
 Der Single-Radar-Tracker steht: Messung → Filter → Gate → Zuordnung →
-Lebenszyklus. Es folgen noch zwei „Veredelungs"-Häppchen: **2.6** (Tracker als
-explizit serialisierbarer, reiner Zustand — Cloud-Härtung) und **2.7**
-(Güte-Metriken gegen die Ground Truth: RMSE, Track-Kontinuität).
+Lebenszyklus. Es folgen noch „Veredelungs"-Häppchen (Cloud-Härtung, ASD-Ausgabe,
+Güte-Metriken).
+
+---
+
+## Häppchen 2.6 — Serialisierbarer Zustand: Snapshot & Replay
+
+**Status:** ✅ umgesetzt · Anforderungen `NFR-CLOUD-001/002/003`
+
+### Die Idee (fachlich)
+
+In der Cloud ist der Ausfall einer Instanz normal. Ein zustandsbehafteter
+Tracker muss sein „Gedächtnis" **wiederherstellbar** machen: per **Snapshot**
+(gespeicherter Stand) und **Replay** (erneutes Abspielen ab dem Snapshot).
+Weil die Scan-Funktion deterministisch ist, kommt dabei derselbe Zustand wieder
+heraus — gut für Ausfallsicherheit *und* für die Audit-Rekonstruktion.
+
+### Die Umsetzung (technisch)
+
+Der ganze Zustand wird über **`serde`** serialisierbar (Ableitungen auf
+`Tracker`, `Track`, `LinearKalman`, …; nalgebra mit `serde`-Feature). Der Kern
+bleibt **format-neutral**; fürs Testen dient `serde_json` als Dev-Abhängigkeit
+(ADR 0007).
+
+### Eine ehrliche Erkenntnis
+
+JSON ist ein Text-Format — der `f64`-Round-Trip ist nicht bit-genau (1 ULP
+Abweichung beobachtet). Deshalb trennen wir die Aussagen sauber:
+- **Determinismus** beweisen wir *ohne* Serialisierung: zwei identische Läufe →
+  bit-genau gleicher Zustand.
+- **Wiederherstellbarkeit** prüfen wir mit enger Toleranz: Restore stellt den
+  Zustand auf volle Zahlengenauigkeit her und läuft äquivalent weiter.
+- Für byte-genaue Produktions-Snapshots wäre ein binäres Codec die richtige Wahl
+  (reine Rand-Entscheidung, später).
+
+### Was noch fehlt (→ 2.7)
+
+Der **neutrale `SystemTrack`-Output in WGS84** (die ASD-Andock-Schnittstelle
+Richtung CAT062) — Häppchen 2.7. Danach die Güte-Metriken (2.8).
