@@ -65,7 +65,9 @@ nächsten Anfassen nachgezogen; seine Nachweise stehen bereits in der Tabelle.
 | NFR-CLOUD-001 | Die Tracker-Kernlogik ist eine reine, deterministische Funktion (Zustand + Plots → Zustand + Tracks); Wanduhr/Netz/Logging bleiben außen. | verifiziert | `firefly-track`: `snapshot::replay_is_deterministic` |
 | NFR-CLOUD-002 | Verarbeitung erfolgt nach Datenzeit (`dt`/Zeit wird übergeben), nicht nach Server-Uhr. | verifiziert | `firefly-track`: `snapshot::replay_is_deterministic`; `process_scan(time, …)` |
 | NFR-CLOUD-003 | Track-Zustand ist serialisierbar (Snapshot) und damit wiederherstellbar/replizierbar. | verifiziert | `firefly-track`: `snapshot::snapshot_roundtrip_recovers_state`, `snapshot::restored_snapshot_continues_equivalently` |
+| NFR-CLOUD-004 | Robustheit gegen schwankende/verzögerte Scan-Intervalle: Tracks werden **nicht allein aufgrund von Zeitverzug** verworfen. Lebenszyklus-Entscheidungen (Coasting/Löschung) richten sich nach Datenzeit und konfigurierbaren Schwellen, nicht nach festen Wanduhr-Fristen. | geplant (Nachweis); Fundament steht (datenzeit-getrieben, NFR-CLOUD-002) | — |
 | NFR-OBS-001 | Strukturierte Logs, Metriken und Tracing sind vorhanden. | geplant (M3) | — |
+| NFR-OPS-001 | Einfache Vorführbarkeit: Der Tracker/eine Demo lässt sich lokal mit einem einzigen Befehl und ohne Programmierkenntnisse starten (Showcase/Präsentation). | geplant (M3) | — |
 | NFR-SAFE-001 | Kein `unsafe`-Code ohne dokumentierte Begründung. | umgesetzt | Clippy/Review-Gate (CLAUDE.md §5) |
 | NFR-INT-001 | Tracker-Kern ist format-/transport-neutral; Ausgabe erfolgt über einen neutralen `SystemTrack` + Adapter (Ports & Adapters). | geplant | — |
 | NFR-INT-002 | Track-Positionen sind nach WGS84 zurückprojizierbar (geodätische Ausgabe); die Sensor-Frame-Referenz wird mitgeführt. | geplant | — |

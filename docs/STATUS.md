@@ -4,7 +4,7 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-06
+- **Zuletzt aktualisiert:** 2026-06-09
 - **Branch:** `claude/radar-track-calculator-BoaU8`
 - **Letzter Commit:** M2 Häppchen 2.6 — serialisierbarer Zustand (Snapshot/Replay,
   serde) in `firefly-track`.
@@ -94,6 +94,12 @@ sind und die Anforderung im Register rückverfolgbar steht.
 - **Sicherheitsanalyse (FHA/Hazards)** — sinnvoll, sobald Tracker-Funktionen
   stehen, gegen die man Gefährdungen bewerten kann.
 - **Frontend-Kartenbibliothek** (Leaflet vs. MapLibre) — Entscheidung in M3.
+- **Timing-Robustheit (NFR-CLOUD-004):** Der Lebenszyklus darf Tracks nicht
+  wegen verzögerter/aussetzender Scans verwerfen. Fundament (Datenzeit-getrieben)
+  steht; ein gezielter Nachweis (Test mit langen/ungleichen Scan-Lücken) ist als
+  Härtungs-Häppchen in M2/M3 eingeplant.
+- **Vorführbarkeit (NFR-OPS-001):** Ein-Befehl-Demo ohne Programmierkenntnisse
+  für Präsentationen — Umsetzung mit dem Frontend in M3.
 
 ## 6. So steige ich wieder ein (Kurzbefehle)
 
