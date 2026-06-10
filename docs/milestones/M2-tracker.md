@@ -319,3 +319,51 @@ Damit existiert die **Andock-Schnittstelle** Richtung ASD/CAT062 als neutraler
 Port. Es fehlen noch die **Güte-Metriken** gegen die Ground Truth (RMSE,
 Track-Kontinuität) — Häppchen 2.8 — um die Qualität des Trackers in Zahlen zu
 fassen.
+
+---
+
+## Häppchen 2.8 — Güte-Metriken gegen Ground Truth
+
+**Status:** ✅ umgesetzt · Anforderung `FR-TRK-007`
+
+### Die Idee (fachlich)
+
+Bisher haben wir die Qualität des Trackers *qualitativ* belegt („zwei kreuzende
+Ziele behalten ihre Identität"). Jetzt **messen** wir sie in Zahlen, indem wir die
+Tracks gegen die *bekannte Wahrheit* des Simulators halten. Das ist zweierlei:
+ein **Verifikationsnachweis** (Assurance, ED-109A) *und* die Grundlage einer
+Demo, die den Mehrwert von Firefly nicht erzählt, sondern **zeigt**.
+
+Zwei Kennzahlen:
+- **RMSE** (Wurzel des mittleren quadratischen Fehlers) der Position — der
+  typische Abstand zwischen Schätzung und Wahrheit in Metern. Das Quadrieren
+  bestraft große Ausreißer stärker als ein simpler Mittelwert.
+- **Track-Kontinuität** — *Coverage* (Anteil Scans mit bestätigtem Track) und
+  *ID-Wechsel* (wie oft die Track-ID für dasselbe Ziel springt; ideal 0).
+
+### Die Umsetzung (technisch)
+
+Ein Modul `metrics.rs` mit zwei **reinen, wiederverwendbaren** Bausteinen:
+- `Rmse` — Akkumulator (`add`/`add_point` → `value()`); unabhängig vom
+  Simulator, damit er später auch ein Live-Demo-Dashboard speisen kann.
+- `TrackContinuity` — beobachtet pro Scan die zugeordnete Track-ID
+  (`observe(Option<TrackId>)`) → `coverage()`, `id_switches()`. Feinheit: Eine
+  *Lücke* (Coasting) vergisst die ID **nicht** — dieselbe ID später ist
+  Kontinuität, eine *andere* ID ist ein Wechsel.
+
+### Der Kern-Nachweis
+
+Sechs Modul-Tests sichern die Mathematik (u. a. dass RMSE Ausreißer stärker
+gewichtet und ein ID-Wechsel von einem bloßen Coasting-Loch unterschieden wird).
+Dazu ein End-to-End-Test: ein nordwärts fliegendes Ziel läuft durch den ganzen
+`Tracker`, und gegen die analytische Wahrheit gilt **Positions-RMSE < 40 m**,
+**0 ID-Wechsel** und **Coverage > 90 %** (nur die M-aus-N-Warmlaufzeit am Anfang
+ist ungedeckt).
+
+### Damit ist M2 abgeschlossen
+
+Der Single-Radar-Tracker steht vollständig: Messung → Filter → Gate → Zuordnung →
+Lebenszyklus → Snapshot/Replay → neutraler WGS84-Output → Güte-Metriken. Es folgt
+**M3** (Web-Frontend mit Live-2D-Karte über WebSocket) — dort wird auch die
+einfache, vorführbare Demo (NFR-OPS-001) konkret, samt einer Szene, die die
+Timing-Robustheit (NFR-CLOUD-004) sichtbar macht.

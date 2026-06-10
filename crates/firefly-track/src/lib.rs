@@ -18,6 +18,7 @@ mod association;
 mod gating;
 mod kalman;
 mod measurement;
+mod metrics;
 mod track;
 mod tracker;
 
@@ -25,5 +26,6 @@ pub use association::{associate, Association};
 pub use gating::Gate;
 pub use kalman::{LinearKalman, ProcessNoise};
 pub use measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};
+pub use metrics::{Rmse, TrackContinuity};
 pub use track::{Track, TrackStatus};
 pub use tracker::{Tracker, TrackerConfig};

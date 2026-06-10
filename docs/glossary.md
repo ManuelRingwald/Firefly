@@ -190,6 +190,13 @@ Mehrere Radare sehen dasselbe Ziel. Fusion bedeutet, ihre Meldungen zeitlich
 abzugleichen, systematische Messfehler (Bias) zu korrigieren und zu *einem*
 gemeinsamen Track zusammenzuführen.
 
+**Track-Kontinuität**
+Maß dafür, ob *ein* Ziel *eine* durchgehende Track-Spur behält. Zwei Teilzahlen:
+**Coverage** (Anteil der Scans, in denen das Ziel überhaupt einen bestätigten
+Track hatte — ideal nahe 1) und **ID-Wechsel** (wie oft die Track-ID für dasselbe
+Ziel springt — ideal 0; ein Sprung heißt: Spur abgerissen und neu geboren oder
+Identität vertauscht).
+
 ---
 
 ## Geometrie & Koordinaten (wo ist „wo"?)
@@ -273,8 +280,10 @@ verpasste echte Plots, aber mehr hereingelassener Clutter. Bestimmt die
 χ²-Schwelle `γ` (für 2 Freiheitsgrade: `γ = −2·ln(1−P_G)`).
 
 **RMSE** (*Root Mean Square Error*, Wurzel des mittleren quadratischen Fehlers)
-Eine Kennzahl, wie weit die Schätzung im Schnitt von der Wahrheit abweicht.
-Damit messen wir später, *ob* der Tracker gut funktioniert.
+Eine Kennzahl, wie weit die Schätzung im Schnitt von der Wahrheit abweicht:
+Wurzel aus dem Mittel der **quadrierten** Einzelfehler. Das Quadrieren bestraft
+große Ausreißer stärker als ein simpler Mittelwert. Die Einheit ist die der
+Messgröße (bei uns Meter). Damit messen wir, *ob* der Tracker gut funktioniert.
 
 ---
 

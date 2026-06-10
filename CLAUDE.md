@@ -141,8 +141,8 @@ Ein Schritt gilt erst als fertig, wenn:
 | Meilenstein | Inhalt | Status |
 |-------------|--------|--------|
 | **M1** | Szenario- + Radar-Plot-Simulator (Datenquelle) | ✅ fertig |
-| **M2** | Single-Radar-Tracker: Gating + GNN + Kalman, Track-Lifecycle | ⏳ als Nächstes |
-| **M3** | Web-Frontend mit Live-2D-Karte über WebSocket | ⏳ |
+| **M2** | Single-Radar-Tracker: Gating + GNN + Kalman, Track-Lifecycle | ✅ fertig |
+| **M3** | Web-Frontend mit Live-2D-Karte über WebSocket | ⏳ als Nächstes |
 | **M4** | SSR/ADS-B-Identitätskorrelation + Multi-Radar-Fusion | ⏳ |
 | **M5** | IMM / JPDA für Manöver & dichten Verkehr | ⏳ |
 
