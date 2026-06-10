@@ -48,8 +48,8 @@ async fn ready() -> impl IntoResponse {
     "ready"
 }
 
-/// A minimal placeholder page that dumps the live stream as text. The real
-/// MapLibre map replaces it in Häppchen 3.4.
+/// The MapLibre air-picture page (Häppchen 3.4), embedded at compile time so the
+/// binary is self-contained (one-command demo, NFR-OPS-001).
 async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
@@ -99,42 +99,7 @@ async fn pump_frames(mut socket: WebSocket, state: AppState) {
     let _ = socket.send(Message::Close(None)).await;
 }
 
-const INDEX_HTML: &str = r#"<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Firefly — live tracks</title>
-<style>
-  body { font-family: system-ui, sans-serif; margin: 2rem; }
-  #log { white-space: pre; font-family: monospace; margin-top: 1rem; }
-  #status { font-weight: bold; }
-</style>
-</head>
-<body>
-<h1>Firefly — live frame stream</h1>
-<p>Placeholder view of the raw frame stream. The live map arrives in Häppchen 3.4.</p>
-<div id="status">connecting…</div>
-<div id="log"></div>
-<script>
-  const statusEl = document.getElementById('status');
-  const logEl = document.getElementById('log');
-  const ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => { statusEl.textContent = 'connected'; };
-  ws.onclose = () => { statusEl.textContent = 'stream complete'; };
-  ws.onmessage = (ev) => {
-    const f = JSON.parse(ev.data);
-    const lines = f.tracks.map(t =>
-      `  #${t.id}  ${t.lat_deg.toFixed(4)}, ${t.lon_deg.toFixed(4)}  ` +
-      `${Math.round(t.ground_speed_mps)} m/s  ` +
-      `${t.confirmed ? 'CNF' : 'tent'}${t.coasting ? ' CST' : ''}`);
-    logEl.textContent =
-      `t = ${f.time.toFixed(1)} s   sensor ${f.sensor}   tracks: ${f.tracks.length}\n` +
-      lines.join('\n');
-  };
-</script>
-</body>
-</html>
-"#;
+const INDEX_HTML: &str = include_str!("../static/index.html");
 
 #[cfg(test)]
 mod tests {
@@ -170,9 +135,28 @@ mod tests {
         assert_eq!(get_status("/ready").await, StatusCode::OK);
     }
 
-    /// The placeholder index page is served. REQ: FR-NET-001
+    /// The index page is served. REQ: FR-NET-001
     #[tokio::test]
     async fn index_page_is_served() {
         assert_eq!(get_status("/").await, StatusCode::OK);
+    }
+
+    /// The embedded page is the MapLibre air picture: it pulls in MapLibre, uses
+    /// the chosen demotiles style and consumes the `/ws` stream. Guards against
+    /// the embedded asset silently going missing or wrong. REQ: FR-UI-001
+    #[test]
+    fn index_html_is_the_maplibre_frontend() {
+        assert!(INDEX_HTML.contains("maplibre-gl"), "loads MapLibre");
+        assert!(
+            INDEX_HTML.contains("demotiles.maplibre.org"),
+            "uses the demotiles style (ADR 0009)"
+        );
+        assert!(INDEX_HTML.contains("/ws"), "connects to the frame stream");
+        // The safety-relevant status is rendered (ADR 0008).
+        assert!(INDEX_HTML.contains("coasting"), "shows coasting state");
+        assert!(
+            INDEX_HTML.contains("position_uncertainty_m"),
+            "draws the uncertainty ring"
+        );
     }
 }

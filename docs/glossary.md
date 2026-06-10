@@ -419,6 +419,18 @@ Bild ausgeliefert werden. Der Browser zeichnet sie selbst — scharf bei jedem
 Zoom, klein in der Übertragung, frei im Stil. Grundlage moderner Vektorkarten wie
 MapLibre.
 
+**GeoJSON**
+Ein verbreitetes JSON-Format für Geo-Objekte (Punkte, Linien, Flächen mit
+Eigenschaften). Das Frontend baut aus jedem `Frame` GeoJSON-Objekte für die
+Track-Symbole, Unsicherheits-Ringe und Geschwindigkeitsvektoren und gibt sie an
+MapLibre zum Zeichnen.
+
+**demotiles (MapLibre)**
+Ein von MapLibre frei gehosteter, einfacher Karten-Stil
+(`demotiles.maplibre.org`), den wir als Hintergrund nutzen. Bequem für die
+Lern-/Demo-Phase; bedeutet eine *externe* Anfrage zur Laufzeit (ADR 0009). Ein
+selbst-gehosteter Stil für volle Souveränität bleibt ein späterer Schritt.
+
 ---
 
 ## Cloud & Betrieb
