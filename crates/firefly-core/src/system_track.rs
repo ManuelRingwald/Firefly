@@ -20,12 +20,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::TrackId;
+use crate::ids::{SensorId, TrackId};
 use crate::time::Timestamp;
 use firefly_geo::Wgs84;
 
 /// One track as reported to the outside world, in geodetic coordinates.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemTrack {
     /// Stable identity of the track.
     pub id: TrackId,
@@ -61,6 +61,12 @@ pub struct SystemTrack {
     /// primary-only track. Will feed a CAT062 identity item (exact item TBD,
     /// M4) and is the eventual correlation key for multi-radar fusion.
     pub icao_address: Option<u32>,
+    /// Sensors that contributed a hit to this track in the **most recent
+    /// scan** (ADR 0010, central measurement fusion). Empty while coasting —
+    /// no sensor saw it this scan. Sorted by [`SensorId`] for determinism.
+    /// Replaces the single-sensor `update_age` simplification for CAT062
+    /// I062/290 (track ages are reported per contributing sensor).
+    pub contributing_sensors: Vec<SensorId>,
 }
 
 impl SystemTrack {
@@ -105,6 +111,7 @@ mod tests {
             position_uncertainty: 0.0,
             mode_3a: None,
             icao_address: None,
+            contributing_sensors: Vec::new(),
         }
     }
 

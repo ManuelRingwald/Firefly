@@ -164,6 +164,7 @@ impl Tracker {
                     position_uncertainty: track.filter.position_uncertainty(),
                     mode_3a: track.mode_3a(),
                     icao_address: track.icao_address(),
+                    contributing_sensors: track.contributing_sensors().iter().copied().collect(),
                 }
             })
             .collect()
@@ -199,13 +200,15 @@ impl Tracker {
         let tracking_frame = self.config.tracking_frame;
         let t = time.as_secs();
 
-        // 1. Predict every existing track forward to the scan time.
+        // 1. Predict every existing track forward to the scan time, and clear
+        //    last scan's sensor provenance (it is rebuilt below).
         for track in &mut self.tracks {
             let dt = t - track.last_time;
             if dt > 0.0 {
                 track.filter.predict(dt, &process_noise);
                 track.last_time = t;
             }
+            track.reset_contributing_sensors();
         }
 
         // 2. Convert each plot to a Cartesian measurement in the *common tracking
@@ -229,7 +232,7 @@ impl Tracker {
         //    recorded as hit (this scan) when any sensor's plot associates to it
         //    or founds it.
         let mut hit_ids: BTreeSet<TrackId> = BTreeSet::new();
-        for items in by_sensor.values() {
+        for (&sensor, items) in &by_sensor {
             let measurements: Vec<CartesianMeasurement> = items.iter().map(|(_, m)| *m).collect();
             let filters: Vec<LinearKalman> = self.tracks.iter().map(|tr| tr.filter).collect();
             let assoc = associate(&filters, &measurements, &gate);
@@ -239,6 +242,7 @@ impl Tracker {
                 self.tracks[ti].filter.update(&measurements[mi]);
                 self.tracks[ti].last_hit_time = t;
                 self.tracks[ti].update_identity(&items[mi].0.mode_ac);
+                self.tracks[ti].record_hit_from(sensor);
                 hit_ids.insert(self.tracks[ti].id());
             }
             // Initiate a new tentative track from each unassociated measurement;
@@ -250,6 +254,7 @@ impl Tracker {
                 self.next_id += 1;
                 let mut track = Track::new(id, filter, t);
                 track.update_identity(&items[mi].0.mode_ac);
+                track.record_hit_from(sensor);
                 self.tracks.push(track);
                 hit_ids.insert(id);
             }
@@ -585,6 +590,65 @@ mod tests {
             got[1],
             expected.east,
             expected.north
+        );
+    }
+
+    /// `SystemTrack::contributing_sensors` reports exactly which sensor(s) hit
+    /// a track in the most recent scan: both while the two radars both see the
+    /// aircraft, and reduced to one when the second radar loses it, and empty
+    /// while coasting with no detection at all.
+    /// REQ: FR-TRK-010
+    #[test]
+    fn system_track_reports_contributing_sensors_per_scan() {
+        let tracking = LocalFrame::new(Wgs84::from_degrees(48.0, 11.0, 0.0));
+        let frame_a = LocalFrame::new(Wgs84::from_degrees(48.0, 11.0, 0.0));
+        let frame_b = LocalFrame::new(Wgs84::from_degrees(47.7, 11.6, 0.0));
+        let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
+        let cfg = TrackerConfig::new(tracking)
+            .with_sensor(SensorId(1), frame_a, error)
+            .with_sensor(SensorId(2), frame_b, error);
+        let mut tracker = Tracker::new(cfg);
+
+        let target = Wgs84::from_degrees(48.1, 11.3, 0.0);
+
+        // Scans 0..3: both sensors see the aircraft.
+        for k in 0..4 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[
+                    plot_seen_by(SensorId(1), &frame_a, t, &target),
+                    plot_seen_by(SensorId(2), &frame_b, t, &target),
+                ],
+            );
+        }
+        let sts = tracker.system_tracks();
+        assert_eq!(sts.len(), 1);
+        assert_eq!(
+            sts[0].contributing_sensors,
+            vec![SensorId(1), SensorId(2)],
+            "both radars contributed this scan"
+        );
+
+        // Scan 4: only sensor 1 still sees it.
+        let t = 16.0;
+        tracker.process_scan(
+            Timestamp(t),
+            &[plot_seen_by(SensorId(1), &frame_a, t, &target)],
+        );
+        let sts = tracker.system_tracks();
+        assert_eq!(
+            sts[0].contributing_sensors,
+            vec![SensorId(1)],
+            "only sensor 1 contributed this scan"
+        );
+
+        // Scan 5: neither sensor sees it (coasting) — no contributors.
+        tracker.process_scan(Timestamp(20.0), &[]);
+        let sts = tracker.system_tracks();
+        assert!(
+            sts[0].contributing_sensors.is_empty(),
+            "coasting track has no contributing sensor this scan"
         );
     }
 

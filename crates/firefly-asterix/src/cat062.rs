@@ -271,6 +271,7 @@ mod tests {
             position_uncertainty: 0.0,
             mode_3a: None,
             icao_address: None,
+            contributing_sensors: Vec::new(),
         }
     }
 

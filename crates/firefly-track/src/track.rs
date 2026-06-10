@@ -10,7 +10,9 @@
 //! The track records its recent association outcomes (hit/miss) so the
 //! [`crate::Tracker`] can apply M-of-N confirmation and miss-based deletion.
 
-use firefly_core::{ModeAC, TrackId};
+use std::collections::BTreeSet;
+
+use firefly_core::{ModeAC, SensorId, TrackId};
 use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +50,11 @@ pub struct Track {
     /// Most recently reported Mode S 24-bit ICAO address, if any SSR-equipped
     /// plot has ever associated with this track. Sticky, like `mode_3a`.
     icao_address: Option<u32>,
+    /// Sensors that contributed a hit (founded or updated this track) in the
+    /// **most recent scan** (ADR 0010). Replaced wholesale each scan — unlike
+    /// `mode_3a`/`icao_address` this is not sticky, since it answers "who sees
+    /// it *right now*", not "who has ever seen it".
+    contributing_sensors: BTreeSet<SensorId>,
 }
 
 impl Track {
@@ -63,6 +70,7 @@ impl Track {
             consecutive_misses: 0,
             mode_3a: None,
             icao_address: None,
+            contributing_sensors: BTreeSet::new(),
         }
     }
 
@@ -140,6 +148,24 @@ impl Track {
     /// Most recently reported Mode S 24-bit ICAO address, if known.
     pub fn icao_address(&self) -> Option<u32> {
         self.icao_address
+    }
+
+    /// Sensors that contributed a hit in the most recent scan.
+    pub fn contributing_sensors(&self) -> &BTreeSet<SensorId> {
+        &self.contributing_sensors
+    }
+
+    /// Clear the contributing-sensor set at the start of a new scan; sensors
+    /// that hit this track again will re-add themselves via
+    /// [`Track::record_hit_from`].
+    pub(crate) fn reset_contributing_sensors(&mut self) {
+        self.contributing_sensors.clear();
+    }
+
+    /// Record that `sensor` contributed a hit (founded or updated this track)
+    /// in the current scan.
+    pub(crate) fn record_hit_from(&mut self, sensor: SensorId) {
+        self.contributing_sensors.insert(sensor);
     }
 
     /// Absorb the SSR identity (if any) of an associated plot.

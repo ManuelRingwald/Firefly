@@ -6,15 +6,17 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** Häppchen **4.A.3** — Multi-Radar **Ende-zu-Ende** durch den
-  Player: neuer Integrationstest `firefly-player/tests/multi_radar.rs` — zwei
-  überlappende Radare (je 51 Plots) auf **ein** Flugzeug ergeben **einen**
-  stabilen Track (kein Geist), über `TrackerConfig::with_sensor` verdrahtet
-  (FR-TRK-010). **125 Tests grün.**
-  (Davor 4.A.2: `firefly-track` auf Multi-Sensor-Mess-Fusion umgestellt —
-  gemeinsamer `tracking_frame` + `BTreeMap<SensorId, SensorModel>`, sequenzielle
-  Sensor-Verarbeitung, `system_tracks()` ohne `&frame`-Arg, `LocalFrame`
-  `Serialize`/`PartialEq`.)
+- **Letzter Commit:** Häppchen **4.A.4** — Sensor-Provenienz im `SystemTrack`:
+  `Track` merkt sich pro Scan, welche Sensoren ihn getroffen haben
+  (`contributing_sensors`, je Scan zurückgesetzt und neu befüllt); `SystemTrack`
+  führt sie als sortierten `Vec<SensorId>` mit (leer beim Coasten). Löst die
+  Single-Sensor-Vereinfachung „update_age → PSR-Alter" für Multi-Radar auf
+  (FR-TRK-010 erweitert). Neuer Test
+  `tracker::system_track_reports_contributing_sensors_per_scan`. **126 Tests
+  grün.**
+  (Davor 4.A.3: Multi-Radar **Ende-zu-Ende** durch den Player —
+  `firefly-player/tests/multi_radar.rs`, zwei überlappende Radare auf ein
+  Flugzeug → ein stabiler Track.)
 - **PR:** keiner offen.
 
 ---
@@ -96,7 +98,7 @@
   Präzision (Rohmessungen) bei gleicher Cloud-Tauglichkeit; Synergie mit dem
   System-Referenzpunkt der CAT062-Ausgabe (ADR 0006). Noch offen:
   Umsetzung in 4.A.1–4.A.4 und CAT062-Kodierung der Identität (4.2).
-- Qualität: **102 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+- Qualität: **126 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -152,13 +154,13 @@ Koordinatenfrage geklärt — **UDP-Multicast** + **System-Stereografisch**
 I062/100-Encoder, Multicast-Versand) sind als Zielbild in ADR 0006
 festgehalten und werden voraussichtlich im Umfeld von M4 eingeplant.
 
-✅ **M4 Häppchen 4.1 + 4.0 erledigt:** SSR-Identität durchgereicht
-(FR-TRK-009); Architektur entschieden — **zentrale Mess-Fusion** (ADR 0010).
+✅ **M4 Häppchen 4.1 + 4.0 + 4.A.1–4.A.4 erledigt:** SSR-Identität durchgereicht
+(FR-TRK-009); Architektur entschieden — **zentrale Mess-Fusion** (ADR 0010);
+Frame-Transform, Multi-Sensor-Tracker, E2E-Fusionstest und Sensor-Provenienz
+alle umgesetzt.
 
-➡️ **Als Nächstes:** **4.A.4** — Sensor-Provenienz im `SystemTrack`: festhalten,
-**welche** Sensoren aktuell zu einem Track beitragen (löst u. a. die
-Single-Sensor-Vereinfachung „update_age → PSR-Alter" für CAT062 I062/290 auf).
-*S3 · Sonnet · Effort mittel.* — Alternativ **4.2** (CAT062-Identitätsfelder).
+➡️ **Als Nächstes:** **4.2** — CAT062-Identitätsfelder kodieren
+(`firefly-asterix`, unabhängig). *S3–S4 · Opus 4.8 · Effort mittel–hoch.*
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)
 
@@ -167,7 +169,7 @@ Single-Sensor-Vereinfachung „update_age → PSR-Alter" für CAT062 I062/290 au
 - [x] **4.A.1** `firefly-geo`: Frame-zu-Frame-Transformation (Position + Kovarianz, FR-GEO-003) — *S4 · Opus 4.8 · Effort hoch*
 - [x] **4.A.2** `firefly-track` auf Multi-Sensor: gemeinsamer Tracking-Frame, Plot-Umrechnung + sequenzielle Fusion, Pro-Sensor-Rauschmodell (FR-TRK-010) — *S4–S5 · Opus 4.8 · Effort hoch*
 - [x] **4.A.3** Multi-Radar-Szenario (zwei überlappende Radare) + E2E-Test: ein Flugzeug → **ein** Track (FR-TRK-010) — *S4 · Opus 4.8 · Effort hoch*
-- [ ] **4.A.4** Sensor-Provenienz im `SystemTrack` (welche Sensoren tragen bei) — *S3 · Sonnet · Effort mittel*
+- [x] **4.A.4** Sensor-Provenienz im `SystemTrack` (welche Sensoren tragen bei, FR-TRK-010) — *S3 · Sonnet · Effort mittel*
 - [ ] **4.2** CAT062-Identitätsfelder kodieren (`firefly-asterix`, unabhängig) — *S3–S4 · Opus 4.8 · Effort mittel–hoch*
 - [ ] *(später)* Sensor-Registrierung / Bias-Korrektur — *S5 · Fable 5 / Opus 4.8*
 
@@ -222,8 +224,10 @@ sind und die Anforderung im Register rückverfolgbar steht.
   Subfield-Bit für APC ist Bit 16 (= `0x80`), Subfeld = X- und Y-Komponente je
   16 Bit, LSB ½ m, vorzeichenlos — passt. Unsere Encoder-Konstanten und der
   Referenz-Dump (`0x40, 0x08` bzw. `0x80, 0x00, 0xC8, 0x00, 0xC8`) stimmen
-  exakt. Offen bleibt weiterhin: Das Mapping „update_age → PSR-Alter" ist eine
-  Single-Sensor-Vereinfachung (Mehr-Sensor-Provenienz erst in M4).
+  exakt. Das Mapping „update_age → PSR-Alter" war eine Single-Sensor-
+  Vereinfachung; mit 4.A.4 trägt der `SystemTrack` jetzt `contributing_sensors`
+  (welche Sensoren im letzten Scan beigetragen haben). Die CAT062-Kodierung
+  dieser Mehr-Sensor-Information ist Teil von 4.2.
 - **ASD-Integration (ADR 0006), Transport & Koordinatenbezug entschieden:**
   Transport = **UDP-Multicast**, Koordinatenbezug = **System-Stereografisch**
   (CAT062 I062/100 statt I062/105). Noch **nicht umgesetzt** — offene
