@@ -6,8 +6,8 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** Nachtrag zu M2 — safety-relevanter `SystemTrack`-Status
-  (coasting / Update-Alter / Positions-Unsicherheit), ADR 0008, FR-TRK-008.
+- **Letzter Commit:** Härtungs-Häppchen — Timing-Robustheit (NFR-CLOUD-004),
+  `tests/timing.rs`. **M2 inkl. Veredelungen komplett.**
 - **PR:** #1 (offen).
 
 ---
@@ -29,8 +29,10 @@
   **Nachtrag (ADR 0008, FR-TRK-008):** der `SystemTrack` trägt jetzt den
   safety-relevanten Status — `coasting`, `update_age`, `position_uncertainty`
   (1σ-Halbachse aus `P`) → bereitet CAT062 I062/080, /290, /500 vor.
+  **Härtung (NFR-CLOUD-004):** `tests/timing.rs` beweist — lange Scan-Lücke mit
+  Daten erhält Identität; Löschung nach Fehltreffer-*Anzahl*, nicht nach Zeit.
   Externe Abhängigkeiten `nalgebra` (ADR 0005), `serde` (ADR 0007).
-- Qualität: **67 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
+- Qualität: **69 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0008,
@@ -56,16 +58,15 @@ ADR 0008). Der Single-Radar-Tracker steht vollständig: Messung → Filter → G
 Zuordnung → Lebenszyklus → Snapshot/Replay → neutraler WGS84-Output mit
 Safety-Status → Güte-Metriken.
 
-➡️ **Als Nächstes: Härtungs-Häppchen (NFR-CLOUD-004) — Timing-Robustheit.**
-Ein Integrationstest (`tests/timing.rs`), der zeigt: (1) eine lange Scan-Lücke
-*mit* Daten erhält Identität und Spur (kein Reset), (2) Löschung hängt an der
-**Fehltreffer-Anzahl**, nicht an verstrichener Zeit. Klein, schnell, und genau das
-Argument für die Chef-Vorführung. **Erklärung steht bereits** (siehe Chat), wartet
-auf **Go**. *(S3 · Sonnet · Effort mittel.)*
+✅ **Timing-Härtung (NFR-CLOUD-004) erledigt** — `tests/timing.rs` beweist beide
+Eigenschaften. Damit ist M2 inkl. aller Veredelungen abgeschlossen.
 
-Danach: **Start von M3** — Web-Frontend mit Live-2D-Karte über WebSocket; hier wird
-auch die Ein-Befehl-Demo (NFR-OPS-001) konkret. *(Größer; WebSocket-Server
-S4 · Opus/Fable 5, Map-Frontend S3 · Sonnet — siehe §4.)*
+➡️ **Als Nächstes: Start von M3** — Web-Frontend mit Live-2D-Karte über WebSocket;
+hier wird auch die Ein-Befehl-Demo (NFR-OPS-001) konkret, samt einer Szene, die die
+Timing-Robustheit *sichtbar* macht. M3 ist groß — Claude wird es **in Häppchen
+zerlegen und vor dem Bau erklären** (WebSocket-Server S4 · Opus/Fable 5,
+Map-Frontend S3 · Sonnet, CAT062-Encoder S4 — siehe §4). Erste offene Frage für M3:
+Frontend-Kartenbibliothek (Leaflet vs. MapLibre, ADR fällig).
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
@@ -79,6 +80,8 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 - [x] **2.6** Serialisierbarer Zustand (Snapshot/Replay) — *S3 · Sonnet · Effort mittel*
 - [x] **2.7** Neutraler `SystemTrack`-Output in WGS84 (ASD-Port → CAT062) — *S3 · Sonnet · Effort mittel*
 - [x] **2.8** Güte-Metriken gegen Ground Truth (RMSE, Track-Kontinuität) — *S3 · Sonnet · Effort mittel*
+- [x] **Nachtrag** Safety-Status auf `SystemTrack` (ADR 0008, FR-TRK-008) — *S3 · Sonnet · Effort mittel*
+- [x] **Härtung** Timing-Robustheit (NFR-CLOUD-004) — *S3 · Sonnet · Effort mittel*
 
 Jeder Haken wird erst gesetzt, wenn die Qualitäts-Gates (CLAUDE.md §5) erfüllt
 sind und die Anforderung im Register rückverfolgbar steht.
@@ -107,10 +110,13 @@ sind und die Anforderung im Register rückverfolgbar steht.
 - **Sicherheitsanalyse (FHA/Hazards)** — sinnvoll, sobald Tracker-Funktionen
   stehen, gegen die man Gefährdungen bewerten kann.
 - **Frontend-Kartenbibliothek** (Leaflet vs. MapLibre) — Entscheidung in M3.
-- **Timing-Robustheit (NFR-CLOUD-004):** Der Lebenszyklus darf Tracks nicht
-  wegen verzögerter/aussetzender Scans verwerfen. Fundament (Datenzeit-getrieben)
-  steht; ein gezielter Nachweis (Test mit langen/ungleichen Scan-Lücken) ist als
-  Härtungs-Häppchen in M2/M3 eingeplant.
+- **Out-of-order-Daten (Eingangs-Adapter, M3/M4):** Wenn ein *sehr alter* Plot
+  *nach* neueren ankommt, kann man nicht sinnvoll rückwärts vorhersagen. Standard:
+  am Eingang nach Datenzeit ordnen, kleines Zeitfenster puffern, zu Spätes
+  *verwerfen* (nur den Plot, nicht den Track). Bewusst **kein** „Daten alt → Reset".
+- **Frische-/Staleness-Anzeige (Ausgabe-Rand, M3):** Aus `SystemTrack.update_age`
+  am Anzeige-Rand eine *weiche* Frische-Markierung ableiten — nie zustands-
+  zerstörend (ADR 0008). Die Entscheidung selbst liegt schon im Tracker.
 - **Vorführbarkeit (NFR-OPS-001):** Ein-Befehl-Demo ohne Programmierkenntnisse
   für Präsentationen — Umsetzung mit dem Frontend in M3.
 
