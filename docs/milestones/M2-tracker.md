@@ -257,3 +257,65 @@ Abweichung beobachtet). Deshalb trennen wir die Aussagen sauber:
 
 Der **neutrale `SystemTrack`-Output in WGS84** (die ASD-Andock-Schnittstelle
 Richtung CAT062) — Häppchen 2.7. Danach die Güte-Metriken (2.8).
+
+---
+
+## Häppchen 2.7 — Neutraler `SystemTrack`-Output in WGS84
+
+**Status:** ✅ umgesetzt · Anforderungen `NFR-INT-001`, `NFR-INT-002`
+
+### Die Idee (fachlich)
+
+Der Tracker *rechnet* in einem flachen, sensor-lokalen Gitter (Ost/Nord in Metern
+um den Radarstandort) — dort ist Fliegen fast geradlinig und die Filter-Mathematik
+billig. Die *Außenwelt* aber — eine Luftlage-Anzeige und später **Phoenix ASD** —
+spricht **geodätisch (WGS84: Breite/Länge)**. Wir brauchen also einen sauberen
+**Ausgabe-Typ**, der eine Track-Schätzung in Welt-Koordinaten aus dem Kern
+heraustransportiert.
+
+Wichtig ist die **Ports-&-Adapters-Idee**: Der Kern liefert einen *neutralen*
+`SystemTrack`. Ein nachgelagerter **Adapter** macht daraus CAT062, JSON für die
+Web-Karte oder was auch immer. So leckt **kein** Draht-Format und **kein**
+Transport in die Rechenlogik — genau das fordern `NFR-INT-001/002`.
+
+### Die Umsetzung (technisch)
+
+- Neuer Typ `SystemTrack` in `firefly-core`: `id`, `time`, `position` (WGS84),
+  `v_east`, `v_north`, `confirmed`. Dazu zwei Helfer:
+  - `ground_speed()` = Länge des Geschwindigkeitsvektors (m/s),
+  - `track_angle()` = Kurs über Grund, **von Nord im Uhrzeigersinn** in `[0,2π)`
+    — dieselbe Azimut-Konvention wie im geo-Modul.
+- `Tracker::system_tracks(&LocalFrame)` projiziert jeden Track per
+  `firefly-geo`-Kette (ENU → ECEF → WGS84) zurück. Die Geschwindigkeit bleibt im
+  lokalen Ost/Nord-Rahmen — über die kurzen Reichweiten eines Einzelradars sind
+  die lokalen Achsen eine exzellente Näherung der geografischen.
+- **Der Frame wird zur Ausgabezeit übergeben, nicht im Zustand gespeichert.** Das
+  hält den serialisierbaren Kern (2.6) in sich geschlossen und macht die
+  geodätische Verankerung zu einer Sache des *Randes*, nicht der Mathematik.
+- Höhe = Höhe des Frame-Ursprungs (Tangentialebene, `up = 0`): Der Tracker ist
+  vorerst **2-D** (kein Mode-C), führt also noch keine eigene vertikale Schätzung.
+
+### Eine bewusste Verfeinerung gegenüber der Skizze
+
+In der Ankündigung hieß es „nur bestätigte Tracks ausgeben". Beim Bauen haben wir
+uns für die **sauberere Port-Variante** entschieden: `system_tracks` liefert
+*alle* Tracks und markiert jeden mit `confirmed` (true/false). Die Entscheidung
+„was wird veröffentlicht?" ist **Politik** und gehört in den **Adapter**, nicht in
+den neutralen Port. Nebeneffekt: Der Status ist jetzt ein echtes, prüfbares Feld —
+und er entspricht später direkt dem CNF/TNT-Bit in ASTERIX CAT062.
+
+### Der Kern-Nachweis
+
+Zwei Projektions-Tests im Tracker: Ein Plot **genau östlich** des Sensors wird zum
+`SystemTrack`, dessen WGS84-Position **verlustfrei zurück** ins lokale ENU
+projiziert (Ost ≈ Reichweite, Nord ≈ 0, Höhe ≈ 0). Und: Ein langlebiger Track
+erscheint `confirmed`, ein frisch geborener `tentativ` — der Port meldet beide.
+Dazu im Kern drei Tests für `ground_speed`/`track_angle` (Kompass-Konvention:
+Nord→0, Ost→π/2, Süd→π, West→3π/2).
+
+### Was noch fehlt (→ 2.8)
+
+Damit existiert die **Andock-Schnittstelle** Richtung ASD/CAT062 als neutraler
+Port. Es fehlen noch die **Güte-Metriken** gegen die Ground Truth (RMSE,
+Track-Kontinuität) — Häppchen 2.8 — um die Qualität des Trackers in Zahlen zu
+fassen.

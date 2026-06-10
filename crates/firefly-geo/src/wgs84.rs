@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
+
 use crate::ecef::Ecef;
 use crate::ellipsoid::{ECCENTRICITY_SQ, SEMI_MAJOR_AXIS};
 
 /// A geodetic position on the WGS84 ellipsoid.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Wgs84 {
     /// Geodetic latitude, radians (positive north).
     pub lat: f64,

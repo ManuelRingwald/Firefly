@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::ellipsoid::{ECCENTRICITY_SQ, SEMI_MAJOR_AXIS, SEMI_MINOR_AXIS};
 use crate::wgs84::Wgs84;
 
@@ -6,7 +8,7 @@ use crate::wgs84::Wgs84;
 /// The origin is the Earth's centre of mass, +X points to the intersection of
 /// the equator and the prime meridian, +Z points to the (geodetic) north pole,
 /// and +Y completes the right-handed frame. Units are metres.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Ecef {
     pub x: f64,
     pub y: f64,

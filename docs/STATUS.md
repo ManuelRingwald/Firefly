@@ -6,8 +6,8 @@
 
 - **Zuletzt aktualisiert:** 2026-06-09
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M2 Häppchen 2.6 — serialisierbarer Zustand (Snapshot/Replay,
-  serde) in `firefly-track`.
+- **Letzter Commit:** M2 Häppchen 2.7 — neutraler `SystemTrack`-Output in WGS84
+  (ASD-Port → CAT062) in `firefly-core`/`firefly-track`.
 - **PR:** #1 (offen).
 
 ---
@@ -16,14 +16,16 @@
 
 - **M1 (Simulator) ist fertig** und gepusht: Workspace + drei Crates
   (`firefly-geo`, `firefly-core`, `firefly-sim`).
-- **M2 läuft:** Häppchen **2.1–2.5 erledigt** — Crate `firefly-track` mit
+- **M2 läuft:** Häppchen **2.1–2.7 erledigt** — Crate `firefly-track` mit
   Converted-Measurement, Kalman-Filter (CV, Joseph-Form), Gating (Mahalanobis/χ²),
   Datenassoziation (GNN/Ungarische Methode) und **Track-Lebenszyklus** (`Tracker`,
   Pro-Scan-Orchestrierung: Geburt/Bestätigung/Coasting/Löschung). Der
   Single-Radar-Tracker steht — inkl. End-to-End-Test mit zwei kreuzenden Zielen.
   **2.6**: serialisierbarer Zustand mit Snapshot/Replay (serde, ADR 0007).
+  **2.7**: neutraler `SystemTrack`-Output in WGS84 (`firefly-core`) + Projektion
+  `Tracker::system_tracks(&LocalFrame)` — der ASD-Port Richtung CAT062.
   Externe Abhängigkeiten `nalgebra` (ADR 0005), `serde` (ADR 0007).
-- Qualität: **52 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
+- Qualität: **58 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
 - **Dokumentation** aufgebaut: Glossar, M1-Erklärung, ADRs 0001–0004,
@@ -44,17 +46,22 @@
 
 ## 3. Nächster Schritt (hier geht es weiter!)
 
-➡️ **Häppchen 2.7 — Neutraler `SystemTrack`-Output in WGS84 (ASD-Port → CAT062).**
+➡️ **Häppchen 2.8 — Güte-Metriken gegen Ground Truth (RMSE, Track-Kontinuität).**
 Claude wartet auf das **Go**, um es zuerst zu *erklären* (noch kein Code):
 
-> Fachlich/technisch: ein neutraler, geodätischer `SystemTrack` als Ausgabe-Port
-> (ID, Position WGS84, Geschwindigkeit, Status, Zeit, …). Der `Tracker` muss
-> dafür die geodätische Frame-Referenz des Sensors mitführen, um die intern
-> lokalen ENU-Tracks nach WGS84 zurückzuprojizieren (NFR-INT-001/002, ADR 0006).
+> Fachlich/technisch: Wir messen die Qualität des Trackers in Zahlen, indem wir
+> seine Tracks gegen die *bekannte Wahrheit* des Simulators halten — z. B.
+> **RMSE** der Positions-/Geschwindigkeitsschätzung und **Track-Kontinuität**
+> (keine Abbrüche, keine Identitätswechsel). Das ist zugleich ein V&V-Nachweis
+> und die Bühne, auf der man den Mehrwert von Firefly *zeigen* kann.
 
 **Komplexität: S3 → Sonnet 4.6, Effort mittel.** Skala: siehe `CLAUDE.md` §2.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
+
+> 💡 **Idee fürs Härtungs-Häppchen (NFR-CLOUD-004):** ein Test mit künstlich
+> langen/ungleichen Scan-Lücken, der zeigt, dass Firefly Tracks *durchhält* statt
+> sie zu verwerfen — das ist später das stärkste Argument in der Vorführung.
 
 ## 4. M2-Plan in Häppchen (mit Komplexität / Modell)
 
@@ -64,7 +71,7 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 - [x] **2.4** Datenassoziation GNN (Ungarische Methode) — *S4 · Opus*
 - [x] **2.5** Track-Lebenszyklus (M-aus-N, Bestätigung, Coasting, Löschung) — *S4 · Opus*
 - [x] **2.6** Serialisierbarer Zustand (Snapshot/Replay) — *S3 · Sonnet · Effort mittel*
-- [ ] **2.7** Neutraler `SystemTrack`-Output in WGS84 (ASD-Port → CAT062) — *S3 · Sonnet · Effort mittel*
+- [x] **2.7** Neutraler `SystemTrack`-Output in WGS84 (ASD-Port → CAT062) — *S3 · Sonnet · Effort mittel*
 - [ ] **2.8** Güte-Metriken gegen Ground Truth (RMSE, Track-Kontinuität) — *S3 · Sonnet · Effort mittel*
 
 Jeder Haken wird erst gesetzt, wenn die Qualitäts-Gates (CLAUDE.md §5) erfüllt

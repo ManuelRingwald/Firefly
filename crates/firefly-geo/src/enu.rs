@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::ecef::Ecef;
 use crate::polar::Polar;
 use crate::wgs84::Wgs84;
@@ -7,7 +9,7 @@ use crate::wgs84::Wgs84;
 /// The frame is defined by a [`LocalFrame`] anchored at some reference point
 /// (typically a radar site). +E points east, +N points (true) north, +U points
 /// up along the local ellipsoidal normal. Units are metres.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Enu {
     pub east: f64,
     pub north: f64,

@@ -16,7 +16,8 @@
 //! whole run is replayable and the state is recoverable. The state
 //! ([`Track`] list) is plain, serialisable data (NFR-CLOUD-001/002/003).
 
-use firefly_core::{Plot, Timestamp, TrackId};
+use firefly_core::{Plot, SystemTrack, Timestamp, TrackId};
+use firefly_geo::{Enu, LocalFrame};
 use serde::{Deserialize, Serialize};
 
 use crate::association::associate;
@@ -95,6 +96,42 @@ impl Tracker {
         self.tracks.iter().filter(|t| t.is_confirmed()).count()
     }
 
+    /// Project the current tracks into neutral, geodetic [`SystemTrack`]s.
+    ///
+    /// This is the tracker's **output port** (Ports & Adapters, NFR-INT-001/002).
+    /// The internal estimate lives in the sensor-local ENU frame; to report it to
+    /// the outside world we lift each track's position back to WGS84 through the
+    /// sensor's [`LocalFrame`].
+    ///
+    /// The frame is passed **at output time**, not stored in the tracker state —
+    /// this keeps the core state self-contained and serialisable (NFR-CLOUD-003)
+    /// and leaves the geodetic anchoring a concern of the boundary, not the maths.
+    ///
+    /// Height is reported as the frame origin's height: the tracker is 2-D for
+    /// now (no Mode-C), so it carries no independent vertical estimate yet.
+    ///
+    /// REQ: NFR-INT-001, NFR-INT-002
+    pub fn system_tracks(&self, frame: &LocalFrame) -> Vec<SystemTrack> {
+        self.tracks
+            .iter()
+            .map(|track| {
+                let p = track.position();
+                let v = track.velocity();
+                // The 2-D estimate sits on the local tangent plane (up = 0),
+                // i.e. at the frame origin's ellipsoidal height.
+                let position = frame.enu_to_geodetic(&Enu::new(p[0], p[1], 0.0));
+                SystemTrack {
+                    id: track.id(),
+                    time: Timestamp(track.last_time),
+                    position,
+                    v_east: v[0],
+                    v_north: v[1],
+                    confirmed: track.is_confirmed(),
+                }
+            })
+            .collect()
+    }
+
     /// Process one scan: a batch of plots that share the time `time`.
     ///
     /// The batch may be empty (no detections this scan), in which case every
@@ -169,7 +206,7 @@ fn should_delete(track: &Track, cfg: &TrackerConfig) -> bool {
 mod tests {
     use super::*;
     use firefly_core::{Plot, SensorId};
-    use firefly_geo::Polar;
+    use firefly_geo::{Polar, Wgs84};
 
     fn config() -> TrackerConfig {
         TrackerConfig::new(SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08))
@@ -245,5 +282,62 @@ mod tests {
             &[plot(0.0, 50_000.0, 0.0), plot(0.0, 50_000.0, 1.0)],
         );
         assert_eq!(tracker.tracks().len(), 2);
+    }
+
+    /// The geodetic output round-trips: a plot due east of the sensor becomes a
+    /// `SystemTrack` whose WGS84 position projects back to the same local ENU
+    /// offset (east ≈ range, north ≈ 0, up ≈ 0).
+    /// REQ: NFR-INT-001, NFR-INT-002
+    #[test]
+    fn system_track_position_round_trips_through_wgs84() {
+        let frame = LocalFrame::new(Wgs84::from_degrees(47.0, 8.0, 500.0));
+        let mut tracker = Tracker::new(config());
+        // One exact plot at 40 km, azimuth 90° (due east): east = ρ, north = 0.
+        tracker.process_scan(
+            Timestamp(0.0),
+            &[plot(0.0, 40_000.0, std::f64::consts::FRAC_PI_2)],
+        );
+
+        let sts = tracker.system_tracks(&frame);
+        assert_eq!(sts.len(), 1);
+
+        let back = frame.geodetic_to_enu(&sts[0].position);
+        assert!((back.east - 40_000.0).abs() < 1.0, "east ≈ range");
+        assert!(back.north.abs() < 1.0, "north ≈ 0");
+        assert!(back.up.abs() < 1.0, "up ≈ 0 (2-D, on the tangent plane)");
+    }
+
+    /// The neutral port reports *both* statuses and tags each track: a long-lived
+    /// track shows up confirmed, a freshly born one still tentative.
+    /// REQ: NFR-INT-001
+    #[test]
+    fn system_tracks_carry_confirmation_status() {
+        let frame = LocalFrame::new(Wgs84::from_degrees(47.0, 8.0, 500.0));
+        let mut tracker = Tracker::new(config());
+
+        // Three scans confirm track A (due north, 50 km).
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(Timestamp(t), &[plot(t, 50_000.0, 0.0)]);
+        }
+        // A fourth scan keeps A alive and spawns a still-tentative track B.
+        tracker.process_scan(
+            Timestamp(12.0),
+            &[
+                plot(12.0, 50_000.0, 0.0),
+                plot(12.0, 30_000.0, std::f64::consts::FRAC_PI_2),
+            ],
+        );
+
+        let mut sts = tracker.system_tracks(&frame);
+        assert_eq!(sts.len(), 2);
+        sts.sort_by_key(|s| s.id.0);
+        assert!(sts[0].confirmed, "older track A is confirmed");
+        assert!(!sts[1].confirmed, "fresh track B is still tentative");
+
+        // A sits due north of the sensor: local north large, east ~0.
+        let back = frame.geodetic_to_enu(&sts[0].position);
+        assert!(back.north > 49_000.0, "A is far north of the sensor");
+        assert!(back.east.abs() < 200.0, "A is ~due north (east ≈ 0)");
     }
 }
