@@ -49,6 +49,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-player"
+version = "0.1.0"
+dependencies = [
+ "firefly-core",
+ "firefly-geo",
+ "firefly-io",
+ "firefly-sim",
+ "firefly-track",
+]
+
+[[package]]
 name = "firefly-sim"
 version = "0.1.0"
 dependencies = [

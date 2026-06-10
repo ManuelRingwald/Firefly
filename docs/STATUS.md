@@ -6,9 +6,9 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M3 Häppchen 3.1 — JSON-Ausgabe-Adapter: neue Crate
-  `firefly-io` mit `Frame`/`FrameTrack` (web-freundliche Drahtform: Grad +
-  abgeleitete Geschwindigkeit/Kurs), verlustfreier JSON-Roundtrip (FR-IO-001).
+- **Letzter Commit:** M3 Häppchen 3.2 — „Player": neue Crate `firefly-player`
+  führt ein Szenario durch den Tracker und erzeugt den vollständigen,
+  deterministischen Frame-Strom (FR-IO-002).
 - **PR:** #1 (offen).
 
 ---
@@ -42,9 +42,14 @@
   **3.1**: neue Crate **`firefly-io`** mit dem neutralen `Frame` (Datenzeit +
   Sensor + `SystemTrack[]`) und `FrameTrack`; web-freundliche Drahtform (Position
   in **Grad**, abgeleitete Geschwindigkeit/Kurs), verlustfreier JSON-Roundtrip
-  (FR-IO-001). Reine, testbare Funktion — **noch kein Netzwerk** (kommt in 3.3).
-- Qualität: **72 Tests + 1 Doctest grün** (4 neu in `firefly-io`), Clippy sauber,
-  `cargo fmt` ok.
+  (FR-IO-001).
+  **3.2**: neue Crate **`firefly-player`** — `Player::new(&scenario, config)` +
+  `.frames()` führt das Szenario (M1) durch den Tracker (M2) und erzeugt den
+  **Frame-Strom** (ein `Frame` je Scan-Zeit) über `firefly-io` (FR-IO-002). Rein
+  und deterministisch (kein Netz, keine Wanduhr) — Tempo-Steuerung ist eine
+  spätere, getrennte Hülle (3.3/3.5).
+- Qualität: **76 Tests + 1 Doctest grün** (4 neu in `firefly-player`), Clippy
+  sauber, `cargo fmt` ok.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
 
@@ -71,17 +76,18 @@ Safety-Status → Güte-Metriken.
 ✅ **Timing-Härtung (NFR-CLOUD-004) erledigt** — `tests/timing.rs` beweist beide
 Eigenschaften. Damit ist M2 inkl. aller Veredelungen abgeschlossen.
 
-✅ **M3 Häppchen 3.0–3.1 erledigt** — ADR 0009 steht (Tokio/axum, WebSocket,
-JSON, MapLibre GL); die Crate `firefly-io` liefert das neutrale `Frame` als
-JSON (FR-IO-001), web-freundlich und verlustfrei roundtrip-getestet.
+✅ **M3 Häppchen 3.0–3.2 erledigt** — ADR 0009 steht (Tokio/axum, WebSocket,
+JSON, MapLibre GL); `firefly-io` liefert das neutrale `Frame` als JSON
+(FR-IO-001); `firefly-player` liefert daraus den vollständigen, deterministischen
+Frame-Strom für ein Szenario (FR-IO-002).
 
-➡️ **Als Nächstes: Häppchen 3.2 — „Player".** Eine reine, testbare Logik, die ein
-Szenario (M1-Simulator) durch den Tracker (M2) schiebt und pro Scan ein `Frame`
-ausgibt — der **Frame-Strom**. Tempo-Steuerung (Echtzeit/schneller/Pause) bleibt
-*getrennt* vom Kern, damit die Verarbeitung deterministisch nach Datenzeit bleibt
-(ADR 0003). Danach 3.3 WebSocket-Server → 3.4 MapLibre-Frontend → 3.5
-Ein-Befehl-Demo (NFR-OPS-001, inkl. sichtbarer Timing-Robustheit). CAT062-Encoder
-(3.X) folgt nach der Demo.
+➡️ **Als Nächstes: Häppchen 3.3 — WebSocket-Server.** Ein axum/Tokio-Server, der
+`Player::frames()` über eine WebSocket-Verbindung an den Browser pusht — inkl.
+Health-/Readiness-Probes, 12-Factor-Konfiguration, geordnetem Shutdown und
+strukturierten Logs (NFR-OBS-001). Hier kommt die **Tempo-Steuerung** dazu (wie
+schnell der Frame-Strom gesendet wird) — getrennt von der reinen Player-Logik.
+Danach 3.4 MapLibre-Frontend → 3.5 Ein-Befehl-Demo (NFR-OPS-001, inkl. sichtbarer
+Timing-Robustheit). CAT062-Encoder (3.X) folgt nach der Demo.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
@@ -89,7 +95,7 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
 - [x] **3.0** Architektur-Entscheidung (ADR 0009: Tokio/axum, WebSocket, JSON, MapLibre) — *S2 · Sonnet · Effort niedrig*
 - [x] **3.1** JSON-Ausgabe-Adapter (`Frame` = Zeit + Sensor + `SystemTrack[]`, `serde_json`; Crate `firefly-io`, FR-IO-001) — *S2–S3 · Sonnet · Effort niedrig–mittel*
-- [ ] **3.2** „Player": Szenario → Tracker → Frame-Strom (reine Logik, Tempo getrennt vom Kern) — *S3 · Sonnet · Effort mittel*
+- [x] **3.2** „Player": Szenario → Tracker → Frame-Strom (reine Logik, Tempo getrennt vom Kern; Crate `firefly-player`, FR-IO-002) — *S3 · Sonnet · Effort mittel*
 - [ ] **3.3** WebSocket-Server (axum/tokio, Health/Readiness, 12-Factor, Shutdown, Logs/NFR-OBS-001) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
 - [ ] **3.4** Frontend 2D-Karte mit Live-Tracks (MapLibre; coasting gestrichelt, Unsicherheits-Ellipse aus `position_uncertainty`) — *S3 · Sonnet · Effort mittel*
 - [ ] **3.5** Demo-Erlebnis (ein Befehl, Demo-Szene, „Verzug"-Auslöser zeigt Timing-Robustheit) — *S3 · Sonnet · Effort mittel*

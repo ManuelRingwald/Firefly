@@ -380,6 +380,13 @@ System-Tracks }`, das über die WebSocket-Leitung geht. Nicht zu verwechseln mit
 *LocalFrame* (dem geodätischen Bezugssystem); hier meint „Frame" ein einzelnes
 Momentbild des Lagebildes.
 
+**Player (Frame-Strom-Erzeuger)**
+Die Komponente, die ein Szenario (M1) durch den Tracker (M2) schiebt und daraus
+den **Frame-Strom** macht — eine `Frame`-Liste, ein Eintrag pro Scan-Zeit. Der
+Player selbst ist **rein und deterministisch** (kein Netz, keine Wanduhr,
+ADR 0003): *wann* und *wie schnell* dieser Strom später nach außen geht (Server,
+Demo-Tempo), ist eine getrennte Hülle darum.
+
 ---
 
 ## Frontend & Karte (was der Browser zeigt)
