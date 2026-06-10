@@ -4,6 +4,10 @@ members = [
     "crates/firefly-geo",
     "crates/firefly-core",
     "crates/firefly-sim",
+    "crates/firefly-track",
+    "crates/firefly-io",
+    "crates/firefly-player",
+    "crates/firefly-server",
 ]
 
 [workspace.package]
@@ -16,3 +20,10 @@ repository = "https://github.com/manuelringwald/firefly"
 [workspace.dependencies]
 firefly-geo = { path = "crates/firefly-geo" }
 firefly-core = { path = "crates/firefly-core" }
+firefly-sim = { path = "crates/firefly-sim" }
+firefly-io = { path = "crates/firefly-io" }
+firefly-track = { path = "crates/firefly-track" }
+firefly-player = { path = "crates/firefly-player" }
+nalgebra = "0.33"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

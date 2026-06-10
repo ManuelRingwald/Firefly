@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::enu::Enu;
 
 /// A polar measurement as produced by a radar, referenced to its site.
@@ -6,7 +8,7 @@ use crate::enu::Enu;
 /// slant range from the antenna, an azimuth (the antenna's pointing angle), and
 /// an elevation angle (available from 3-D radars; primary 2-D radars leave it
 /// effectively unknown).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Polar {
     /// Slant range from the sensor, metres.
     pub range: f64,

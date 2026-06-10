@@ -39,6 +39,8 @@ Arbeitsschritt gilt dieser Ablauf:
      aus Sicht der Luftlage?)
    - **Technisch** (*Wie* setzen wir es um? Welche Bausteine, welche Mathematik,
      welche Dateien?)
+   - **Komplexität** (Einstufung **S1–S5** mit Modell-Empfehlung, siehe unten —
+     damit der Projektverantwortliche das passende Modell wählen kann.)
 2. **Begriffe klären** — Jeder neue Fachbegriff wird beim ersten Auftreten
    erklärt und in `docs/glossary.md` aufgenommen. Keine unerklärten Abkürzungen.
 3. **Freigabe abwarten** — Claude hält an und wartet auf Rückfragen oder ein
@@ -50,6 +52,29 @@ Arbeitsschritt gilt dieser Ablauf:
 
 **Verboten:** „Durchrattern" — also mehrere Bausteine ungefragt
 hintereinanderweg bauen, ohne Erklärung und Freigabe dazwischen.
+
+### Komplexitäts-Skala (für die Modellwahl)
+
+Jeder angekündigte Schritt bekommt eine Einstufung. Sie schätzt, *wie
+anspruchsvoll* das saubere Erklären **und** Umsetzen des Schritts ist (Mathe,
+Algorithmik, Architektur-Abwägung, Testumfang) — nicht bloß die Zeilenzahl.
+
+| Stufe | Bedeutung | Modell-Empfehlung | Effort-Level |
+|-------|-----------|-------------------|--------------|
+| **S1** | Trivial/mechanisch (Doku-Kleinkram, Umbenennen, Tippen) | Haiku 4.5 | niedrig |
+| **S2** | Leicht (klar umrissen, wenig Logik) | Haiku 4.5 / Sonnet 4.6 | niedrig–mittel |
+| **S3** | Mittel (etwas Mathe/Logik, überschaubarer Umfang) | Sonnet 4.6 | mittel |
+| **S4** | Anspruchsvoll (subtile Mathe/Algorithmen, Architektur, viele Tests) | Opus 4.8 / Fable 5 | hoch |
+| **S5** | Sehr anspruchsvoll (tiefe Mathe, Fusion, große Architektur-Abwägungen) | Fable 5 / Opus 4.8 | hoch–max |
+
+Faustregel: **S1–S2 → Haiku**, **S3 → Sonnet**, **S4–S5 → Opus 4.8 oder Fable 5**.
+Das **Effort-Level** mit der Stufe mitziehen (niedrig bei S1, max bei S5). In
+einem Lernprojekt, in dem die *Erklärung* zählt, bei Grenzfällen lieber das
+stärkere Modell und das höhere Effort-Level.
+
+> **Hinweis Fable 5:** neues Spitzenmodell der Claude-Familie; ohne belastbare
+> Vergleichswerte hier als Top-Option für S4–S5 geführt, gleichrangig mit
+> Opus 4.8 — nach Erfahrung kalibrieren.
 
 ---
 
@@ -116,8 +141,8 @@ Ein Schritt gilt erst als fertig, wenn:
 | Meilenstein | Inhalt | Status |
 |-------------|--------|--------|
 | **M1** | Szenario- + Radar-Plot-Simulator (Datenquelle) | ✅ fertig |
-| **M2** | Single-Radar-Tracker: Gating + GNN + Kalman, Track-Lifecycle | ⏳ als Nächstes |
-| **M3** | Web-Frontend mit Live-2D-Karte über WebSocket | ⏳ |
+| **M2** | Single-Radar-Tracker: Gating + GNN + Kalman, Track-Lifecycle | ✅ fertig |
+| **M3** | Web-Frontend mit Live-2D-Karte über WebSocket | ⏳ als Nächstes |
 | **M4** | SSR/ADS-B-Identitätskorrelation + Multi-Radar-Fusion | ⏳ |
 | **M5** | IMM / JPDA für Manöver & dichten Verkehr | ⏳ |
 

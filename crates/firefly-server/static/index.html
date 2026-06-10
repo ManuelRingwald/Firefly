@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Firefly — live air picture</title>
+
+<!-- MapLibre GL JS from CDN (external request; see ADR 0009). -->
+<link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; }
+  #hud {
+    position: absolute; top: 10px; left: 10px; z-index: 1;
+    background: rgba(20, 24, 32, 0.82); color: #e8eef6;
+    padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.5;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); min-width: 180px;
+  }
+  #hud h1 { font-size: 14px; margin: 0 0 6px; letter-spacing: 0.04em; }
+  #hud .row { display: flex; justify-content: space-between; gap: 16px; }
+  #hud .k { color: #9fb0c4; }
+  #legend { margin-top: 8px; border-top: 1px solid #33414f; padding-top: 6px; }
+  #legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  #status.live { color: #58d68d; }
+  #status.done { color: #f5b041; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="hud">
+  <h1>FIREFLY — live air picture</h1>
+  <div class="row"><span class="k">Status</span><span id="status">connecting…</span></div>
+  <div class="row"><span class="k">Data time</span><span id="clock">—</span></div>
+  <div class="row"><span class="k">Sensor</span><span id="sensor">—</span></div>
+  <div class="row"><span class="k">Tracks</span><span id="count">0</span></div>
+  <div id="legend">
+    <div><span class="dot" style="background:#2196f3"></span>confirmed</div>
+    <div><span class="dot" style="background:#9e9e9e"></span>tentative</div>
+    <div><span class="dot" style="background:#ff9800"></span>coasting (dashed = uncertainty)</div>
+  </div>
+</div>
+
+<script>
+  // ---- Map ----------------------------------------------------------------
+  const map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://demotiles.maplibre.org/style.json',
+    center: [11.0, 48.0], // scene origin; we fit to the tracks on first frame
+    zoom: 5.5,
+  });
+
+  // ---- Geometry helpers ---------------------------------------------------
+  // Approximate local metres → lon/lat offset (good enough for display).
+  function offset(lng, lat, dEast, dNorth) {
+    const dLat = dNorth / 110540.0;
+    const dLng = dEast / (111320.0 * Math.cos(lat * Math.PI / 180.0));
+    return [lng + dLng, lat + dLat];
+  }
+
+  // A closed ring approximating a circle of `radiusM` around [lng, lat].
+  function ring(lng, lat, radiusM, steps = 48) {
+    const coords = [];
+    for (let i = 0; i <= steps; i++) {
+      const a = (i / steps) * 2 * Math.PI;
+      coords.push(offset(lng, lat, radiusM * Math.sin(a), radiusM * Math.cos(a)));
+    }
+    return coords;
+  }
+
+  // A short leader line along the course, length proportional to speed
+  // (where the track would be in `LOOKAHEAD_S` seconds of straight flight).
+  const LOOKAHEAD_S = 60.0;
+  function velocityLine(lng, lat, courseDeg, speedMps) {
+    const dist = speedMps * LOOKAHEAD_S;
+    const a = courseDeg * Math.PI / 180.0;
+    const end = offset(lng, lat, dist * Math.sin(a), dist * Math.cos(a));
+    return [[lng, lat], end];
+  }
+
+  // ---- Sources & layers ---------------------------------------------------
+  const EMPTY = { type: 'FeatureCollection', features: [] };
+
+  function addLayers() {
+    map.addSource('uncertainty', { type: 'geojson', data: EMPTY });
+    map.addSource('velocity', { type: 'geojson', data: EMPTY });
+    map.addSource('tracks', { type: 'geojson', data: EMPTY });
+
+    // Uncertainty ring — solid when fresh, dashed when coasting (two layers
+    // because line-dasharray cannot be data-driven per feature).
+    map.addLayer({
+      id: 'unc-fresh', type: 'line', source: 'uncertainty',
+      filter: ['!', ['get', 'coasting']],
+      paint: { 'line-color': '#7fb0ff', 'line-width': 1.2, 'line-opacity': 0.8 },
+    });
+    map.addLayer({
+      id: 'unc-coast', type: 'line', source: 'uncertainty',
+      filter: ['get', 'coasting'],
+      paint: { 'line-color': '#ff9800', 'line-width': 1.4, 'line-dasharray': [2, 2], 'line-opacity': 0.9 },
+    });
+
+    // Velocity leader.
+    map.addLayer({
+      id: 'vel', type: 'line', source: 'velocity',
+      paint: { 'line-color': '#cdd9e5', 'line-width': 1.5, 'line-opacity': 0.7 },
+    });
+
+    // Track dot, coloured by status.
+    map.addLayer({
+      id: 'track-dot', type: 'circle', source: 'tracks',
+      paint: {
+        'circle-radius': 5,
+        'circle-color': ['case',
+          ['get', 'coasting'], '#ff9800',
+          ['get', 'confirmed'], '#2196f3',
+          '#9e9e9e'],
+        'circle-stroke-color': '#0b0e13',
+        'circle-stroke-width': 1.5,
+      },
+    });
+
+    // Track label: id + speed.
+    map.addLayer({
+      id: 'track-label', type: 'symbol', source: 'tracks',
+      layout: {
+        'text-field': ['concat', '#', ['to-string', ['get', 'id']], '  ', ['to-string', ['get', 'speed']], ' m/s'],
+        'text-size': 11, 'text-offset': [0, 1.2], 'text-anchor': 'top',
+      },
+      paint: { 'text-color': '#e8eef6', 'text-halo-color': '#0b0e13', 'text-halo-width': 1.2 },
+    });
+  }
+
+  // ---- Live stream --------------------------------------------------------
+  let fitted = false;
+  const statusEl = document.getElementById('status');
+  const clockEl = document.getElementById('clock');
+  const sensorEl = document.getElementById('sensor');
+  const countEl = document.getElementById('count');
+
+  function render(frame) {
+    const tracks = [], unc = [], vel = [];
+    for (const t of frame.tracks) {
+      const lng = t.lon_deg, lat = t.lat_deg;
+      tracks.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lng, lat] },
+        properties: {
+          id: t.id, confirmed: t.confirmed, coasting: t.coasting,
+          speed: Math.round(t.ground_speed_mps), age: t.update_age_s,
+        },
+      });
+      unc.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: ring(lng, lat, Math.max(t.position_uncertainty_m, 1)) },
+        properties: { coasting: t.coasting },
+      });
+      vel.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: velocityLine(lng, lat, t.track_angle_deg, t.ground_speed_mps) },
+        properties: {},
+      });
+    }
+
+    map.getSource('tracks').setData({ type: 'FeatureCollection', features: tracks });
+    map.getSource('uncertainty').setData({ type: 'FeatureCollection', features: unc });
+    map.getSource('velocity').setData({ type: 'FeatureCollection', features: vel });
+
+    clockEl.textContent = `${frame.time.toFixed(1)} s`;
+    sensorEl.textContent = frame.sensor;
+    countEl.textContent = frame.tracks.length;
+
+    // Fit the view to the first frame that has tracks.
+    if (!fitted && tracks.length > 0) {
+      const lons = frame.tracks.map(t => t.lon_deg), lats = frame.tracks.map(t => t.lat_deg);
+      map.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+        { padding: 120, maxZoom: 9, duration: 0 });
+      fitted = true;
+    }
+  }
+
+  function connect() {
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onopen = () => { statusEl.textContent = 'live'; statusEl.className = 'live'; };
+    ws.onclose = () => { statusEl.textContent = 'stream complete'; statusEl.className = 'done'; };
+    ws.onerror = () => { statusEl.textContent = 'connection error'; statusEl.className = 'done'; };
+    ws.onmessage = (ev) => render(JSON.parse(ev.data));
+  }
+
+  map.on('load', () => { addLayers(); connect(); });
+</script>
+</body>
+</html>

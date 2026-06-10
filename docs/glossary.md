@@ -17,6 +17,19 @@ Systeme, die daraus ein Luftlagebild erzeugen.
 Das Gesamtbild „Wer fliegt gerade wo, wie schnell, in welche Richtung?". Der
 Tracker ist das Rechenherz, das dieses Bild aus rohen Radarmeldungen erzeugt.
 
+**ASD (*Air Situation Display*)**
+Die Lagedarstellung am Lotsenarbeitsplatz — der Bildschirm, der die berechneten
+Tracks zeigt. Ein *Konsument* des Trackers: Firefly soll später genau dieses ASD
+beliefern (siehe ADR 0006).
+
+**EFS (*Electronic Flight Strips*)**
+Elektronische Flugstreifen, die die früheren Papierstreifen ersetzen. Brauchen
+Tracks, die mit Flugplänen/Callsign korreliert sind (→ Identitätsarbeit in M4).
+
+**Phoenix WebInnovation**
+Die cloud-native Plattform des Projektverantwortlichen mit ASD + EFS, heute vom
+Legacy-Phoenix-Tracker gespeist. Zielumgebung, an die Firefly andocken soll.
+
 **Primärradar (PSR, *Primary Surveillance Radar*)**
 Sendet einen Funkimpuls aus und misst das Echo, das vom Flugzeugrumpf
 zurückgeworfen wird — wie eine Taschenlampe, deren Lichtreflex man sieht. Es
@@ -97,6 +110,22 @@ muss (oft „M aus N": z. B. in 3 von 4 Scans wiedergesehen).
 Wenn ein bestätigter Track in einem Scan keinen Plot bekommt (Ziel kurz nicht
 gesehen), „segelt" er auf Basis der Vorhersage weiter, statt sofort zu sterben.
 
+**Update-Alter (*Track Update Age*)**
+Wie viel **Datenzeit** seit dem letzten *realen Treffer* eines Tracks vergangen
+ist. 0 s = gerade frisch gemessen; wächst, solange der Track coastet. Sagt dem
+Verbraucher (Anzeige), wie „frisch" eine Spur ist — ohne die Wanduhr. In ASTERIX
+CAT062 als I062/290 geführt.
+
+**Track-Lebenszyklus (tentativ / bestätigt)**
+Die „Lebensphasen" eines Tracks: Er wird **tentativ** (auf Probe) geboren,
+wird nach Bewährung (M-aus-N) **bestätigt** (*confirmed*) und der Luftlage
+gemeldet, und wird wieder **gelöscht**, wenn er zu lange nicht mehr gesehen
+wird. Verhindert, dass Falschalarme sofort als „echte" Flugzeuge erscheinen.
+
+**M-aus-N**
+Die Bestätigungsregel: Ein tentativer Track wird bestätigt, sobald er in den
+letzten **N** Scans mindestens **M** Treffer hatte (z. B. 3 aus 5).
+
 **Gating**
 Bevor man fragt „Welcher Plot gehört zu welchem Track?", grenzt man den
 Suchbereich ein: Nur Plots in einem plausiblen Fenster um die Vorhersage kommen
@@ -118,6 +147,35 @@ eine bessere Schätzung als jede der beiden allein. Analogie: ein erfahrener
 Beobachter, der seine Erwartung und das, was er gerade sieht, klug
 zusammenbringt.
 
+**Zustand / Zustandsvektor**
+Die Größen, die der Tracker über ein Ziel schätzt und mitführt — bei uns
+`[Ost, Nord, Geschwindigkeit-Ost, Geschwindigkeit-Nord]`. Die „aktuelle
+Annahme", wo das Ziel ist und wohin es fliegt.
+
+**Prozessrauschen `Q` (Manöver-Budget)**
+Der Regler dafür, wie sehr der Filter dem Bewegungsmodell misstraut. Echte
+Flugzeuge fliegen nicht perfekt gleichförmig — `Q` lässt Abweichungen zu. Zu
+klein: der Filter „klebt" stur an der Geraden und verliert Kurven. Zu groß: er
+zappelt dem Rauschen hinterher. Eine zentrale Stellschraube der Track-Güte.
+`Q` muss zur **erwarteten Manövrierfähigkeit** passen: Für eine sanfte 1°/s-Kurve
+(≈3,7 m/s²) braucht es deutlich mehr als der für Geradeausflug gewählte Standard
+(Faustregel `q ≳ a²·Δt`). Für *starke* Manöver ist die saubere Antwort kein
+einzelnes `Q`, sondern **IMM** (mehrere Modelle parallel, Meilenstein M5).
+
+**Innovation**
+Die „Überraschung" eines neuen Plots: die Differenz zwischen dem, was gemessen
+wurde, und dem, was der Filter vorhergesagt hatte (`y = Messung − Vorhersage`).
+
+**Kalman-Gain (Vertrauens-Hebel)**
+Bestimmt, wie stark eine neue Messung die Schätzung korrigiert. Präzise Messung
+(kleines `R`) → großer Hebel, der Filter folgt der Messung; grobe Messung →
+kleiner Hebel, der Filter bleibt eher bei seiner Vorhersage.
+
+**Joseph-Form**
+Eine besonders stabile Rechenform für das Aktualisieren der Unsicherheit `P` im
+Kalman-Filter. Sie hält `P` auch bei Rundungsfehlern gültig (symmetrisch und
+positiv definit) — wichtig für verlässliche, prüfbare Numerik.
+
 **Bewegungsmodell**
 Die Annahme darüber, *wie* ein Ziel sich bewegt:
 - **CV** (*Constant Velocity*): gleichförmig geradeaus.
@@ -128,10 +186,26 @@ Die Annahme darüber, *wie* ein Ziel sich bewegt:
 Lässt mehrere Bewegungsmodelle parallel laufen und gewichtet sie laufend — gut
 für Flugzeuge, die mal geradeaus fliegen, mal Kurven fliegen.
 
+**Zuordnungsproblem (*assignment problem*)**
+Die Aufgabe, Zeilen (Tracks) und Spalten (Plots) einer Kostentabelle so paarweise
+zuzuordnen, dass die Gesamtkosten minimal werden — jede Zeile/Spalte höchstens
+einmal. Das mathematische Gerüst hinter GNN.
+
+**Ungarische Methode (Kuhn–Munkres)**
+Ein Standard-Algorithmus, der das Zuordnungsproblem **exakt und effizient**
+(`O(n³)`) löst — global optimal statt gierig.
+
 **Multi-Radar-Fusion**
 Mehrere Radare sehen dasselbe Ziel. Fusion bedeutet, ihre Meldungen zeitlich
 abzugleichen, systematische Messfehler (Bias) zu korrigieren und zu *einem*
 gemeinsamen Track zusammenzuführen.
+
+**Track-Kontinuität**
+Maß dafür, ob *ein* Ziel *eine* durchgehende Track-Spur behält. Zwei Teilzahlen:
+**Coverage** (Anteil der Scans, in denen das Ziel überhaupt einen bestätigten
+Track hatte — ideal nahe 1) und **ID-Wechsel** (wie oft die Track-ID für dasselbe
+Ziel springt — ideal 0; ein Sprung heißt: Spur abgerissen und neu geboren oder
+Identität vertauscht).
 
 ---
 
@@ -188,14 +262,49 @@ Die „Unsicherheit in mehreren Dimensionen" — beschreibt nicht nur, wie ungen
 einzelne Werte sind, sondern auch, wie ihre Fehler zusammenhängen (z. B.
 Position und Geschwindigkeit). Der Kalman-Filter rechnet ständig damit.
 
+**Fehlerellipse / 1σ-Halbachse**
+Die anschauliche Form der Positions-Unsicherheit: eine Ellipse (die „Zigarre"),
+deren Achsen aus der Kovarianz folgen. Die **lange Halbachse** (Wurzel des
+größten Eigenwerts der 2×2-Positions-Kovarianz) ist ein einzelnes, ehrliches Maß
+für „wie unsicher ist die Position gerade" — das Maß, das der Tracker als
+Positions-Unsicherheit ausgibt (CAT062 I062/500).
+
 **Mahalanobis-Distanz**
 Ein „fairer" Abstand, der die Unsicherheit berücksichtigt: Ein Plot, der in
 Richtung großer Unsicherheit abweicht, zählt als „näher" als einer, der in
 Richtung kleiner Unsicherheit gleich weit weg liegt. Grundlage des Gatings.
 
+**Jacobi-Matrix**
+Beschreibt, wie sich kleine Änderungen am *Eingang* einer Umrechnung auf den
+*Ausgang* auswirken — die „lokale Umrechnungs-Steigung" in mehreren Dimensionen.
+Damit lässt sich eine Unsicherheit von einem Koordinatensystem ins andere
+„mitnehmen": `R_neu = J · R_alt · Jᵀ`.
+
+**Converted Measurement (umgerechnete Messung)**
+Das Standardverfahren, eine polare Radarmessung (Entfernung, Winkel) in
+kartesische x/y zu übersetzen — *samt* ihrer Unsicherheit, die über die
+Jacobi-Matrix in die richtige (zigarrenförmige, gekippte) Ellipse umgerechnet
+wird. Wichtig: Die **Bodenentfernung** ist `ρ = Schrägentfernung · cos(Elevation)`,
+also hängt die *radiale* Unsicherheit nicht nur vom Entfernungs-, sondern auch
+vom **Höhenwinkel-Rauschen** ab (`σ_ρ² = (cos φ·σ_r)² + (r·sin φ·σ_φ)²`). Bei
+hoch fliegenden Zielen dominiert der zweite Term — lässt man ihn weg, wird das
+Gate viel zu eng und Tracks zerbrechen unnötig (gefunden & behoben in M3).
+
+**χ²-Verteilung (Chi-Quadrat) & Freiheitsgrade**
+Die Verteilung, der die quadrierte Mahalanobis-Distanz folgt, wenn die Modelle
+stimmen. Die *Freiheitsgrade* entsprechen der Zahl der Messdimensionen (bei uns
+2: Ost/Nord). Aus ihr leiten wir die Gate-Schwelle ab.
+
+**Gate-Wahrscheinlichkeit `P_G`**
+Die Chance, dass ein *echter* Plot innerhalb des Gates landet. Größer = weniger
+verpasste echte Plots, aber mehr hereingelassener Clutter. Bestimmt die
+χ²-Schwelle `γ` (für 2 Freiheitsgrade: `γ = −2·ln(1−P_G)`).
+
 **RMSE** (*Root Mean Square Error*, Wurzel des mittleren quadratischen Fehlers)
-Eine Kennzahl, wie weit die Schätzung im Schnitt von der Wahrheit abweicht.
-Damit messen wir später, *ob* der Tracker gut funktioniert.
+Eine Kennzahl, wie weit die Schätzung im Schnitt von der Wahrheit abweicht:
+Wurzel aus dem Mittel der **quadrierten** Einzelfehler. Das Quadrieren bestraft
+große Ausreißer stärker als ein simpler Mittelwert. Die Einheit ist die der
+Messgröße (bei uns Meter). Damit messen wir, *ob* der Tracker gut funktioniert.
 
 ---
 
@@ -213,6 +322,29 @@ mehreren Crates, jede mit einer klaren Aufgabe.
 Ein Verbund mehrerer Crates, die zusammen verwaltet und gebaut werden — wie ein
 Projektordner mit mehreren Teil-Modulen.
 
+**nalgebra**
+Eine etablierte, reine Rust-Bibliothek für lineare Algebra (Vektoren, Matrizen).
+Ab dem Tracker (M2) unsere erste externe Abhängigkeit — siehe ADR 0005.
+
+**Serialisierung / serde**
+*Serialisieren* = einen Programmzustand in eine speicher-/sendbare Form bringen
+(und *deserialisieren* = zurück). **serde** ist der Rust-Standard dafür,
+format-neutral (JSON, binär, …). Grundlage für Snapshot/Replay (ADR 0007).
+
+**Ports & Adapters (Hexagonale Architektur)**
+Ein Bauprinzip: Der fachliche *Kern* (hier der Tracker) kennt nur neutrale
+Schnittstellen („Ports") und bleibt unabhängig von der Außenwelt; konkrete
+Anbindungen (Formate wie CAT062, Transporte) stecken in austauschbaren
+*Adaptern*. Hält den Kern testbar, portabel und (für uns) zertifizierungs-
+freundlich entkoppelt.
+
+**System-Track**
+Der *fertige*, aufbereitete Track, wie ihn das Gesamtsystem nach außen gibt
+(Position, Geschwindigkeit, Identität, Qualität, Status). In ASTERIX die
+Kategorie **CAT062**. Abgrenzung: ein *Plot* ist eine Rohmeldung, ein
+*(internal) Track* die laufende Schätzung, der *System-Track* das ausgegebene
+Ergebnis.
+
 **Test (Unit-/Integrationstest)**
 Kleines Prüfprogramm, das automatisch nachweist, dass ein Stück Code das
 Richtige tut. Unsere Absicherung gegen Fehler.
@@ -229,6 +361,83 @@ verrauschten Szenarien reproduzierbar.
 **ADR** (*Architecture Decision Record*)
 Eine kurze Notiz, die eine wichtige Entscheidung samt Begründung festhält —
 damit man später nachvollziehen kann, *warum* etwas so gebaut wurde.
+
+**async / await & Runtime (Tokio)**
+*Synchron* heißt: ein Programm tut eine Sache nach der anderen. Ein Server muss
+aber vieles **gleichzeitig** bedienen (Verbindungen, Datenstrom, Health-Checks).
+*Asynchrones* Programmieren (`async`/`await`) erlaubt das, ohne für jede Aufgabe
+einen eigenen Betriebssystem-Thread zu binden; eine **Runtime** verteilt die
+Aufgaben auf wenige Threads. **Tokio** ist die verbreitetste Async-Runtime in
+Rust — unser Fundament für den M3-Server (ADR 0009).
+
+**axum**
+Ein Web-Framework auf Tokio-Basis (aus demselben Ökosystem). Es nimmt
+HTTP-/WebSocket-Verbindungen an und ordnet sie „Routen" zu; über Tower-Middleware
+lassen sich Health-/Readiness-Probes und sauberes Herunterfahren sauber bauen.
+Unsere Wahl für den M3-Server (ADR 0009).
+
+**WebSocket**
+Eine **dauerhafte, beidseitige** Verbindung zwischen Browser und Server. Anders
+als eine klassische HTTP-Anfrage (Frage → Antwort → zu) bleibt sie offen, sodass
+der Server laufend neue Daten „pushen" kann — ideal, um Track-Positionen Scan für
+Scan an die Karte zu schicken.
+
+**Frame (Ausgabe-Bild)**
+Bei uns: ein **Ausgabe-Paket pro Zeitschritt** — `{ Zeit, Sensor, Liste der
+System-Tracks }`, das über die WebSocket-Leitung geht. Nicht zu verwechseln mit
+*LocalFrame* (dem geodätischen Bezugssystem); hier meint „Frame" ein einzelnes
+Momentbild des Lagebildes.
+
+**Player (Frame-Strom-Erzeuger)**
+Die Komponente, die ein Szenario (M1) durch den Tracker (M2) schiebt und daraus
+den **Frame-Strom** macht — eine `Frame`-Liste, ein Eintrag pro Scan-Zeit. Der
+Player selbst ist **rein und deterministisch** (kein Netz, keine Wanduhr,
+ADR 0003): *wann* und *wie schnell* dieser Strom später nach außen geht (Server,
+Demo-Tempo), ist eine getrennte Hülle darum.
+
+---
+
+## Frontend & Karte (was der Browser zeigt)
+
+**Frontend**
+Der Teil, der im Browser läuft und das Lagebild **darstellt** (HTML/JavaScript +
+Karte). Er *rendert* nur, was der Tracker liefert, und trifft **keine**
+safety-relevante Entscheidung (ADR 0008).
+
+**Leaflet**
+Eine klassische, sehr einfache Karten-Bibliothek (zeichnet Kacheln und Symbole
+per Canvas/SVG/DOM). Großer Beispiel-Fundus, flacher Einstieg — für kleine bis
+mittlere Objektzahlen völlig ausreichend. (In Firefly *erwogen*, aber zugunsten
+von MapLibre verworfen — ADR 0009.)
+
+**MapLibre GL**
+Eine quelloffene, **GPU-gestützte** Karten-Bibliothek (zeichnet per WebGL). Sie
+skaliert gut zu vielen, häufig aktualisierten Objekten und lässt sich
+anbieter-neutral selbst hosten. Unsere Wahl fürs M3-Frontend, mit Blick auf den
+dichteren Verkehr in M4 (ADR 0009).
+
+**WebGL**
+Eine Browser-Schnittstelle, die Zeichnen direkt über die **Grafikkarte (GPU)**
+erlaubt — schneller bei vielen/animierten Objekten als klassisches Zeichnen über
+die Seitenstruktur (DOM).
+
+**Vektor-Kachel (*Vector Tile*)**
+Karten-Daten, die als **Geometrie** (Linien, Flächen, Punkte) statt als fertiges
+Bild ausgeliefert werden. Der Browser zeichnet sie selbst — scharf bei jedem
+Zoom, klein in der Übertragung, frei im Stil. Grundlage moderner Vektorkarten wie
+MapLibre.
+
+**GeoJSON**
+Ein verbreitetes JSON-Format für Geo-Objekte (Punkte, Linien, Flächen mit
+Eigenschaften). Das Frontend baut aus jedem `Frame` GeoJSON-Objekte für die
+Track-Symbole, Unsicherheits-Ringe und Geschwindigkeitsvektoren und gibt sie an
+MapLibre zum Zeichnen.
+
+**demotiles (MapLibre)**
+Ein von MapLibre frei gehosteter, einfacher Karten-Stil
+(`demotiles.maplibre.org`), den wir als Hintergrund nutzen. Bequem für die
+Lern-/Demo-Phase; bedeutet eine *externe* Anfrage zur Laufzeit (ADR 0009). Ein
+selbst-gehosteter Stil für volle Souveränität bleibt ein späterer Schritt.
 
 ---
 
@@ -293,6 +502,18 @@ Konfiguration über Umgebungsvariablen statt fest im Code).
 **Health-/Readiness-Probe**
 Kleine Selbstauskünfte eines Dienstes: „Lebe ich noch?" (health) und „Bin ich
 bereit, Last anzunehmen?" (readiness). Kubernetes nutzt sie zum Steuern.
+
+**Geordnetes Herunterfahren (Graceful Shutdown)**
+Beim Stopp-Signal (z. B. SIGTERM, das Kubernetes vor dem Beenden schickt) fährt
+der Dienst *kontrolliert* herunter: keine neuen Verbindungen mehr annehmen,
+laufende sauber beenden, dann erst aussteigen — statt einfach „abgewürgt" zu
+werden. Wichtig, damit beim Skalieren/Neustart in der Cloud nichts hart abreißt.
+
+**Tempo-Faktor / Playback-Geschwindigkeit**
+Beim Abspielen eines aufgezeichneten/simulierten Datenstroms: das Verhältnis von
+**Datenzeit zu Wanduhr** (z. B. „2× so schnell"). Liegt bewusst am *Ausgabe-Rand*
+(Server), nicht im Tracker — den Strom schneller, langsamer oder pausiert
+*zuzustellen* ändert keine einzige Track-Entscheidung (ADR 0003, NFR-CLOUD-004).
 
 **Observability (Beobachtbarkeit)**
 Die Fähigkeit, von außen zu verstehen, was ein laufendes System tut — über

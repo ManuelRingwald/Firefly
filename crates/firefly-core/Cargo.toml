@@ -9,3 +9,4 @@ description = "Shared domain types (plots, sensors, time, identities) for the Fi
 
 [dependencies]
 firefly-geo = { workspace = true }
+serde = { workspace = true }

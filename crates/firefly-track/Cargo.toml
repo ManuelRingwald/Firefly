@@ -1,0 +1,18 @@
+[package]
+name = "firefly-track"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The Firefly tracker: turning radar plots into clean tracks (gating, association, Kalman filtering, lifecycle)."
+
+[dependencies]
+firefly-geo = { workspace = true }
+firefly-core = { workspace = true }
+nalgebra = { workspace = true, features = ["serde-serialize"] }
+serde = { workspace = true }
+
+[dev-dependencies]
+firefly-sim = { workspace = true }
+serde_json = { workspace = true }

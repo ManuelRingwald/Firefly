@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 /// A point in time, expressed as seconds since an arbitrary but fixed epoch.
 ///
 /// For simulation this is simply seconds since scenario start. It maps cleanly
 /// onto ASTERIX "time of day" (seconds since UTC midnight) later on. We keep it
 /// as `f64` because sub-scan timing (fractions of a second) matters for
 /// prediction, and the dynamic range is tiny compared to `f64` precision.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Timestamp(pub f64);
 
 impl Timestamp {
