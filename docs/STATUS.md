@@ -6,10 +6,10 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/continuation-o0xmqz`
-- **Letzter Commit:** Häppchen 3.X.1 — neue Crate `firefly-asterix`: CAT062-
-  Framing (`[CAT][LEN][Record]`) + FSPEC/UAP-Mechanik + die drei
-  geometrie-freien Felder I062/010 (SAC/SIC), I062/070 (Zeit, LSB 1/128 s),
-  I062/040 (Track-Nummer). Referenz-Hex-Dump-Test, 12 Tests grün (FR-IO-003).
+- **Letzter Commit:** Häppchen 3.X.2 — `firefly-asterix`: Position I062/105
+  (lat/lon, LSB 180/2²⁵°, signed i32) + Geschwindigkeit I062/185 (Vx/Vy,
+  LSB 0,25 m/s, signed i16) mit Zweierkomplement; Referenz-Dump erweitert,
+  14 Tests grün (FR-IO-003).
 - **PR:** keiner offen.
 
 ---
@@ -117,8 +117,8 @@ Meilenstein-Doku: `docs/milestones/M3-live-picture.md`.
 neben JSON, ADR 0006), in Unter-Häppchen zerlegt:
 - [x] **3.X.1** Crate `firefly-asterix`, Framing (CAT/LEN) + FSPEC/UAP-Mechanik
   + I062/010, /070, /040 (geometrie-frei). *S3 · Sonnet · Effort mittel*
-- [ ] **3.X.2** I062/105 (Position WGS84) + I062/185 (Geschwindigkeit kart.) mit
-  Skalierungsfaktoren. *S4 · Opus 4.8 · Effort hoch*
+- [x] **3.X.2** I062/105 (Position WGS84) + I062/185 (Geschwindigkeit kart.) mit
+  Skalierungsfaktoren + Zweierkomplement. *S4 · Opus 4.8 · Effort hoch*
 - [ ] **3.X.3** I062/080 (Track-Status, variable Länge mit FX), I062/290, /500
   (Alter/Unsicherheit). *S4 · Opus 4.8 · Effort hoch*
 - [ ] **3.X.4** Adapter-Abschluss (`Frame`/Scan → Datenblock), Meilenstein-Doku.
