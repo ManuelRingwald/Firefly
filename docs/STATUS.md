@@ -6,9 +6,10 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M3 Häppchen 3.4 — MapLibre-Frontend: `static/index.html`
-  (ins Binary eingebettet) zeigt die Tracks live auf einer 2D-Karte; Safety-Status
-  sichtbar (Farbe, Unsicherheits-Ring, Geschwindigkeitsvektor) (FR-UI-001).
+- **Letzter Commit:** M3 Bugfix — Track-Identitäts-Stabilität: Höhenwinkel-Rauschen
+  fließt jetzt in die radiale Mess-Kovarianz ein (FR-TRK-002), Demo-Prozessrauschen
+  an das Kurven-Manöver angepasst; je Flugzeug genau eine stabile Track-ID
+  (Regressionstests, FR-TRK-006).
 - **PR:** #1 (offen).
 
 ---
@@ -58,8 +59,17 @@
   `/ws`-Strom konsumiert und je Frame die Tracks zeichnet. Safety-Status sichtbar
   (ADR 0008): Farbe nach confirmed/tentativ/coasting, Unsicherheits-Ring
   (gestrichelt beim Coasting), Geschwindigkeitsvektor (FR-UI-001).
-- Qualität: **89 Tests + 1 Doctest grün** (13 in `firefly-server`, inkl.
-  WebSocket-Integrationstest), Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+  **Bugfix (nach Sichtprüfung im Browser):** Die Track-IDs zählten hoch (statt
+  zwei stabile Tracks gab es bis zu #21). Zwei Ursachen — beide behoben:
+  *(1)* Die umgerechnete Mess-Kovarianz ignorierte das **Höhenwinkel-Rauschen**;
+  bei 10–11 km Höhe streut das die Bodenentfernung um ~175 m, das Gate war viel
+  zu eng → Plot fiel raus → Dublette. Jetzt fließt der Term
+  `σ_ρ² = (cos φ·σ_r)² + (r·sin φ·σ_φ)²` ein (FR-TRK-002, `from_polar_deg`).
+  *(2)* Das **Prozessrauschen** des CV-Filters war auf Geradeausflug getunt und
+  zu klein für die 1°/s-Kurve → das kurvende Ziel zerbrach; Demo nutzt jetzt
+  `accel_psd ≈ 60` (passt zum Manöver). Ergebnis: je Flugzeug **eine** stabile
+  ID (Regressionstests `identity::*`, `scene::demo_scene_keeps_one_identity_*`).
+- Qualität: **93 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -164,6 +174,15 @@ sind und die Anforderung im Register rückverfolgbar steht.
   zerstörend (ADR 0008). Die Entscheidung selbst liegt schon im Tracker.
 - **Vorführbarkeit (NFR-OPS-001):** Ein-Befehl-Demo ohne Programmierkenntnisse
   für Präsentationen — Umsetzung mit dem Frontend in M3.
+- **GNN-Assoziationskosten (latent, später):** Die Ungarische Methode nutzt heute
+  reine `d²`-Kosten. Statistisch korrekt wäre die negative Log-Likelihood
+  `d² + ln(det S)`, die *unsichere* Tracks bestraft. Beim Identitäts-Bugfix
+  geprüft: hier **nicht** ursächlich (jede Dublette entstand aus einem Plot
+  *außerhalb* des Gates, nicht aus Fehlzuordnung). Lohnt erst bei dichtem Verkehr
+  / überlappenden Gates (M5/JPDA). Kein eigener Commit jetzt.
+- **Manöver-Handling (M5):** Ein einzelnes `Q` deckt nur einen Manöver-Bereich ab.
+  Für starke Manöver ist **IMM** (mehrere Modelle parallel) die saubere Antwort —
+  geplant für M5. Bis dahin: `Q` je Szenario passend wählen.
 
 ## 6. So steige ich wieder ein (Kurzbefehle)
 

@@ -14,10 +14,21 @@
 //! measurements wrongly.
 //!
 //! We obtain `R` with the classic **converted-measurement** approach: the
-//! polar errors form a simple diagonal covariance `R_polar = diag(σ_ρ², σ_θ²)`,
-//! which we transport through the polar→Cartesian map using that map's Jacobian
-//! `J`, giving `R = J · R_polar · Jᵀ`. (A small long-range bias correction —
-//! the "unbiased" variant — is a documented future refinement.)
+//! polar errors form a diagonal covariance `R_polar = diag(σ_ρ², σ_θ²)`, which
+//! we transport through the polar→Cartesian map using that map's Jacobian `J`,
+//! giving `R = J · R_polar · Jᵀ`. (A small long-range bias correction — the
+//! "unbiased" variant — is a documented future refinement.)
+//!
+//! Elevation matters even for a 2-D tracker. The ground range is
+//! `ρ = r · cos φ` (slant range `r`, elevation `φ`), so the *radial* (ground)
+//! uncertainty has **two** sources — the slant-range noise *and* the elevation
+//! noise — both projected onto the ground plane:
+//! `σ_ρ² = (cos φ · σ_r)² + (r · sin φ · σ_φ)²`. For a target well above the
+//! horizon the second term dominates (`r·sin φ` is a long lever arm), so
+//! ignoring it badly under-estimates the radial uncertainty and makes the
+//! validation gate far too tight. Because the elevation noise enters east/north
+//! *only* through `ρ`, folding it into `σ_ρ²` and transporting `(ρ, θ)` through
+//! `J` is exactly equivalent to the full 3→2 transport — no extra approximation.
 //!
 //! Frame note: the measurement lives in the **sensor's own** local east/north
 //! frame. That is exactly right for the single-radar tracker of M2; a common
@@ -35,25 +46,54 @@ use serde::{Deserialize, Serialize};
 /// happens when the believed model and reality disagree.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SensorErrorModel {
-    /// Assumed ground-range noise (1σ), metres.
+    /// Assumed slant-range noise (1σ), metres.
     pub sigma_range: f64,
     /// Assumed azimuth noise (1σ), radians.
     pub sigma_azimuth: f64,
+    /// Assumed elevation noise (1σ), radians. Feeds the slant→ground projection
+    /// and therefore the *radial* part of the converted covariance; set it to 0
+    /// when the sensor reports no (or noise-free) elevation.
+    pub sigma_elevation: f64,
 }
 
 impl SensorErrorModel {
-    pub fn new(sigma_range: f64, sigma_azimuth: f64) -> Self {
+    /// Full polar error model, all sigmas in SI (metres / radians).
+    pub fn new(sigma_range: f64, sigma_azimuth: f64, sigma_elevation: f64) -> Self {
         Self {
             sigma_range,
             sigma_azimuth,
+            sigma_elevation,
         }
     }
 
-    /// Convenience constructor taking the azimuth sigma in degrees.
+    /// Convenience constructor taking the azimuth sigma in degrees and assuming
+    /// **no elevation noise** (`σ_φ = 0`). Suitable when the sensor delivers a
+    /// clean elevation (or none, e.g. a target near the horizon); for a noisy
+    /// elevation that feeds the ground projection use [`Self::from_polar_deg`].
     pub fn from_range_and_azimuth_deg(sigma_range: f64, sigma_azimuth_deg: f64) -> Self {
         Self {
             sigma_range,
             sigma_azimuth: sigma_azimuth_deg.to_radians(),
+            sigma_elevation: 0.0,
+        }
+    }
+
+    /// Full polar error model with the angle sigmas in degrees: slant-range
+    /// (metres), azimuth (degrees), elevation (degrees).
+    ///
+    /// Use this when the radar reports a *noisy* elevation that feeds the
+    /// slant→ground projection (e.g. en-route targets well above the horizon),
+    /// so the converted covariance reflects the ground-range spread the
+    /// elevation noise actually causes.
+    pub fn from_polar_deg(
+        sigma_range: f64,
+        sigma_azimuth_deg: f64,
+        sigma_elevation_deg: f64,
+    ) -> Self {
+        Self {
+            sigma_range,
+            sigma_azimuth: sigma_azimuth_deg.to_radians(),
+            sigma_elevation: sigma_elevation_deg.to_radians(),
         }
     }
 }
@@ -92,8 +132,9 @@ impl CartesianMeasurement {
 /// REQ: FR-TRK-002
 pub fn convert_plot(measurement: &Polar, model: &SensorErrorModel) -> CartesianMeasurement {
     let (sin_az, cos_az) = measurement.azimuth.sin_cos();
+    let (sin_el, cos_el) = measurement.elevation.sin_cos();
     // Project the slant range onto the ground plane for 2-D horizontal tracking.
-    let rho = measurement.range * measurement.elevation.cos();
+    let rho = measurement.range * cos_el;
 
     // Position: east = ρ sinθ, north = ρ cosθ.
     let z = Vector2::new(rho * sin_az, rho * cos_az);
@@ -104,9 +145,15 @@ pub fn convert_plot(measurement: &Polar, model: &SensorErrorModel) -> CartesianM
     // Matrix2::new is row-major: (m11, m12, m21, m22).
     let j = Matrix2::new(sin_az, rho * cos_az, cos_az, -rho * sin_az);
 
+    // Radial (ground-range) variance, with both contributing noise sources
+    // projected onto the ground plane (the elevation term via ρ = r cos φ):
+    //   σ_ρ² = (cos φ · σ_r)² + (r · sin φ · σ_φ)².
+    let var_ground_range = (cos_el * model.sigma_range).powi(2)
+        + (measurement.range * sin_el * model.sigma_elevation).powi(2);
+
     // Polar errors are independent: diag(σ_ρ², σ_θ²).
     let r_polar = Matrix2::new(
-        model.sigma_range * model.sigma_range,
+        var_ground_range,
         0.0,
         0.0,
         model.sigma_azimuth * model.sigma_azimuth,
@@ -175,6 +222,37 @@ mod tests {
         assert!(var_east > 10.0 * var_north);
         // Axis-aligned for a due-north target ⇒ no correlation.
         assert!(cm.r[(0, 1)].abs() < 1e-6);
+    }
+
+    /// Elevation noise inflates the *radial* (ground-range) variance for a
+    /// target above the horizon, via ρ = r·cos φ. For a due-north target the
+    /// radial direction is north, so the north-variance must grow by exactly the
+    /// elevation term `(r·sin φ·σ_φ)²` on top of the projected range term.
+    /// REQ: FR-TRK-002
+    #[test]
+    fn elevation_noise_inflates_radial_variance() {
+        let sigma_range = 50.0;
+        let sigma_elev_deg = 1.0;
+        let model = SensorErrorModel::from_polar_deg(sigma_range, 0.08, sigma_elev_deg);
+
+        let r = 73_000.0;
+        let elev = 8.0_f64.to_radians();
+        let cm = convert_plot(&Polar::new(r, 0.0, elev), &model); // due north
+        let var_north = cm.r[(1, 1)]; // radial direction for az = 0
+
+        let sigma_elev = sigma_elev_deg.to_radians();
+        let expected = (elev.cos() * sigma_range).powi(2) + (r * elev.sin() * sigma_elev).powi(2);
+        assert!((var_north - expected).abs() < 1e-6);
+
+        // The elevation term dominates here: ~175 m vs ~49 m of slant projection,
+        // so the modelled radial sigma is far larger than σ_range alone.
+        assert!(var_north.sqrt() > 3.0 * sigma_range);
+
+        // With no elevation noise the radial variance collapses to the projected
+        // slant-range term (cos φ · σ_r)² — strictly less than σ_range².
+        let no_elev = SensorErrorModel::from_range_and_azimuth_deg(sigma_range, 0.08);
+        let var_north_clean = convert_plot(&Polar::new(r, 0.0, elev), &no_elev).r[(1, 1)];
+        assert!((var_north_clean - (elev.cos() * sigma_range).powi(2)).abs() < 1e-6);
     }
 
     /// Cross-range positional uncertainty grows with range (∝ range²).

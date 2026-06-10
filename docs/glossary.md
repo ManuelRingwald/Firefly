@@ -157,6 +157,10 @@ Der Regler dafür, wie sehr der Filter dem Bewegungsmodell misstraut. Echte
 Flugzeuge fliegen nicht perfekt gleichförmig — `Q` lässt Abweichungen zu. Zu
 klein: der Filter „klebt" stur an der Geraden und verliert Kurven. Zu groß: er
 zappelt dem Rauschen hinterher. Eine zentrale Stellschraube der Track-Güte.
+`Q` muss zur **erwarteten Manövrierfähigkeit** passen: Für eine sanfte 1°/s-Kurve
+(≈3,7 m/s²) braucht es deutlich mehr als der für Geradeausflug gewählte Standard
+(Faustregel `q ≳ a²·Δt`). Für *starke* Manöver ist die saubere Antwort kein
+einzelnes `Q`, sondern **IMM** (mehrere Modelle parallel, Meilenstein M5).
 
 **Innovation**
 Die „Überraschung" eines neuen Plots: die Differenz zwischen dem, was gemessen
@@ -280,7 +284,11 @@ Damit lässt sich eine Unsicherheit von einem Koordinatensystem ins andere
 Das Standardverfahren, eine polare Radarmessung (Entfernung, Winkel) in
 kartesische x/y zu übersetzen — *samt* ihrer Unsicherheit, die über die
 Jacobi-Matrix in die richtige (zigarrenförmige, gekippte) Ellipse umgerechnet
-wird.
+wird. Wichtig: Die **Bodenentfernung** ist `ρ = Schrägentfernung · cos(Elevation)`,
+also hängt die *radiale* Unsicherheit nicht nur vom Entfernungs-, sondern auch
+vom **Höhenwinkel-Rauschen** ab (`σ_ρ² = (cos φ·σ_r)² + (r·sin φ·σ_φ)²`). Bei
+hoch fliegenden Zielen dominiert der zweite Term — lässt man ihn weg, wird das
+Gate viel zu eng und Tracks zerbrechen unnötig (gefunden & behoben in M3).
 
 **χ²-Verteilung (Chi-Quadrat) & Freiheitsgrade**
 Die Verteilung, der die quadrierte Mahalanobis-Distanz folgt, wenn die Modelle
