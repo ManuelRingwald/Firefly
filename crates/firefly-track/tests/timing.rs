@@ -13,11 +13,16 @@
 //! REQ: NFR-CLOUD-004
 
 use firefly_core::{Plot, SensorId, Timestamp};
-use firefly_geo::Polar;
+use firefly_geo::{LocalFrame, Polar, Wgs84};
 use firefly_track::{SensorErrorModel, Tracker, TrackerConfig};
 
 fn config() -> TrackerConfig {
-    TrackerConfig::new(SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08))
+    let frame = LocalFrame::new(Wgs84::from_degrees(48.0, 11.0, 0.0));
+    TrackerConfig::single_sensor(
+        SensorId(1),
+        frame,
+        SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08),
+    )
 }
 
 /// A primary plot at a given polar position for a given time.

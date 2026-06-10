@@ -14,7 +14,7 @@
 //! edge concern (the core only derives the serde traits and stays neutral).
 
 use firefly_core::{Plot, Sensor, SensorId, TargetId, Timestamp};
-use firefly_geo::{Enu, Wgs84};
+use firefly_geo::{Enu, LocalFrame, Wgs84};
 use firefly_sim::{Leg, Radar, RadarParams, Scenario, State, Target};
 use firefly_track::{SensorErrorModel, Tracker, TrackerConfig};
 
@@ -68,7 +68,10 @@ fn demo_scenario() -> Scenario {
 }
 
 fn new_tracker() -> Tracker {
-    Tracker::new(TrackerConfig::new(
+    let frame = LocalFrame::new(Wgs84::from_degrees(48.0, 11.0, 0.0));
+    Tracker::new(TrackerConfig::single_sensor(
+        SensorId(1),
+        frame,
         SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08),
     ))
 }

@@ -24,7 +24,7 @@
 use std::collections::BTreeSet;
 
 use firefly_core::{Sensor, SensorId, TargetId};
-use firefly_geo::{Enu, Wgs84};
+use firefly_geo::{Enu, LocalFrame, Wgs84};
 use firefly_sim::{Leg, Radar, RadarParams, Scenario, State, Target};
 use firefly_track::{ProcessNoise, SensorErrorModel, Tracker, TrackerConfig};
 
@@ -64,7 +64,12 @@ fn turning() -> Target {
 /// turn — the same rationale the demo scene uses (elevation-aware error model +
 /// manoeuvre-matched process noise).
 fn tracker_config() -> TrackerConfig {
-    let mut cfg = TrackerConfig::new(SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0));
+    let frame = LocalFrame::new(Wgs84::from_degrees(48.0, 11.0, 0.0));
+    let mut cfg = TrackerConfig::single_sensor(
+        SensorId(1),
+        frame,
+        SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0),
+    );
     cfg.process_noise = ProcessNoise::new(60.0);
     cfg
 }

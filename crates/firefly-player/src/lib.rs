@@ -21,14 +21,12 @@
 //! wall-clock dependency anywhere in this crate.
 
 use firefly_core::{Plot, SensorId};
-use firefly_geo::LocalFrame;
 use firefly_io::Frame;
 use firefly_sim::Scenario;
 use firefly_track::{Tracker, TrackerConfig};
 
 /// Runs a [`Scenario`] through a [`Tracker`] and produces the [`Frame`] stream.
 pub struct Player {
-    frame: LocalFrame,
     sensor: SensorId,
     plots: Vec<Plot>,
     tracker: Tracker,
@@ -37,10 +35,11 @@ pub struct Player {
 impl Player {
     /// Set up a player for `scenario`, simulating its plot stream up front.
     ///
-    /// The reported [`SensorId`] is that of the scenario's first radar — M3
-    /// targets a single radar (NFR-INT-002 already documents the multi-sensor
-    /// generalisation as M4 work). A scenario without a radar yields an empty
-    /// frame stream.
+    /// The tracker's `config` carries the common tracking frame and the
+    /// per-sensor geometry (ADR 0010); the player just feeds it the simulated
+    /// plots. The reported [`SensorId`] is that of the scenario's first radar —
+    /// a placeholder until multi-sensor provenance lands (Häppchen 4.A.4). A
+    /// scenario without a radar yields an empty frame stream.
     pub fn new(scenario: &Scenario, config: TrackerConfig) -> Self {
         let sensor = scenario
             .radars()
@@ -49,7 +48,6 @@ impl Player {
             .unwrap_or(SensorId(0));
 
         Self {
-            frame: *scenario.frame(),
             sensor,
             plots: firefly_sim::run(scenario),
             tracker: Tracker::new(config),
@@ -73,7 +71,7 @@ impl Player {
                 i += 1;
             }
             self.tracker.process_scan(time, &self.plots[start..i]);
-            let tracks = self.tracker.system_tracks(&self.frame);
+            let tracks = self.tracker.system_tracks();
             out.push(Frame::new(time, self.sensor, &tracks));
         }
         out
@@ -84,12 +82,17 @@ impl Player {
 mod tests {
     use super::*;
     use firefly_core::{Sensor, SensorId as Sid, TargetId};
-    use firefly_geo::{Enu, Wgs84};
+    use firefly_geo::{Enu, LocalFrame, Wgs84};
     use firefly_sim::{Leg, Radar, RadarParams, State, Target};
     use firefly_track::SensorErrorModel;
 
     fn config() -> TrackerConfig {
-        TrackerConfig::new(SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08))
+        let frame = LocalFrame::new(Wgs84::from_degrees(48.0, 11.0, 0.0));
+        TrackerConfig::single_sensor(
+            Sid(1),
+            frame,
+            SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08),
+        )
     }
 
     fn northbound_target() -> Target {

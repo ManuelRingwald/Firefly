@@ -48,7 +48,7 @@ impl Enu {
 /// A local East-North-Up tangent-plane frame anchored at a geodetic reference
 /// point. Holds the precomputed rotation between ECEF and ENU so that repeated
 /// conversions (one per radar plot) are cheap.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LocalFrame {
     origin_geodetic: Wgs84,
     origin_ecef: Ecef,

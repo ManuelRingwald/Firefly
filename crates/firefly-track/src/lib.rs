@@ -28,4 +28,4 @@ pub use kalman::{LinearKalman, ProcessNoise};
 pub use measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};
 pub use metrics::{Rmse, TrackContinuity};
 pub use track::{Track, TrackStatus};
-pub use tracker::{Tracker, TrackerConfig};
+pub use tracker::{SensorModel, Tracker, TrackerConfig};

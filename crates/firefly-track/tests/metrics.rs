@@ -9,7 +9,7 @@
 //! REQ: FR-TRK-007
 
 use firefly_core::{Sensor, SensorId, TargetId, Timestamp};
-use firefly_geo::{Enu, Wgs84};
+use firefly_geo::{Enu, LocalFrame, Wgs84};
 use firefly_sim::{Leg, Radar, RadarParams, Scenario, State, Target};
 use firefly_track::{Rmse, SensorErrorModel, TrackContinuity, Tracker, TrackerConfig};
 
@@ -62,7 +62,9 @@ fn single_target_quality_meets_thresholds() {
         .add_target(target);
     let plots = firefly_sim::run(&scenario);
 
-    let mut tracker = Tracker::new(TrackerConfig::new(
+    let mut tracker = Tracker::new(TrackerConfig::single_sensor(
+        SensorId(1),
+        LocalFrame::new(origin),
         SensorErrorModel::from_range_and_azimuth_deg(sigma_range, sigma_azimuth_deg),
     ));
 

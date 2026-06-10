@@ -5,7 +5,7 @@
 //! timing robustness — lands in Häppchen 3.5.
 
 use firefly_core::{Sensor, SensorId, TargetId};
-use firefly_geo::{Enu, Wgs84};
+use firefly_geo::{Enu, LocalFrame, Wgs84};
 use firefly_io::Frame;
 use firefly_player::Player;
 use firefly_sim::{Leg, Radar, RadarParams, Scenario, State, Target};
@@ -32,7 +32,11 @@ pub fn demo_frames() -> Vec<Frame> {
     //    for straight flight (the default) cannot follow it and the track
     //    fractures. We size `accel_psd` to that manoeuvre (`q ≳ a²·Δt ≈ 54`).
     //    Strong manoeuvres ultimately want IMM (M5); this suffices for the demo.
-    let mut tracker = TrackerConfig::new(SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0));
+    let mut tracker = TrackerConfig::single_sensor(
+        SensorId(1),
+        LocalFrame::new(origin),
+        SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0),
+    );
     tracker.process_noise = ProcessNoise::new(60.0);
     Player::new(&scenario, tracker).frames()
 }

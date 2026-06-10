@@ -30,7 +30,9 @@ fn clean_radar(origin: Wgs84) -> Radar {
 fn run_tracker(scenario: &Scenario) -> Tracker {
     let plots = firefly_sim::run(scenario);
     let model = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
-    let mut tracker = Tracker::new(TrackerConfig::new(model));
+    let radar = &scenario.radars()[0];
+    let cfg = TrackerConfig::single_sensor(radar.sensor.id, *radar.sensor.frame(), model);
+    let mut tracker = Tracker::new(cfg);
 
     let mut i = 0;
     while i < plots.len() {
