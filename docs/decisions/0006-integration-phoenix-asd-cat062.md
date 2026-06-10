@@ -54,6 +54,34 @@ erwartet, über den dort genutzten Transport.
 - CAT062-Kodierung + Transport-Adapter werden ein eigener, klar abgegrenzter
   Baustein (M3/M4), nicht Teil des Tracker-Kerns.
 
+## Nachtrag (Häppchen B): Transport & Koordinatenbezug entschieden
+
+Die in Punkt 3 offen gelassenen Fragen sind geklärt:
+
+- **Transport: UDP-Multicast.** Der CAT062-Adapter sendet die kodierten
+  Bytes als UDP-Pakete an eine Multicast-Adresse; ASD, EFS und ggf. weitere
+  Konsumenten (Recorder) hören unabhängig voneinander mit. Entspricht dem in
+  der Flugsicherung üblichen ASTERIX-Verteilweg (ED-109A-Umfeld) und passt zur
+  Entkopplungs-Anforderung aus ADR 0003 — der Sender kennt seine Empfänger
+  nicht.
+- **Koordinatenbezug: System-Stereografisch.** Das ASD erwartet Positionen in
+  CAT062 als **I062/100** (X/Y relativ zu einem System-Referenzpunkt), nicht
+  als I062/105 (WGS84).
+
+### Konsequenzen für den CAT062-Adapter (`firefly-asterix`)
+
+- Der Tracker-Kern bleibt unverändert **WGS84-neutral** (`SystemTrack`,
+  Punkt 2 dieses ADR) — die Projektion ist reine Adapter-Aufgabe.
+- `firefly-asterix` braucht eine **Projektion WGS84 → System-Stereografisch**
+  (Referenzpunkt + Projektionsparameter als Konfiguration) und einen
+  **I062/100-Encoder** zusätzlich bzw. anstelle von I062/105.
+- Ein **UDP-Multicast-Versand-Adapter** wird ein eigener, kleiner Baustein
+  (vermutlich in `firefly-server` oder einer neuen Crate) — nicht Teil des
+  Tracker-Kerns.
+- Beide Punkte sind **noch nicht umgesetzt**; sie sind jetzt als Zielbild
+  festgehalten und werden in eigenen Häppchen geplant (vermutlich im Umfeld
+  von M4, da Multi-Sensor-Provenienz und ASD-Andockung zusammenhängen).
+
 ## Nachtrag (M3.X.4): Adapter bleiben unabhängig voneinander
 
 Bei der Fertigstellung des CAT062-Adapters (`firefly-asterix`, Häppchen 3.X)

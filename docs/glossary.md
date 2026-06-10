@@ -278,6 +278,17 @@ Tracking. Wie ein lokaler Stadtplan statt eines Globus.
 Die Lehre vom Vermessen der Erde — hier konkret das korrekte Umrechnen zwischen
 WGS84, ECEF, ENU und polaren Radarkoordinaten.
 
+**System-Stereografische Projektion**
+Eine *flache Karte* der Erdoberfläche um einen festen System-Referenzpunkt
+herum (stereografische Projektion — wie eine Schattenwurf-Abbildung der Kugel
+auf eine Ebene durch diesen Punkt). ATC-Systeme rechnen intern oft auf so einer
+Ebene (X/Y in Metern relativ zum Referenzpunkt), weil sich Geometrie
+(Abstände, Winkel, Bildschirm-Pixel) darauf einfacher rechnen lässt als auf der
+gekrümmten WGS84-Kugel. Ähnlich wie ENU, aber mit *einem* Referenzpunkt für ein
+ganzes System (z. B. einen Flughafen/FIR), nicht pro Sensor. CAT062 kann
+Positionen wahlweise in WGS84 (I062/105) oder in dieser System-Ebene (I062/100)
+übertragen — siehe ADR 0006.
+
 ---
 
 ## Mathematik & Statistik (das Handwerkszeug)
@@ -527,6 +538,15 @@ unabhängig von Server-Launen.
 Ein „Förderband" für Nachrichten zwischen Bausteinen (z. B. Sensoren →
 Tracker → Anzeige). Entkoppelt die Teile, erlaubt Skalierung, Puffern und
 Wiederabspielen.
+
+**UDP-Multicast**
+Ein Netzwerk-Versandverfahren: ein Sender schickt Pakete an eine
+*Multicast-Adresse* (eine Art „Funkkanal"), und beliebig viele Empfänger
+(ASD, EFS, Recorder, ...) können „mithören", ohne dass der Sender sie kennen
+oder einzeln adressieren muss — wie ein Radiosender, der einfach sendet, egal
+wie viele Radios gerade eingeschaltet sind. Basiert auf **UDP** (schnell,
+verbindungslos, ohne Zustellgarantie) — Standard-Transport für ASTERIX-
+Radardaten in der Flugsicherung (ED-109A-Umfeld).
 
 **Back-Pressure (Lastpuffer/Gegendruck)**
 Mechanismus, der einen überlasteten Empfänger schützt, indem der Sender

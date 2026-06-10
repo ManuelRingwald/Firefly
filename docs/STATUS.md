@@ -5,12 +5,13 @@
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
 - **Zuletzt aktualisiert:** 2026-06-10
-- **Branch:** `claude/continuation-o0xmqz`
-- **Letzter Commit:** Häppchen 3.X.4 — Adapter-Abschluss: Entscheidung
-  dokumentiert, dass `firefly-asterix` **keine** `Frame → CAT062`-
-  Komfortfunktion bekommt (ADR 0006-Nachtrag, beide Adapter unabhängig auf
-  `SystemTrack`); Meilenstein-Doku `docs/milestones/M3X-cat062-encoder.md`.
-  Damit ist **Häppchen 3.X (CAT062-Encoder-Adapter) abgeschlossen**.
+- **Branch:** `claude/next-steps-ft3t3n`
+- **Letzter Commit:** Häppchen B (ADR 0006-Nachtrag) — offene
+  ASD-Integrationsfragen geklärt: Transport = **UDP-Multicast**,
+  Koordinatenbezug = **System-Stereografisch** (CAT062 I062/100). Noch nicht
+  umgesetzt, aber als Zielbild für die Folge-Häppchen (Projektion +
+  I062/100-Encoder, Multicast-Versand) festgehalten. Glossar ergänzt um
+  *UDP-Multicast* und *System-Stereografische Projektion*.
 - **PR:** keiner offen.
 
 ---
@@ -127,10 +128,15 @@ ASTERIX-Ausgabe neben JSON, ADR 0006):
   (ADR 0006-Nachtrag), Meilenstein-Doku `M3X-cat062-encoder.md`.
   *S3 · Sonnet · Effort mittel*
 
+✅ **Häppchen B (ADR 0006-Nachtrag) erledigt:** Transport- und
+Koordinatenfrage geklärt — **UDP-Multicast** + **System-Stereografisch**
+(CAT062 I062/100). Noch nicht umgesetzt; Folge-Häppchen (Projektion +
+I062/100-Encoder, Multicast-Versand) sind als Zielbild in ADR 0006
+festgehalten und werden voraussichtlich im Umfeld von M4 eingeplant.
+
 ➡️ **Als Nächstes:** **M4** (SSR/ADS-B-Identitätskorrelation +
-Multi-Radar-Fusion) — oder Transport-/Koordinaten-Fragen aus ADR 0006
-(UDP-Multicast vs. Bus, WGS-84 vs. System-Stereografisch) klären, je nach
-Wunsch des Projektverantwortlichen.
+Multi-Radar-Fusion) starten — Architektur-Diskussion und ADR als erstes
+Häppchen, je nach Wunsch des Projektverantwortlichen.
 
 Offen/optional: Sichtprüfung des Frontends (inkl. „Verzug"-Knopf) im Browser
 durch den Projektverantwortlichen.
@@ -185,11 +191,16 @@ sind und die Anforderung im Register rückverfolgbar steht.
   Referenz-Dump (`0x40, 0x08` bzw. `0x80, 0x00, 0xC8, 0x00, 0xC8`) stimmen
   exakt. Offen bleibt weiterhin: Das Mapping „update_age → PSR-Alter" ist eine
   Single-Sensor-Vereinfachung (Mehr-Sensor-Provenienz erst in M4).
-- **ASD-Integration (ADR 0006):** Transport (UDP-Multicast / Bus / WebSocket)
-  und Koordinatenbezug (WGS84 vs. System-Stereografisch) noch offen. **Design-
-  Hinweis fürs nächste Häppchen:** Der `Tracker` sollte die geodätische
-  Frame-Referenz des Sensors mitführen, damit Tracks später nach **WGS84**
-  ausgegeben werden können (neutraler `SystemTrack` → CAT062-Adapter).
+- **ASD-Integration (ADR 0006), Transport & Koordinatenbezug entschieden:**
+  Transport = **UDP-Multicast**, Koordinatenbezug = **System-Stereografisch**
+  (CAT062 I062/100 statt I062/105). Noch **nicht umgesetzt** — offene
+  Folge-Häppchen: (1) Projektion WGS84 → System-Stereografisch +
+  I062/100-Encoder in `firefly-asterix`, (2) UDP-Multicast-Versand-Adapter.
+  Voraussichtlich im Umfeld von M4 (hängt mit Multi-Sensor-Provenienz
+  zusammen). Design-Hinweis bleibt: Der `Tracker` führt die geodätische
+  Frame-Referenz des Sensors mit, damit Tracks neutral als **WGS84**
+  (`SystemTrack`) ausgegeben werden — die Stereo-Projektion ist reine
+  Adapter-Aufgabe.
 - **Message-Bus-Technologie** (z. B. NATS/Kafka) — erst relevant ab M3, dann ADR.
 - **Coverage-Werkzeug** (z. B. `cargo llvm-cov`) — einführen, sobald V&V-Nachweise
   greifbar werden.
