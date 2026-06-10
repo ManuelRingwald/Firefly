@@ -22,3 +22,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0006 — Integrationsziel Phoenix ASD & CAT062-Ausgabe](0006-integration-phoenix-asd-cat062.md)
 - [0007 — `serde` für die Zustands-Serialisierung](0007-serde-serialisierung.md)
 - [0008 — Safety-relevante Track-Zustandsentscheidung im Tracker](0008-safety-track-zustand-im-tracker.md)
+- [0009 — Frontend-Architektur M3 (Async-Server, WebSocket, JSON, MapLibre)](0009-frontend-architektur-m3.md)

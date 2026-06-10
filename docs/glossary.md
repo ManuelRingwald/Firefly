@@ -354,6 +354,64 @@ verrauschten Szenarien reproduzierbar.
 Eine kurze Notiz, die eine wichtige Entscheidung samt Begründung festhält —
 damit man später nachvollziehen kann, *warum* etwas so gebaut wurde.
 
+**async / await & Runtime (Tokio)**
+*Synchron* heißt: ein Programm tut eine Sache nach der anderen. Ein Server muss
+aber vieles **gleichzeitig** bedienen (Verbindungen, Datenstrom, Health-Checks).
+*Asynchrones* Programmieren (`async`/`await`) erlaubt das, ohne für jede Aufgabe
+einen eigenen Betriebssystem-Thread zu binden; eine **Runtime** verteilt die
+Aufgaben auf wenige Threads. **Tokio** ist die verbreitetste Async-Runtime in
+Rust — unser Fundament für den M3-Server (ADR 0009).
+
+**axum**
+Ein Web-Framework auf Tokio-Basis (aus demselben Ökosystem). Es nimmt
+HTTP-/WebSocket-Verbindungen an und ordnet sie „Routen" zu; über Tower-Middleware
+lassen sich Health-/Readiness-Probes und sauberes Herunterfahren sauber bauen.
+Unsere Wahl für den M3-Server (ADR 0009).
+
+**WebSocket**
+Eine **dauerhafte, beidseitige** Verbindung zwischen Browser und Server. Anders
+als eine klassische HTTP-Anfrage (Frage → Antwort → zu) bleibt sie offen, sodass
+der Server laufend neue Daten „pushen" kann — ideal, um Track-Positionen Scan für
+Scan an die Karte zu schicken.
+
+**Frame (Ausgabe-Bild)**
+Bei uns: ein **Ausgabe-Paket pro Zeitschritt** — `{ Zeit, Sensor, Liste der
+System-Tracks }`, das über die WebSocket-Leitung geht. Nicht zu verwechseln mit
+*LocalFrame* (dem geodätischen Bezugssystem); hier meint „Frame" ein einzelnes
+Momentbild des Lagebildes.
+
+---
+
+## Frontend & Karte (was der Browser zeigt)
+
+**Frontend**
+Der Teil, der im Browser läuft und das Lagebild **darstellt** (HTML/JavaScript +
+Karte). Er *rendert* nur, was der Tracker liefert, und trifft **keine**
+safety-relevante Entscheidung (ADR 0008).
+
+**Leaflet**
+Eine klassische, sehr einfache Karten-Bibliothek (zeichnet Kacheln und Symbole
+per Canvas/SVG/DOM). Großer Beispiel-Fundus, flacher Einstieg — für kleine bis
+mittlere Objektzahlen völlig ausreichend. (In Firefly *erwogen*, aber zugunsten
+von MapLibre verworfen — ADR 0009.)
+
+**MapLibre GL**
+Eine quelloffene, **GPU-gestützte** Karten-Bibliothek (zeichnet per WebGL). Sie
+skaliert gut zu vielen, häufig aktualisierten Objekten und lässt sich
+anbieter-neutral selbst hosten. Unsere Wahl fürs M3-Frontend, mit Blick auf den
+dichteren Verkehr in M4 (ADR 0009).
+
+**WebGL**
+Eine Browser-Schnittstelle, die Zeichnen direkt über die **Grafikkarte (GPU)**
+erlaubt — schneller bei vielen/animierten Objekten als klassisches Zeichnen über
+die Seitenstruktur (DOM).
+
+**Vektor-Kachel (*Vector Tile*)**
+Karten-Daten, die als **Geometrie** (Linien, Flächen, Punkte) statt als fertiges
+Bild ausgeliefert werden. Der Browser zeichnet sie selbst — scharf bei jedem
+Zoom, klein in der Übertragung, frei im Stil. Grundlage moderner Vektorkarten wie
+MapLibre.
+
 ---
 
 ## Cloud & Betrieb
