@@ -2,12 +2,13 @@
 //!
 //! A [`Cat062Encoder`] turns the tracks of one scan into a single CAT062 *data
 //! block*: a `[CAT][LEN][record…]` envelope (see [`data_block`]) around one
-//! [`record`](Cat062Encoder::record) per track. The record currently carries the
-//! data source (I062/010), time of track (I062/070), WGS-84 position (I062/105),
-//! Cartesian velocity (I062/185) and track number (I062/040); the safety status
-//! items (I062/080, /290, /500) join them in 3.X.3.
+//! [`record`](Cat062Encoder::record) per track. Each record carries the data
+//! source (I062/010), time of track (I062/070), WGS-84 position (I062/105),
+//! Cartesian velocity (I062/185), track number (I062/040) and the safety-relevant
+//! status: confirmation/coasting (I062/080), update age (I062/290) and position
+//! accuracy (I062/500) — the same status the tracker decides (ADR 0008).
 //!
-//! REQ: FR-IO-003
+//! REQ: FR-IO-003, FR-TRK-008
 
 use firefly_core::{SystemTrack, Timestamp};
 
@@ -30,6 +31,12 @@ mod uap {
     pub const VELOCITY_CARTESIAN: u8 = 7;
     /// I062/040 — Track Number.
     pub const TRACK_NUMBER: u8 = 12;
+    /// I062/080 — Track Status.
+    pub const TRACK_STATUS: u8 = 13;
+    /// I062/290 — System Track Update Ages.
+    pub const UPDATE_AGES: u8 = 14;
+    /// I062/500 — Estimated Accuracies.
+    pub const ESTIMATED_ACCURACIES: u8 = 16;
 }
 
 /// I062/070 is counted in units of 1/128 second since midnight.
@@ -41,6 +48,23 @@ const SECONDS_PER_DAY: f64 = 86_400.0;
 const POSITION_LSB_DEGREES: f64 = 180.0 / (1u32 << 25) as f64;
 /// I062/185 stores each velocity component as a signed count of 0.25 m/s.
 const VELOCITY_LSB_MPS: f64 = 0.25;
+/// I062/290 stores each update age as one octet of 1/4-second steps.
+const AGE_LSB_SECONDS: f64 = 0.25;
+/// I062/500 APC stores each position-accuracy component in 0.5-metre steps.
+const ACCURACY_LSB_METRES: f64 = 0.5;
+
+/// The field-extension bit (lowest bit of an octet): "another octet follows".
+/// Used both by the FSPEC and, here, *inside* the variable-length I062/080.
+const FX: u8 = 0x01;
+/// I062/080 octet 1, bit 2 (CNF): set means the track is still *tentative*.
+const STATUS_CNF_TENTATIVE: u8 = 0x02;
+/// I062/080 octet 4, bit 8 (CST): set means the track is *coasting*.
+const STATUS_CST_COASTING: u8 = 0x80;
+/// I062/290 primary subfield, bit 7: the PSR-age subfield is present.
+const AGE_PSR_PRESENT: u8 = 0x40;
+/// I062/500 primary subfield, bit 8: the APC (Cartesian position accuracy)
+/// subfield is present.
+const ACCURACY_APC_PRESENT: u8 = 0x80;
 
 /// The originator of the tracks, as it appears in I062/010.
 ///
@@ -95,6 +119,9 @@ impl Cat062Encoder {
             .item(uap::POSITION_WGS84, encode_position(track))
             .item(uap::VELOCITY_CARTESIAN, encode_velocity(track))
             .item(uap::TRACK_NUMBER, encode_track_number(track))
+            .item(uap::TRACK_STATUS, encode_track_status(track))
+            .item(uap::UPDATE_AGES, encode_update_ages(track))
+            .item(uap::ESTIMATED_ACCURACIES, encode_accuracies(track))
             .finish()
     }
 }
@@ -152,6 +179,61 @@ fn encode_track_number(track: &SystemTrack) -> Vec<u8> {
     number.to_be_bytes().to_vec()
 }
 
+/// I062/080 — Track Status, a **variable-length** item whose octets chain via the
+/// FX bit. We carry the two safety-relevant flags from ADR 0008:
+///
+/// - **CNF** (octet 1, bit 2): confirmed vs. tentative.
+/// - **CST** (octet 4, bit 8): coasting.
+///
+/// CST lives in the fourth octet, so a coasting track must extend that far;
+/// octets 2 and 3 then carry only their FX bit (all their fields default to 0).
+/// A non-coasting track needs no extension at all — one octet suffices, because
+/// CST's default is already "not coasting".
+fn encode_track_status(track: &SystemTrack) -> Vec<u8> {
+    let mut octet1 = 0u8;
+    if !track.confirmed {
+        octet1 |= STATUS_CNF_TENTATIVE;
+    }
+    if !track.coasting {
+        return vec![octet1];
+    }
+    vec![octet1 | FX, FX, FX, STATUS_CST_COASTING]
+}
+
+/// I062/290 — System Track Update Ages, a compound item: a primary subfield
+/// (which ages follow) plus the present age octets, each in 1/4-second steps.
+///
+/// For the single-radar demo the tracker's generic "time since the last
+/// measurement" maps to the **PSR age** subfield (age of the last primary
+/// detection used to update the track). Per-technology ages (SSR, Mode S, ADS-B)
+/// arrive with multi-sensor provenance in M4.
+fn encode_update_ages(track: &SystemTrack) -> Vec<u8> {
+    let age = scaled_u8(track.update_age, AGE_LSB_SECONDS);
+    vec![AGE_PSR_PRESENT, age]
+}
+
+/// I062/500 — Estimated Accuracies, a compound item. We carry the **APC**
+/// (Cartesian position accuracy) subfield: the tracker's 1σ position uncertainty
+/// (metres) in both the X and Y components, a circular approximation of the error
+/// ellipse, each a 16-bit count of 0.5-metre steps.
+fn encode_accuracies(track: &SystemTrack) -> Vec<u8> {
+    let sigma = scaled_u16(track.position_uncertainty, ACCURACY_LSB_METRES);
+    let mut out = vec![ACCURACY_APC_PRESENT];
+    out.extend_from_slice(&sigma.to_be_bytes()); // X component
+    out.extend_from_slice(&sigma.to_be_bytes()); // Y component
+    out
+}
+
+/// Quantise a non-negative value to LSB steps, saturating into one octet.
+fn scaled_u8(value: f64, lsb: f64) -> u8 {
+    (value / lsb).round().clamp(0.0, u8::MAX as f64) as u8
+}
+
+/// Quantise a non-negative value to LSB steps, saturating into two octets.
+fn scaled_u16(value: f64, lsb: f64) -> u16 {
+    (value / lsb).round().clamp(0.0, u16::MAX as f64) as u16
+}
+
 /// Wrap encoded records in the CAT062 envelope: `[CAT][LEN][record…]`, where
 /// `LEN` is the total block length (header included), big-endian.
 fn data_block(records: &[Vec<u8>]) -> Vec<u8> {
@@ -188,11 +270,15 @@ mod tests {
         }
     }
 
-    /// The reference track used by the dump tests: deliberately chosen so its
-    /// position and velocity land on round LSB counts. 45° = 2²⁵/4 steps,
-    /// 11.25° = 2²⁵/16 steps; 100 m/s = 400 steps, −50 m/s = −200 steps.
+    /// The reference track used by the dump tests: deliberately chosen so every
+    /// field lands on a round LSB count. 45° = 2²⁵/4 steps, 11.25° = 2²⁵/16 steps;
+    /// 100 m/s = 400 steps, −50 m/s = −200 steps; age 2 s = 8 quarter-seconds;
+    /// uncertainty 100 m = 200 half-metres. Confirmed and not coasting.
     fn track(id: u32) -> SystemTrack {
-        track_at(id, 45.0, 11.25, 100.0, -50.0)
+        let mut t = track_at(id, 45.0, 11.25, 100.0, -50.0);
+        t.update_age = 2.0;
+        t.position_uncertainty = 100.0;
+        t
     }
 
     /// Time of track scales by 1/128 s. 12.0 s → 12·128 = 1536 = 0x000600.
@@ -252,17 +338,73 @@ mod tests {
         assert_eq!(encode_velocity(&t), vec![0x01, 0x90, 0xFF, 0x38]);
     }
 
+    /// Track status is one octet unless the track is coasting. CNF (bit 2) marks
+    /// a tentative track; CST lives in the 4th octet, so coasting extends the
+    /// item via FX, with octets 2 and 3 as FX-only fillers. REQ: FR-IO-003, FR-TRK-008
+    #[test]
+    fn track_status_carries_cnf_and_extends_for_cst() {
+        let mut t = track_at(1, 0.0, 0.0, 0.0, 0.0);
+
+        t.confirmed = true;
+        t.coasting = false;
+        assert_eq!(encode_track_status(&t), vec![0x00], "confirmed, fresh");
+
+        t.confirmed = false;
+        assert_eq!(encode_track_status(&t), vec![0x02], "tentative, fresh");
+
+        t.confirmed = true;
+        t.coasting = true;
+        assert_eq!(
+            encode_track_status(&t),
+            vec![0x01, 0x01, 0x01, 0x80],
+            "confirmed but coasting → four octets, CST set"
+        );
+
+        t.confirmed = false;
+        assert_eq!(
+            encode_track_status(&t),
+            vec![0x03, 0x01, 0x01, 0x80],
+            "tentative and coasting"
+        );
+    }
+
+    /// Update ages: the PSR-age subfield is present (0x40) and the age is in
+    /// quarter-seconds. 2.0 s → 8; saturates at 255. REQ: FR-IO-003, FR-TRK-008
+    #[test]
+    fn update_ages_use_psr_subfield_in_quarter_seconds() {
+        let mut t = track_at(1, 0.0, 0.0, 0.0, 0.0);
+        t.update_age = 2.0;
+        assert_eq!(encode_update_ages(&t), vec![0x40, 0x08]);
+
+        t.update_age = 1_000.0; // far beyond 63.75 s → saturates
+        assert_eq!(encode_update_ages(&t), vec![0x40, 0xFF]);
+    }
+
+    /// Estimated accuracies: the APC subfield is present (0x80); the 1σ
+    /// uncertainty fills both components in half-metres. 100 m → 200 = 0x00C8.
+    /// REQ: FR-IO-003, FR-TRK-008
+    #[test]
+    fn accuracies_use_apc_subfield_in_half_metres() {
+        let mut t = track_at(1, 0.0, 0.0, 0.0, 0.0);
+        t.position_uncertainty = 100.0;
+        assert_eq!(encode_accuracies(&t), vec![0x80, 0x00, 0xC8, 0x00, 0xC8]);
+    }
+
     /// One track encodes to a fully known byte string — the reference dump.
     ///
-    /// Hand derivation (present FRNs {1, 4, 5, 7, 12}):
-    /// - FSPEC: octet 1 = FRN1·0x80 + FRN4·0x10 + FRN5·0x08 + FRN7·0x02 + FX·0x01
-    ///   = `0x9B`; octet 2 = FRN12·0x08 = `0x08`.
+    /// Hand derivation (present FRNs {1, 4, 5, 7, 12, 13, 14, 16}):
+    /// - FSPEC: octet 1 = FRN1·0x80 + FRN4·0x10 + FRN5·0x08 + FRN7·0x02 + FX = `0x9B`;
+    ///   octet 2 = FRN12·0x08 + FRN13·0x04 + FRN14·0x02 + FX = `0x0F`;
+    ///   octet 3 = FRN16·0x40 = `0x40`.
     /// - I062/010 SAC/SIC = `[0x19, 0x02]`.
     /// - I062/070 at 12.0 s = 1536 ticks = `[0x00, 0x06, 0x00]`.
     /// - I062/105 lat 45° = `[0x00,0x80,0x00,0x00]`, lon 11.25° = `[0x00,0x20,0x00,0x00]`.
     /// - I062/185 Vx 100 m/s = `[0x01,0x90]`, Vy −50 m/s = `[0xFF,0x38]`.
     /// - I062/040 track #1 = `[0x00, 0x01]`.
-    /// - record (21 bytes) wrapped: CAT 62 = 0x3E, LEN = 3 + 21 = 24 = 0x0018.
+    /// - I062/080 confirmed, fresh = `[0x00]`.
+    /// - I062/290 PSR age 2 s = `[0x40, 0x08]`.
+    /// - I062/500 APC 100 m = `[0x80, 0x00,0xC8, 0x00,0xC8]`.
+    /// - record (30 bytes) wrapped: CAT 62 = 0x3E, LEN = 3 + 30 = 33 = 0x0021.
     ///
     /// REQ: FR-IO-003
     #[test]
@@ -272,8 +414,8 @@ mod tests {
 
         let expected = vec![
             0x3E, // CAT 62
-            0x00, 0x18, // LEN = 24
-            0x9B, 0x08, // FSPEC {1, 4, 5, 7, 12}
+            0x00, 0x21, // LEN = 33
+            0x9B, 0x0F, 0x40, // FSPEC {1, 4, 5, 7, 12, 13, 14, 16}
             0x19, 0x02, // I062/010 SAC/SIC
             0x00, 0x06, 0x00, // I062/070 time = 1536 ticks
             0x00, 0x80, 0x00, 0x00, // I062/105 latitude 45°
@@ -281,11 +423,14 @@ mod tests {
             0x01, 0x90, // I062/185 Vx = 100 m/s
             0xFF, 0x38, // I062/185 Vy = −50 m/s
             0x00, 0x01, // I062/040 track number 1
+            0x00, // I062/080 confirmed, fresh
+            0x40, 0x08, // I062/290 PSR age = 2 s
+            0x80, 0x00, 0xC8, 0x00, 0xC8, // I062/500 APC = 100 m
         ];
         assert_eq!(block, expected);
     }
 
-    /// LEN counts every byte of every record. Two tracks → two 21-byte records.
+    /// LEN counts every byte of every record. Two tracks → two 30-byte records.
     /// REQ: FR-IO-003
     #[test]
     fn length_field_covers_all_records() {
@@ -295,7 +440,7 @@ mod tests {
         assert_eq!(block[0], 0x3E, "category");
         let len = u16::from_be_bytes([block[1], block[2]]) as usize;
         assert_eq!(len, block.len(), "LEN equals the real block length");
-        assert_eq!(len, 3 + 2 * 21, "header + two 21-byte records");
+        assert_eq!(len, 3 + 2 * 30, "header + two 30-byte records");
     }
 
     /// An empty scan still yields a valid, minimal data block (just the header).

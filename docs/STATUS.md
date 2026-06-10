@@ -6,10 +6,11 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/continuation-o0xmqz`
-- **Letzter Commit:** Häppchen 3.X.2 — `firefly-asterix`: Position I062/105
-  (lat/lon, LSB 180/2²⁵°, signed i32) + Geschwindigkeit I062/185 (Vx/Vy,
-  LSB 0,25 m/s, signed i16) mit Zweierkomplement; Referenz-Dump erweitert,
-  14 Tests grün (FR-IO-003).
+- **Letzter Commit:** Häppchen 3.X.3 — `firefly-asterix`: Status-Felder
+  I062/080 (CNF/CST, variable Länge via FX — coasting reicht bis ins 4. Octet),
+  I062/290 (PSR-Update-Alter, LSB ¼ s) und I062/500 (APC-Positionsgenauigkeit,
+  LSB ½ m); Referenz-Dump komplett (8 Felder), 17 Tests grün (FR-IO-003,
+  FR-TRK-008).
 - **PR:** keiner offen.
 
 ---
@@ -119,7 +120,7 @@ neben JSON, ADR 0006), in Unter-Häppchen zerlegt:
   + I062/010, /070, /040 (geometrie-frei). *S3 · Sonnet · Effort mittel*
 - [x] **3.X.2** I062/105 (Position WGS84) + I062/185 (Geschwindigkeit kart.) mit
   Skalierungsfaktoren + Zweierkomplement. *S4 · Opus 4.8 · Effort hoch*
-- [ ] **3.X.3** I062/080 (Track-Status, variable Länge mit FX), I062/290, /500
+- [x] **3.X.3** I062/080 (Track-Status, variable Länge mit FX), I062/290, /500
   (Alter/Unsicherheit). *S4 · Opus 4.8 · Effort hoch*
 - [ ] **3.X.4** Adapter-Abschluss (`Frame`/Scan → Datenblock), Meilenstein-Doku.
   *S3 · Sonnet · Effort mittel*
@@ -170,6 +171,14 @@ sind und die Anforderung im Register rückverfolgbar steht.
 
 ## 5. Offene Punkte / später entscheiden
 
+- **CAT062 LSB-/Subfeld-Werte gegen die offizielle Spezifikation prüfen:** Die
+  Felder I062/290 (Update-Alter) und I062/500 (Genauigkeiten) sind nach bestem
+  Wissen kodiert (LSB ¼ s bzw. ½ m, Subfeld-Auswahl PSR/APC), aber noch **nicht**
+  gegen das EUROCONTROL-Dokument gegengeprüft (offline nicht verfügbar). Die
+  Referenz-Dump-Tests sichern nur gegen *Regression*, nicht gegen Spec-Treue.
+  Vor operativem Einsatz: Edition/LSB/Subfeld-Layout verifizieren. Auch das
+  Mapping „update_age → PSR-Alter" ist eine Single-Sensor-Vereinfachung
+  (Mehr-Sensor-Provenienz erst in M4).
 - **ASD-Integration (ADR 0006):** Transport (UDP-Multicast / Bus / WebSocket)
   und Koordinatenbezug (WGS84 vs. System-Stereografisch) noch offen. **Design-
   Hinweis fürs nächste Häppchen:** Der `Tracker` sollte die geodätische

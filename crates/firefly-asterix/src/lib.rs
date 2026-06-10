@@ -22,15 +22,15 @@
 //! a defined byte width and, for numbers, a fixed **LSB** (the value of its least
 //! significant bit), so a float like seconds becomes an integer count of LSBs.
 //!
-//! ## Scope so far (Häppchen 3.X.1–3.X.2)
+//! ## Scope so far (Häppchen 3.X.1–3.X.3)
 //!
 //! The framing ([`cat062`]) and the FSPEC machinery ([`fspec`]) are in place.
 //! A record carries the data source (`I062/010`), time of track (`I062/070`),
-//! WGS-84 position (`I062/105`), Cartesian velocity (`I062/185`) and track number
-//! (`I062/040`). The safety-status items (`I062/080`, `/290`, `/500`) follow in
-//! 3.X.3.
+//! WGS-84 position (`I062/105`), Cartesian velocity (`I062/185`), track number
+//! (`I062/040`) and the safety-relevant status — confirmation/coasting
+//! (`I062/080`), update age (`I062/290`) and position accuracy (`I062/500`).
 //!
-//! REQ: FR-IO-003
+//! REQ: FR-IO-003, FR-TRK-008
 
 mod cat062;
 mod fspec;
