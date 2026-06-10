@@ -6,15 +6,13 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** Häppchen **4.0** — Architektur-Entscheidung für die
-  Multi-Radar-Fusion (ADR 0010): **Option A, zentrale Mess-Fusion** (ein
-  Tracker nimmt den gemischten Multi-Sensor-Plot-Strom; gemeinsamer
-  Tracking-Frame; Plot-Umrechnung in diesen Frame inkl. Kovarianz;
-  Pro-Sensor-Rauschmodell). Gewählt wegen besserer Präzision (Rohmessungen
-  direkt) bei gleicher Cloud-Tauglichkeit; Synergie mit dem
-  System-Referenzpunkt der CAT062-Ausgabe (ADR 0006). Glossar um Mess-/Track-
-  Fusion, Track-to-Track-Assoziation, lokaler vs. System-Track, Sensor-Bias,
-  gemeinsamer Tracking-Frame ergänzt.
+- **Letzter Commit:** Häppchen **4.A.1** — Geo-Baustein in `firefly-geo`:
+  `LocalFrame::horizontal_from` transformiert eine horizontale Messung
+  (Position + 2×2-Kovarianz) von einem Frame in einen anderen (Position via
+  geodätische Verkettung, Kovarianz via Frame-Rotation `R'=T·R·Tᵀ`); dazu
+  `horizontal_rotation_from` und private Richtungs-Rotationen. `nalgebra` zu
+  `firefly-geo` hinzugefügt (ADR 0005). 5 neue Tests, FR-GEO-003. Über ~67 km
+  Basislinie: Position auf ~1 m, Kovarianz-Invarianten auf ~1e-4 genau.
 - **PR:** keiner offen.
 
 ---
@@ -155,16 +153,18 @@ festgehalten und werden voraussichtlich im Umfeld von M4 eingeplant.
 ✅ **M4 Häppchen 4.1 + 4.0 erledigt:** SSR-Identität durchgereicht
 (FR-TRK-009); Architektur entschieden — **zentrale Mess-Fusion** (ADR 0010).
 
-➡️ **Als Nächstes:** **4.A.1** — Geo-Baustein in `firefly-geo`: Position **und**
-Kovarianz von einem `LocalFrame` in einen anderen umrechnen (Verkettung
-Sensor-ENU → WGS84 → Tracking-ENU samt Kovarianz-Rotation). Reine, isoliert
-testbare Mathematik. *S4 · Opus 4.8 · Effort hoch.*
+➡️ **Als Nächstes:** **4.A.2** — `firefly-track` auf Multi-Sensor umstellen:
+`TrackerConfig` mit gemeinsamem Tracking-Frame + Rauschmodell **je** `SensorId`;
+`process_scan` rechnet jeden Plot via `convert_plot` (Sensor-Frame) und dann
+`LocalFrame::horizontal_from` (4.A.1) in den gemeinsamen Frame, *bevor* gegated/
+assoziiert wird. `system_tracks` nutzt dann den gemeinsamen Frame direkt.
+*S4–S5 · Opus 4.8 / Fable 5 · Effort hoch.*
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)
 
 - [x] **4.1** SSR-Identität bis zum `SystemTrack` (FR-TRK-009) — *S3 · Sonnet*
 - [x] **4.0** Architektur-Entscheidung: zentrale Mess-Fusion (ADR 0010) — *S4 · Opus 4.8*
-- [ ] **4.A.1** `firefly-geo`: Frame-zu-Frame-Transformation (Position + Kovarianz) — *S4 · Opus 4.8 · Effort hoch*
+- [x] **4.A.1** `firefly-geo`: Frame-zu-Frame-Transformation (Position + Kovarianz, FR-GEO-003) — *S4 · Opus 4.8 · Effort hoch*
 - [ ] **4.A.2** `firefly-track` auf Multi-Sensor: gemeinsamer Tracking-Frame, Plot-Umrechnung vor Assoziation, Pro-Sensor-Rauschmodell — *S4–S5 · Opus 4.8 / Fable 5 · Effort hoch*
 - [ ] **4.A.3** Multi-Radar-Szenario (zwei überlappende Radare) + E2E-Test: ein Flugzeug → **ein** Track — *S4 · Opus 4.8 · Effort hoch*
 - [ ] **4.A.4** Sensor-Provenienz im `SystemTrack` (welche Sensoren tragen bei) — *S3 · Sonnet · Effort mittel*

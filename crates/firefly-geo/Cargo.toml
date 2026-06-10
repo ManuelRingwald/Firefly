@@ -9,3 +9,4 @@ description = "Geodesy and coordinate transforms (WGS84 / ECEF / local ENU / pol
 
 [dependencies]
 serde = { workspace = true }
+nalgebra = { workspace = true }
