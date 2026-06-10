@@ -5,12 +5,13 @@
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
 - **Zuletzt aktualisiert:** 2026-06-10
-- **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M3 Bugfix — Track-Identitäts-Stabilität: Höhenwinkel-Rauschen
-  fließt jetzt in die radiale Mess-Kovarianz ein (FR-TRK-002), Demo-Prozessrauschen
-  an das Kurven-Manöver angepasst; je Flugzeug genau eine stabile Track-ID
-  (Regressionstests, FR-TRK-006).
-- **PR:** #1 (offen).
+- **Branch:** `claude/continuation-o0xmqz`
+- **Letzter Commit:** M3 Häppchen 3.5 — „Verzug"-Auslöser: ein Knopf im
+  Frontend pausiert die WebSocket-Zustellung für 5 s (`pump_frames`), der
+  Frame-Strom selbst bleibt unverändert (NFR-CLOUD-004 sichtbar gemacht,
+  NFR-OPS-001 verifiziert). Damit ist **M3 abgeschlossen**
+  (`docs/milestones/M3-live-picture.md`).
+- **PR:** keiner offen.
 
 ---
 
@@ -69,7 +70,14 @@
   zu klein für die 1°/s-Kurve → das kurvende Ziel zerbrach; Demo nutzt jetzt
   `accel_psd ≈ 60` (passt zum Manöver). Ergebnis: je Flugzeug **eine** stabile
   ID (Regressionstests `identity::*`, `scene::demo_scene_keeps_one_identity_*`).
-- Qualität: **93 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+  **3.5**: „Verzug"-Auslöser (NFR-OPS-001/NFR-CLOUD-004) — Knopf „Verzug
+  simulieren (5 s)" im Frontend schickt `"delay"` über `/ws`; `pump_frames`
+  bestätigt mit `delay_triggered` und pausiert die Zustellung um 5 s
+  (`DELAY_TRIGGER_PAUSE`), rein an der Auslieferungs-Kante — der Frame-Strom
+  selbst bleibt unverändert. Test
+  `websocket::delay_trigger_pauses_delivery_without_corrupting_the_stream`.
+  **M3 ist damit abgeschlossen** (`docs/milestones/M3-live-picture.md`).
+- Qualität: **94 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -97,22 +105,22 @@ Safety-Status → Güte-Metriken.
 ✅ **Timing-Härtung (NFR-CLOUD-004) erledigt** — `tests/timing.rs` beweist beide
 Eigenschaften. Damit ist M2 inkl. aller Veredelungen abgeschlossen.
 
-✅ **M3 Häppchen 3.0–3.4 erledigt** — ADR 0009 steht; `firefly-io` → `Frame` als
-JSON (FR-IO-001); `firefly-player` → deterministischer Frame-Strom (FR-IO-002);
-`firefly-server` streamt ihn live über WebSocket (FR-NET-001); das
-**MapLibre-Frontend** zeigt die Tracks auf einer 2D-Karte mit sichtbarem
-Safety-Status (FR-UI-001). Komplette Kette steht: ein Befehl → Live-Lagebild im
-Browser.
+✅ **M3 Häppchen 3.0–3.5 erledigt — M3 ist abgeschlossen.** ADR 0009 steht;
+`firefly-io` → `Frame` als JSON (FR-IO-001); `firefly-player` →
+deterministischer Frame-Strom (FR-IO-002); `firefly-server` streamt ihn live
+über WebSocket (FR-NET-001); das **MapLibre-Frontend** zeigt die Tracks auf
+einer 2D-Karte mit sichtbarem Safety-Status (FR-UI-001); ein „Verzug"-Knopf
+macht die Timing-Robustheit (NFR-CLOUD-004) erlebbar (NFR-OPS-001). Komplette
+Kette steht: ein Befehl → Live-Lagebild im Browser.
+Meilenstein-Doku: `docs/milestones/M3-live-picture.md`.
 
-➡️ **Als Nächstes: Häppchen 3.5 — Ein-Befehl-Demo (NFR-OPS-001).** Eine
-vorzeigbare Demo-Szene und ein **„Verzug"-Auslöser**, der die *Zustellung*
-absichtlich pausiert/verzögert und damit **sichtbar** macht, dass die Tracks
-unbeschädigt bleiben (Datenzeit-Determinismus, NFR-CLOUD-004). Bedienung ohne
-Programmierkenntnisse. Danach ist M3 fertig (Meilenstein-Doku `docs/milestones/`
-schreiben). CAT062-Encoder (3.X) folgt nach der Demo.
+➡️ **Als Nächstes: Häppchen 3.X — CAT062-Encoder-Adapter** (binäre
+ASTERIX-Ausgabe neben JSON, ADR 0006) **oder** Beginn von **M4**
+(SSR/ADS-B-Identitätskorrelation + Multi-Radar-Fusion). Auswahl gemeinsam mit
+dem Projektverantwortlichen treffen.
 
-Offen/optional vor 3.5: Sichtprüfung des Frontends im Browser durch den
-Projektverantwortlichen.
+Offen/optional: Sichtprüfung des Frontends (inkl. „Verzug"-Knopf) im Browser
+durch den Projektverantwortlichen.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
@@ -123,8 +131,8 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 - [x] **3.2** „Player": Szenario → Tracker → Frame-Strom (reine Logik, Tempo getrennt vom Kern; Crate `firefly-player`, FR-IO-002) — *S3 · Sonnet · Effort mittel*
 - [x] **3.3** WebSocket-Server (axum/tokio, Health/Readiness, 12-Factor, Shutdown, Logs/NFR-OBS-001; Crate `firefly-server`, FR-NET-001) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
 - [x] **3.4** Frontend 2D-Karte mit Live-Tracks (MapLibre; coasting/Status farbig, Unsicherheits-Ring, Geschwindigkeitsvektor; `static/index.html`, FR-UI-001) — *S3 · Sonnet · Effort mittel*
-- [ ] **3.5** Demo-Erlebnis (ein Befehl, Demo-Szene, „Verzug"-Auslöser zeigt Timing-Robustheit) — *S3 · Sonnet · Effort mittel*
-- [ ] **3.X** CAT062-Encoder-Adapter (parallel/später, nach der Demo) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
+- [x] **3.5** Demo-Erlebnis (ein Befehl, „Verzug"-Auslöser zeigt Timing-Robustheit) — *S3 · Sonnet · Effort mittel*
+- [ ] **3.X** CAT062-Encoder-Adapter (parallel/später) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
 
 ## 4b. M2-Plan in Häppchen (abgeschlossen)
 
