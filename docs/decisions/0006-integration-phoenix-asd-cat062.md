@@ -53,3 +53,16 @@ erwartet, über den dort genutzten Transport.
   (Callsign/Identität) — fällt in die Identitäts-/Fusions-Arbeit von **M4**.
 - CAT062-Kodierung + Transport-Adapter werden ein eigener, klar abgegrenzter
   Baustein (M3/M4), nicht Teil des Tracker-Kerns.
+
+## Nachtrag (M3.X.4): Adapter bleiben unabhängig voneinander
+
+Bei der Fertigstellung des CAT062-Adapters (`firefly-asterix`, Häppchen 3.X)
+stellte sich die Frage, ob er eine Komfortfunktion bekommen soll, die direkt
+aus dem JSON-Zwischenformat (`firefly-io::Frame`, Häppchen 3.1) übersetzt.
+**Entschieden: nein.** Beide Adapter (`firefly-io` für JSON, `firefly-asterix`
+für CAT062) übersetzen unabhängig voneinander **denselben** `SystemTrack` aus
+dem Tracker-Kern — keiner hängt vom anderen ab. Eine `Frame → CAT062`-Brücke
+hätte eine unnötige Kopplung zwischen den Adaptern eingeführt und zudem
+verlustbehaftet aus `FrameTrack`s abgeleiteter Geschwindigkeit (Betrag/Kurs)
+die für I062/185 nötigen kartesischen Komponenten zurückrechnen müssen.
+Details siehe `docs/milestones/M3X-cat062-encoder.md`.

@@ -6,11 +6,11 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/continuation-o0xmqz`
-- **Letzter Commit:** Häppchen 3.X.3 — `firefly-asterix`: Status-Felder
-  I062/080 (CNF/CST, variable Länge via FX — coasting reicht bis ins 4. Octet),
-  I062/290 (PSR-Update-Alter, LSB ¼ s) und I062/500 (APC-Positionsgenauigkeit,
-  LSB ½ m); Referenz-Dump komplett (8 Felder), 17 Tests grün (FR-IO-003,
-  FR-TRK-008).
+- **Letzter Commit:** Häppchen 3.X.4 — Adapter-Abschluss: Entscheidung
+  dokumentiert, dass `firefly-asterix` **keine** `Frame → CAT062`-
+  Komfortfunktion bekommt (ADR 0006-Nachtrag, beide Adapter unabhängig auf
+  `SystemTrack`); Meilenstein-Doku `docs/milestones/M3X-cat062-encoder.md`.
+  Damit ist **Häppchen 3.X (CAT062-Encoder-Adapter) abgeschlossen**.
 - **PR:** keiner offen.
 
 ---
@@ -114,18 +114,23 @@ macht die Timing-Robustheit (NFR-CLOUD-004) erlebbar (NFR-OPS-001). Komplette
 Kette steht: ein Befehl → Live-Lagebild im Browser.
 Meilenstein-Doku: `docs/milestones/M3-live-picture.md`.
 
-➡️ **Läuft: Häppchen 3.X — CAT062-Encoder-Adapter** (binäre ASTERIX-Ausgabe
-neben JSON, ADR 0006), in Unter-Häppchen zerlegt:
+✅ **Häppchen 3.X — CAT062-Encoder-Adapter abgeschlossen** (binäre
+ASTERIX-Ausgabe neben JSON, ADR 0006):
 - [x] **3.X.1** Crate `firefly-asterix`, Framing (CAT/LEN) + FSPEC/UAP-Mechanik
   + I062/010, /070, /040 (geometrie-frei). *S3 · Sonnet · Effort mittel*
 - [x] **3.X.2** I062/105 (Position WGS84) + I062/185 (Geschwindigkeit kart.) mit
   Skalierungsfaktoren + Zweierkomplement. *S4 · Opus 4.8 · Effort hoch*
 - [x] **3.X.3** I062/080 (Track-Status, variable Länge mit FX), I062/290, /500
-  (Alter/Unsicherheit). *S4 · Opus 4.8 · Effort hoch*
-- [ ] **3.X.4** Adapter-Abschluss (`Frame`/Scan → Datenblock), Meilenstein-Doku.
+  (Alter/Unsicherheit) — gegen EUROCONTROL SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10
+  verifiziert. *S4 · Opus 4.8 · Effort hoch*
+- [x] **3.X.4** Adapter-Abschluss: Entscheidung gegen `Frame → CAT062`
+  (ADR 0006-Nachtrag), Meilenstein-Doku `M3X-cat062-encoder.md`.
   *S3 · Sonnet · Effort mittel*
 
-Danach optional **M4** (SSR/ADS-B-Identitätskorrelation + Multi-Radar-Fusion).
+➡️ **Als Nächstes:** **M4** (SSR/ADS-B-Identitätskorrelation +
+Multi-Radar-Fusion) — oder Transport-/Koordinaten-Fragen aus ADR 0006
+(UDP-Multicast vs. Bus, WGS-84 vs. System-Stereografisch) klären, je nach
+Wunsch des Projektverantwortlichen.
 
 Offen/optional: Sichtprüfung des Frontends (inkl. „Verzug"-Knopf) im Browser
 durch den Projektverantwortlichen.
@@ -140,7 +145,7 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 - [x] **3.3** WebSocket-Server (axum/tokio, Health/Readiness, 12-Factor, Shutdown, Logs/NFR-OBS-001; Crate `firefly-server`, FR-NET-001) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
 - [x] **3.4** Frontend 2D-Karte mit Live-Tracks (MapLibre; coasting/Status farbig, Unsicherheits-Ring, Geschwindigkeitsvektor; `static/index.html`, FR-UI-001) — *S3 · Sonnet · Effort mittel*
 - [x] **3.5** Demo-Erlebnis (ein Befehl, „Verzug"-Auslöser zeigt Timing-Robustheit) — *S3 · Sonnet · Effort mittel*
-- [ ] **3.X** CAT062-Encoder-Adapter (parallel/später) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
+- [x] **3.X** CAT062-Encoder-Adapter (3.X.1–3.X.4, `firefly-asterix`, FR-IO-003) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
 
 ## 4b. M2-Plan in Häppchen (abgeschlossen)
 
