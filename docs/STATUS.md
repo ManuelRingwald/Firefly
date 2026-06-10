@@ -171,14 +171,15 @@ sind und die Anforderung im Register rückverfolgbar steht.
 
 ## 5. Offene Punkte / später entscheiden
 
-- **CAT062 LSB-/Subfeld-Werte gegen die offizielle Spezifikation prüfen:** Die
-  Felder I062/290 (Update-Alter) und I062/500 (Genauigkeiten) sind nach bestem
-  Wissen kodiert (LSB ¼ s bzw. ½ m, Subfeld-Auswahl PSR/APC), aber noch **nicht**
-  gegen das EUROCONTROL-Dokument gegengeprüft (offline nicht verfügbar). Die
-  Referenz-Dump-Tests sichern nur gegen *Regression*, nicht gegen Spec-Treue.
-  Vor operativem Einsatz: Edition/LSB/Subfeld-Layout verifizieren. Auch das
-  Mapping „update_age → PSR-Alter" ist eine Single-Sensor-Vereinfachung
-  (Mehr-Sensor-Provenienz erst in M4).
+- **CAT062 I062/290 / I062/500 gegen Spezifikation geprüft (erledigt):** Anhand
+  des vom Projektverantwortlichen bereitgestellten Auszugs aus
+  SUR.ET1.ST05.2000-STD-09-01 (Ed. 1.10) verifiziert: Primary-Subfield-Bit für
+  PSR-Alter ist Bit 15 (= `0x40`), LSB ¼ s, ein Oktett — passt. Primary-
+  Subfield-Bit für APC ist Bit 16 (= `0x80`), Subfeld = X- und Y-Komponente je
+  16 Bit, LSB ½ m, vorzeichenlos — passt. Unsere Encoder-Konstanten und der
+  Referenz-Dump (`0x40, 0x08` bzw. `0x80, 0x00, 0xC8, 0x00, 0xC8`) stimmen
+  exakt. Offen bleibt weiterhin: Das Mapping „update_age → PSR-Alter" ist eine
+  Single-Sensor-Vereinfachung (Mehr-Sensor-Provenienz erst in M4).
 - **ASD-Integration (ADR 0006):** Transport (UDP-Multicast / Bus / WebSocket)
   und Koordinatenbezug (WGS84 vs. System-Stereografisch) noch offen. **Design-
   Hinweis fürs nächste Häppchen:** Der `Tracker` sollte die geodätische

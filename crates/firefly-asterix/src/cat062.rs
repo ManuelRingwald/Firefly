@@ -60,10 +60,12 @@ const FX: u8 = 0x01;
 const STATUS_CNF_TENTATIVE: u8 = 0x02;
 /// I062/080 octet 4, bit 8 (CST): set means the track is *coasting*.
 const STATUS_CST_COASTING: u8 = 0x80;
-/// I062/290 primary subfield, bit 7: the PSR-age subfield is present.
+/// I062/290 primary subfield, bit 7 (spec bit-15, "PSR"): the PSR-age subfield
+/// is present. Verified against SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.20.
 const AGE_PSR_PRESENT: u8 = 0x40;
-/// I062/500 primary subfield, bit 8: the APC (Cartesian position accuracy)
-/// subfield is present.
+/// I062/500 primary subfield, bit 8 (spec bit-16, "APC"): the Cartesian
+/// position-accuracy subfield is present. Verified against
+/// SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.26.
 const ACCURACY_APC_PRESENT: u8 = 0x80;
 
 /// The originator of the tracks, as it appears in I062/010.
