@@ -6,12 +6,12 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** Häppchen B (ADR 0006-Nachtrag) — offene
-  ASD-Integrationsfragen geklärt: Transport = **UDP-Multicast**,
-  Koordinatenbezug = **System-Stereografisch** (CAT062 I062/100). Noch nicht
-  umgesetzt, aber als Zielbild für die Folge-Häppchen (Projektion +
-  I062/100-Encoder, Multicast-Versand) festgehalten. Glossar ergänzt um
-  *UDP-Multicast* und *System-Stereografische Projektion*.
+- **Letzter Commit:** Häppchen **4.1** — SSR-Identität (Mode-3/A-Code,
+  Mode-S-ICAO-Adresse) wird vom `Plot` über den `Track` bis zum `SystemTrack`
+  durchgereicht (FR-TRK-009). Übernahme ist „sticky": ein Plot ohne SSR-Antwort
+  löscht eine bekannte Identität nicht, eine neue SSR-Antwort überschreibt sie.
+  Grundlage für CAT062-Identitätsfelder (4.2, noch offen) und den
+  Korrelations-Schlüssel (ICAO-Adresse) der Multi-Radar-Fusion (M4).
 - **PR:** keiner offen.
 
 ---
@@ -78,7 +78,17 @@
   selbst bleibt unverändert. Test
   `websocket::delay_trigger_pauses_delivery_without_corrupting_the_stream`.
   **M3 ist damit abgeschlossen** (`docs/milestones/M3-live-picture.md`).
-- Qualität: **94 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+- **Häppchen B (ADR 0006-Nachtrag) erledigt:** Transport- und
+  Koordinatenfrage geklärt — **UDP-Multicast** + **System-Stereografisch**
+  (CAT062 I062/100). Noch nicht umgesetzt; als Zielbild in ADR 0006
+  festgehalten.
+- **M4 läuft:** Häppchen **4.1 erledigt** — `Track` (firefly-track) merkt sich
+  jetzt die SSR-Identität (Mode-3/A, ICAO-Adresse) aus zugeordneten Plots
+  (`Track::update_identity`, sticky), und `SystemTrack` (firefly-core) führt
+  sie als `mode_3a: Option<u16>` / `icao_address: Option<u32>` mit (FR-TRK-009).
+  Noch offen: CAT062-Kodierung dieser Felder (4.2) und die eigentliche
+  Multi-Radar-Fusion/Architektur-ADR (4.0).
+- Qualität: **102 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -134,9 +144,14 @@ Koordinatenfrage geklärt — **UDP-Multicast** + **System-Stereografisch**
 I062/100-Encoder, Multicast-Versand) sind als Zielbild in ADR 0006
 festgehalten und werden voraussichtlich im Umfeld von M4 eingeplant.
 
-➡️ **Als Nächstes:** **M4** (SSR/ADS-B-Identitätskorrelation +
-Multi-Radar-Fusion) starten — Architektur-Diskussion und ADR als erstes
-Häppchen, je nach Wunsch des Projektverantwortlichen.
+✅ **M4 Häppchen 4.1 erledigt:** SSR-Identität (Mode-3/A, ICAO-Adresse) wird
+vom `Plot` über den `Track` bis zum `SystemTrack` durchgereicht, sticky
+gegenüber primär-only-Treffern (FR-TRK-009).
+
+➡️ **Als Nächstes:** weitere M4-Häppchen — z. B. **4.2** (CAT062-Kodierung der
+neuen Identitätsfelder, `firefly-asterix`) oder **4.0** (Architektur-ADR für
+die eigentliche Multi-Radar-Fusion: wie werden Tracks mehrerer Sensoren
+korreliert/verschmolzen?), je nach Wunsch des Projektverantwortlichen.
 
 Offen/optional: Sichtprüfung des Frontends (inkl. „Verzug"-Knopf) im Browser
 durch den Projektverantwortlichen.

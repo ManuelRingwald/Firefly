@@ -130,6 +130,8 @@ impl Tracker {
                     coasting: track.is_coasting(),
                     update_age: track.update_age(),
                     position_uncertainty: track.filter.position_uncertainty(),
+                    mode_3a: track.mode_3a(),
+                    icao_address: track.icao_address(),
                 }
             })
             .collect()
@@ -169,6 +171,7 @@ impl Tracker {
             self.tracks[ti].filter.update(&measurements[mi]);
             self.tracks[ti].last_hit_time = t;
             self.tracks[ti].observe(true, cfg.confirm_n);
+            self.tracks[ti].update_identity(&plots[mi].mode_ac);
         }
         // 4b. Coast unassociated tracks (a miss).
         for &ti in &assoc.unassigned_tracks {
@@ -192,6 +195,7 @@ impl Tracker {
             let mut track = Track::new(TrackId(self.next_id), filter, t);
             self.next_id += 1;
             track.observe(true, cfg.confirm_n); // the founding plot is a hit
+            track.update_identity(&plots[mi].mode_ac);
             self.tracks.push(track);
         }
     }
@@ -209,7 +213,7 @@ fn should_delete(track: &Track, cfg: &TrackerConfig) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use firefly_core::{Plot, SensorId};
+    use firefly_core::{DetectionKind, ModeAC, Plot, SensorId};
     use firefly_geo::{Polar, Wgs84};
 
     fn config() -> TrackerConfig {
@@ -219,6 +223,21 @@ mod tests {
     /// A plot at a fixed polar position for a given time.
     fn plot(time: f64, range: f64, az: f64) -> Plot {
         Plot::primary(SensorId(1), Timestamp(time), Polar::new(range, az, 0.0))
+    }
+
+    /// A combined primary+secondary plot carrying an SSR identity reply.
+    fn plot_with_identity(time: f64, range: f64, az: f64, mode_3a: u16, icao: u32) -> Plot {
+        Plot {
+            sensor: SensorId(1),
+            time: Timestamp(time),
+            measurement: Polar::new(range, az, 0.0),
+            kind: DetectionKind::Combined,
+            mode_ac: ModeAC {
+                mode_3a: Some(mode_3a),
+                flight_level_ft: Some(35_000.0),
+                icao_address: Some(icao),
+            },
+        }
     }
 
     /// A new track is born tentative, then confirmed once M-of-N hits accrue.
@@ -387,6 +406,54 @@ mod tests {
         assert!(
             rehit[0].position_uncertainty < coasted[0].position_uncertainty,
             "update sharpens"
+        );
+    }
+
+    /// A track that has only ever seen primary-only plots reports no
+    /// identity. REQ: FR-TRK-009
+    #[test]
+    fn primary_only_track_has_no_identity() {
+        let frame = LocalFrame::new(Wgs84::from_degrees(47.0, 8.0, 500.0));
+        let mut tracker = Tracker::new(config());
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(Timestamp(t), &[plot(t, 50_000.0, 0.0)]);
+        }
+
+        let sts = tracker.system_tracks(&frame);
+        assert_eq!(sts.len(), 1);
+        assert_eq!(sts[0].mode_3a, None);
+        assert_eq!(sts[0].icao_address, None);
+    }
+
+    /// An SSR identity reply is absorbed into the track and reported on the
+    /// `SystemTrack`, surviving a subsequent primary-only (coasted) scan.
+    /// REQ: FR-TRK-009
+    #[test]
+    fn ssr_identity_reaches_system_track_and_stays_sticky() {
+        let frame = LocalFrame::new(Wgs84::from_degrees(47.0, 8.0, 500.0));
+        let mut tracker = Tracker::new(config());
+
+        // Born and confirmed with an SSR-equipped plot.
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[plot_with_identity(t, 50_000.0, 0.0, 0o2613, 0x0040_0123)],
+            );
+        }
+        let sts = tracker.system_tracks(&frame);
+        assert_eq!(sts[0].mode_3a, Some(0o2613));
+        assert_eq!(sts[0].icao_address, Some(0x0040_0123));
+
+        // A subsequent primary-only hit must not erase the known identity.
+        tracker.process_scan(Timestamp(12.0), &[plot(12.0, 50_000.0, 0.0)]);
+        let sts = tracker.system_tracks(&frame);
+        assert_eq!(sts[0].mode_3a, Some(0o2613), "identity stays sticky");
+        assert_eq!(
+            sts[0].icao_address,
+            Some(0x0040_0123),
+            "identity stays sticky"
         );
     }
 }

@@ -10,7 +10,7 @@
 //! The track records its recent association outcomes (hit/miss) so the
 //! [`crate::Tracker`] can apply M-of-N confirmation and miss-based deletion.
 
-use firefly_core::TrackId;
+use firefly_core::{ModeAC, TrackId};
 use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +41,13 @@ pub struct Track {
     recent: Vec<bool>,
     /// Consecutive misses since the last hit.
     consecutive_misses: u32,
+    /// Most recently reported Mode 3/A code ("squawk"), if any SSR-equipped
+    /// plot has ever associated with this track. Sticky: a plot without an
+    /// SSR reply (e.g. a primary-only detection) does not clear it.
+    mode_3a: Option<u16>,
+    /// Most recently reported Mode S 24-bit ICAO address, if any SSR-equipped
+    /// plot has ever associated with this track. Sticky, like `mode_3a`.
+    icao_address: Option<u32>,
 }
 
 impl Track {
@@ -54,6 +61,8 @@ impl Track {
             last_hit_time: time, // the founding plot is a hit
             recent: Vec::new(),
             consecutive_misses: 0,
+            mode_3a: None,
+            icao_address: None,
         }
     }
 
@@ -121,5 +130,109 @@ impl Track {
     /// Promote to confirmed.
     pub(crate) fn confirm(&mut self) {
         self.status = TrackStatus::Confirmed;
+    }
+
+    /// Most recently reported Mode 3/A code ("squawk"), if known.
+    pub fn mode_3a(&self) -> Option<u16> {
+        self.mode_3a
+    }
+
+    /// Most recently reported Mode S 24-bit ICAO address, if known.
+    pub fn icao_address(&self) -> Option<u32> {
+        self.icao_address
+    }
+
+    /// Absorb the SSR identity (if any) of an associated plot.
+    ///
+    /// Sticky: a present value overwrites the stored one, but a `None` (e.g.
+    /// from a primary-only detection) leaves the last known identity in
+    /// place — losing one SSR reply should not erase what we already know.
+    pub(crate) fn update_identity(&mut self, mode_ac: &ModeAC) {
+        if mode_ac.mode_3a.is_some() {
+            self.mode_3a = mode_ac.mode_3a;
+        }
+        if mode_ac.icao_address.is_some() {
+            self.icao_address = mode_ac.icao_address;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kalman::LinearKalman;
+    use crate::measurement::{convert_plot, SensorErrorModel};
+    use firefly_geo::Polar;
+
+    fn fresh_track() -> Track {
+        let model = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
+        let measurement = convert_plot(&Polar::new(50_000.0, 0.0, 0.0), &model);
+        let filter = LinearKalman::from_first_measurement(&measurement, 200.0);
+        Track::new(TrackId(1), filter, 0.0)
+    }
+
+    /// A fresh track has no known identity yet.
+    /// REQ: FR-TRK-009
+    #[test]
+    fn fresh_track_has_no_identity() {
+        let track = fresh_track();
+        assert_eq!(track.mode_3a(), None);
+        assert_eq!(track.icao_address(), None);
+    }
+
+    /// An SSR reply on an associated plot is absorbed into the track.
+    /// REQ: FR-TRK-009
+    #[test]
+    fn identity_is_absorbed_from_ssr_reply() {
+        let mut track = fresh_track();
+        track.update_identity(&ModeAC {
+            mode_3a: Some(0o2613),
+            flight_level_ft: Some(35_000.0),
+            icao_address: Some(0x0040_0123),
+        });
+        assert_eq!(track.mode_3a(), Some(0o2613));
+        assert_eq!(track.icao_address(), Some(0x0040_0123));
+    }
+
+    /// A primary-only plot (no SSR reply) does not erase a previously known
+    /// identity — losing one reply should not wipe out what we already know.
+    /// REQ: FR-TRK-009
+    #[test]
+    fn missing_ssr_reply_does_not_clear_known_identity() {
+        let mut track = fresh_track();
+        track.update_identity(&ModeAC {
+            mode_3a: Some(0o2613),
+            flight_level_ft: None,
+            icao_address: Some(0x0040_0123),
+        });
+
+        track.update_identity(&ModeAC::default());
+
+        assert_eq!(track.mode_3a(), Some(0o2613), "squawk stays sticky");
+        assert_eq!(
+            track.icao_address(),
+            Some(0x0040_0123),
+            "ICAO address stays sticky"
+        );
+    }
+
+    /// A new SSR reply overwrites the previously known identity (e.g. the
+    /// pilot was assigned a new squawk).
+    /// REQ: FR-TRK-009
+    #[test]
+    fn new_ssr_reply_overwrites_known_identity() {
+        let mut track = fresh_track();
+        track.update_identity(&ModeAC {
+            mode_3a: Some(0o2613),
+            flight_level_ft: None,
+            icao_address: Some(0x0040_0123),
+        });
+        track.update_identity(&ModeAC {
+            mode_3a: Some(0o7000),
+            flight_level_ft: None,
+            icao_address: Some(0x0040_0123),
+        });
+
+        assert_eq!(track.mode_3a(), Some(0o7000));
     }
 }

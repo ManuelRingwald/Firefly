@@ -116,6 +116,8 @@ mod tests {
             coasting: false,
             update_age: 0.0,
             position_uncertainty: 42.0,
+            mode_3a: None,
+            icao_address: None,
         }
     }
 

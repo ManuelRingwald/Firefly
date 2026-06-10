@@ -52,6 +52,15 @@ pub struct SystemTrack {
     /// — the tracker's honest "how sure am I about this position right now".
     /// Maps to CAT062 I062/500 (estimated accuracies).
     pub position_uncertainty: f64,
+    /// Most recently reported Mode 3/A code ("squawk"), if any SSR-equipped
+    /// plot has ever associated with this track. `None` for a primary-only
+    /// track. Will feed a CAT062 identity item (exact item TBD, M4).
+    pub mode_3a: Option<u16>,
+    /// Most recently reported Mode S 24-bit ICAO aircraft address, if any
+    /// SSR-equipped plot has ever associated with this track. `None` for a
+    /// primary-only track. Will feed a CAT062 identity item (exact item TBD,
+    /// M4) and is the eventual correlation key for multi-radar fusion.
+    pub icao_address: Option<u32>,
 }
 
 impl SystemTrack {
@@ -94,6 +103,8 @@ mod tests {
             coasting: false,
             update_age: 0.0,
             position_uncertainty: 0.0,
+            mode_3a: None,
+            icao_address: None,
         }
     }
 
