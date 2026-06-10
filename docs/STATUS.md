@@ -6,12 +6,15 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** Häppchen **4.1** — SSR-Identität (Mode-3/A-Code,
-  Mode-S-ICAO-Adresse) wird vom `Plot` über den `Track` bis zum `SystemTrack`
-  durchgereicht (FR-TRK-009). Übernahme ist „sticky": ein Plot ohne SSR-Antwort
-  löscht eine bekannte Identität nicht, eine neue SSR-Antwort überschreibt sie.
-  Grundlage für CAT062-Identitätsfelder (4.2, noch offen) und den
-  Korrelations-Schlüssel (ICAO-Adresse) der Multi-Radar-Fusion (M4).
+- **Letzter Commit:** Häppchen **4.0** — Architektur-Entscheidung für die
+  Multi-Radar-Fusion (ADR 0010): **Option A, zentrale Mess-Fusion** (ein
+  Tracker nimmt den gemischten Multi-Sensor-Plot-Strom; gemeinsamer
+  Tracking-Frame; Plot-Umrechnung in diesen Frame inkl. Kovarianz;
+  Pro-Sensor-Rauschmodell). Gewählt wegen besserer Präzision (Rohmessungen
+  direkt) bei gleicher Cloud-Tauglichkeit; Synergie mit dem
+  System-Referenzpunkt der CAT062-Ausgabe (ADR 0006). Glossar um Mess-/Track-
+  Fusion, Track-to-Track-Assoziation, lokaler vs. System-Track, Sensor-Bias,
+  gemeinsamer Tracking-Frame ergänzt.
 - **PR:** keiner offen.
 
 ---
@@ -82,12 +85,17 @@
   Koordinatenfrage geklärt — **UDP-Multicast** + **System-Stereografisch**
   (CAT062 I062/100). Noch nicht umgesetzt; als Zielbild in ADR 0006
   festgehalten.
-- **M4 läuft:** Häppchen **4.1 erledigt** — `Track` (firefly-track) merkt sich
-  jetzt die SSR-Identität (Mode-3/A, ICAO-Adresse) aus zugeordneten Plots
-  (`Track::update_identity`, sticky), und `SystemTrack` (firefly-core) führt
-  sie als `mode_3a: Option<u16>` / `icao_address: Option<u32>` mit (FR-TRK-009).
-  Noch offen: CAT062-Kodierung dieser Felder (4.2) und die eigentliche
-  Multi-Radar-Fusion/Architektur-ADR (4.0).
+- **M4 läuft:** Häppchen **4.1 + 4.0 erledigt.**
+  **4.1**: `Track` (firefly-track) merkt sich die SSR-Identität (Mode-3/A,
+  ICAO-Adresse) aus zugeordneten Plots (`Track::update_identity`, sticky), und
+  `SystemTrack` (firefly-core) führt sie als `mode_3a: Option<u16>` /
+  `icao_address: Option<u32>` mit (FR-TRK-009).
+  **4.0**: Architektur-Entscheidung **ADR 0010** — zentrale **Mess-Fusion**
+  (Option A): ein Tracker, gemeinsamer Tracking-Frame, Plot-Umrechnung in
+  diesen Frame (Position + Kovarianz), Pro-Sensor-Rauschmodell. Begründung:
+  Präzision (Rohmessungen) bei gleicher Cloud-Tauglichkeit; Synergie mit dem
+  System-Referenzpunkt der CAT062-Ausgabe (ADR 0006). Noch offen:
+  Umsetzung in 4.A.1–4.A.4 und CAT062-Kodierung der Identität (4.2).
 - Qualität: **102 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
@@ -144,14 +152,24 @@ Koordinatenfrage geklärt — **UDP-Multicast** + **System-Stereografisch**
 I062/100-Encoder, Multicast-Versand) sind als Zielbild in ADR 0006
 festgehalten und werden voraussichtlich im Umfeld von M4 eingeplant.
 
-✅ **M4 Häppchen 4.1 erledigt:** SSR-Identität (Mode-3/A, ICAO-Adresse) wird
-vom `Plot` über den `Track` bis zum `SystemTrack` durchgereicht, sticky
-gegenüber primär-only-Treffern (FR-TRK-009).
+✅ **M4 Häppchen 4.1 + 4.0 erledigt:** SSR-Identität durchgereicht
+(FR-TRK-009); Architektur entschieden — **zentrale Mess-Fusion** (ADR 0010).
 
-➡️ **Als Nächstes:** weitere M4-Häppchen — z. B. **4.2** (CAT062-Kodierung der
-neuen Identitätsfelder, `firefly-asterix`) oder **4.0** (Architektur-ADR für
-die eigentliche Multi-Radar-Fusion: wie werden Tracks mehrerer Sensoren
-korreliert/verschmolzen?), je nach Wunsch des Projektverantwortlichen.
+➡️ **Als Nächstes:** **4.A.1** — Geo-Baustein in `firefly-geo`: Position **und**
+Kovarianz von einem `LocalFrame` in einen anderen umrechnen (Verkettung
+Sensor-ENU → WGS84 → Tracking-ENU samt Kovarianz-Rotation). Reine, isoliert
+testbare Mathematik. *S4 · Opus 4.8 · Effort hoch.*
+
+### M4-Plan in Häppchen (Option A, ADR 0010)
+
+- [x] **4.1** SSR-Identität bis zum `SystemTrack` (FR-TRK-009) — *S3 · Sonnet*
+- [x] **4.0** Architektur-Entscheidung: zentrale Mess-Fusion (ADR 0010) — *S4 · Opus 4.8*
+- [ ] **4.A.1** `firefly-geo`: Frame-zu-Frame-Transformation (Position + Kovarianz) — *S4 · Opus 4.8 · Effort hoch*
+- [ ] **4.A.2** `firefly-track` auf Multi-Sensor: gemeinsamer Tracking-Frame, Plot-Umrechnung vor Assoziation, Pro-Sensor-Rauschmodell — *S4–S5 · Opus 4.8 / Fable 5 · Effort hoch*
+- [ ] **4.A.3** Multi-Radar-Szenario (zwei überlappende Radare) + E2E-Test: ein Flugzeug → **ein** Track — *S4 · Opus 4.8 · Effort hoch*
+- [ ] **4.A.4** Sensor-Provenienz im `SystemTrack` (welche Sensoren tragen bei) — *S3 · Sonnet · Effort mittel*
+- [ ] **4.2** CAT062-Identitätsfelder kodieren (`firefly-asterix`, unabhängig) — *S3–S4 · Opus 4.8 · Effort mittel–hoch*
+- [ ] *(später)* Sensor-Registrierung / Bias-Korrektur — *S5 · Fable 5 / Opus 4.8*
 
 Offen/optional: Sichtprüfung des Frontends (inkl. „Verzug"-Knopf) im Browser
 durch den Projektverantwortlichen.

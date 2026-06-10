@@ -237,6 +237,41 @@ Mehrere Radare sehen dasselbe Ziel. Fusion bedeutet, ihre Meldungen zeitlich
 abzugleichen, systematische Messfehler (Bias) zu korrigieren und zu *einem*
 gemeinsamen Track zusammenzuführen.
 
+**Mess-Fusion (zentrales Tracking)** vs. **Track-Fusion (track-to-track)**
+Zwei Wege, mehrere Radare zu fusionieren (siehe ADR 0010):
+- **Mess-Fusion:** *alle* Plots aller Sensoren laufen in **einen** Tracker, der
+  **ein** gemeinsames Lagebild pflegt. Genauer (verarbeitet Rohmessungen direkt),
+  braucht aber einen gemeinsamen Koordinatenrahmen. *Unsere Wahl für M4.*
+- **Track-Fusion:** *jeder* Sensor hat seinen **eigenen** Tracker (lokale Tracks);
+  eine Schicht darüber verschmilzt die zusammengehörigen lokalen Tracks. Modular,
+  aber das Fusionieren bereits gefilterter Tracks ist mathematisch heikler.
+
+**Track-to-Track-Assoziation**
+Bei der Track-Fusion: die Frage „Sind dieser lokale Track von Radar A und jener
+von Radar B *dasselbe* Flugzeug?". Bei der Mess-Fusion entfällt sie, weil es von
+vornherein nur *einen* Track je Flugzeug gibt.
+
+**Lokaler Track vs. System-Track**
+Ein **lokaler Track** ist die Schätzung *eines einzelnen* Sensors (sein eigener
+Tracker). Der **System-Track** ist das *fusionierte*, nach außen gegebene
+Ergebnis über alle Sensoren (in ASTERIX: CAT062). Bei zentraler Mess-Fusion
+(unsere Wahl) gibt es gar keine separaten lokalen Tracks — der eine Tracker
+liefert direkt System-Tracks.
+
+**Sensor-Registrierung / Sensor-Bias**
+**Bias** ist ein *systematischer* (nicht zufälliger) Messfehler eines Sensors —
+z. B. ein Radar, dessen Azimut konstant um 0,2° verdreht oder dessen Entfernung
+um 150 m versetzt ist. **Registrierung** ist das Vermessen und Herausrechnen
+dieser Versätze, damit zwei Radare dasselbe Flugzeug an *denselben* Ort legen.
+Bleibt der Bias unkorrigiert, zieht die Fusion ein Flugzeug auseinander (Geist/
+Duplikat). Eigenes, späteres Thema (für beide Fusionswege gleich).
+
+**Gemeinsamer Tracking-Frame / System-Referenzpunkt**
+Der eine lokale ENU-Bezugsrahmen, in dem der zentrale Tracker rechnet —
+unabhängig von jedem einzelnen Sensorstandort. Jeder Plot wird vor der
+Verarbeitung in diesen Rahmen umgerechnet. Es ist zugleich der Bezugspunkt der
+System-Stereografischen CAT062-Ausgabe (ADR 0006).
+
 **Track-Kontinuität**
 Maß dafür, ob *ein* Ziel *eine* durchgehende Track-Spur behält. Zwei Teilzahlen:
 **Coverage** (Anteil der Scans, in denen das Ziel überhaupt einen bestätigten
