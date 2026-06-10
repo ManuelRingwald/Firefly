@@ -127,6 +127,9 @@ impl Tracker {
                     v_east: v[0],
                     v_north: v[1],
                     confirmed: track.is_confirmed(),
+                    coasting: track.is_coasting(),
+                    update_age: track.update_age(),
+                    position_uncertainty: track.filter.position_uncertainty(),
                 }
             })
             .collect()
@@ -164,6 +167,7 @@ impl Tracker {
         // 4a. Update associated tracks (a hit).
         for &(ti, mi) in &assoc.pairs {
             self.tracks[ti].filter.update(&measurements[mi]);
+            self.tracks[ti].last_hit_time = t;
             self.tracks[ti].observe(true, cfg.confirm_n);
         }
         // 4b. Coast unassociated tracks (a miss).
@@ -339,5 +343,50 @@ mod tests {
         let back = frame.geodetic_to_enu(&sts[0].position);
         assert!(back.north > 49_000.0, "A is far north of the sensor");
         assert!(back.east.abs() < 200.0, "A is ~due north (east ≈ 0)");
+    }
+
+    /// The safety-relevant status is reported and the tracker decides it: a
+    /// just-hit track is fresh; a missed scan makes it coast (age grows,
+    /// uncertainty grows); a fresh plot clears it again (age 0, uncertainty
+    /// shrinks). REQ: FR-TRK-008
+    #[test]
+    fn system_tracks_report_coasting_age_and_uncertainty() {
+        let frame = LocalFrame::new(Wgs84::from_degrees(48.0, 11.0, 0.0));
+        let mut tracker = Tracker::new(config());
+
+        // Confirm a stationary track at 50 km due north.
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(Timestamp(t), &[plot(t, 50_000.0, 0.0)]);
+        }
+        let fresh = tracker.system_tracks(&frame);
+        assert_eq!(fresh.len(), 1);
+        assert!(!fresh[0].coasting, "just-hit track is not coasting");
+        assert!(fresh[0].update_age.abs() < 1e-9, "age 0 right after a hit");
+        assert!(fresh[0].position_uncertainty > 0.0);
+        let sigma_fresh = fresh[0].position_uncertainty;
+
+        // One missed scan → the track coasts.
+        tracker.process_scan(Timestamp(12.0), &[]);
+        let coasted = tracker.system_tracks(&frame);
+        assert!(coasted[0].coasting, "missed scan → coasting");
+        assert!(
+            (coasted[0].update_age - 4.0).abs() < 1e-9,
+            "age = one scan interval"
+        );
+        assert!(
+            coasted[0].position_uncertainty > sigma_fresh,
+            "uncertainty grows while coasting"
+        );
+
+        // A fresh plot → no longer coasting, age resets, uncertainty shrinks.
+        tracker.process_scan(Timestamp(16.0), &[plot(16.0, 50_000.0, 0.0)]);
+        let rehit = tracker.system_tracks(&frame);
+        assert!(!rehit[0].coasting);
+        assert!(rehit[0].update_age.abs() < 1e-9);
+        assert!(
+            rehit[0].position_uncertainty < coasted[0].position_uncertainty,
+            "update sharpens"
+        );
     }
 }

@@ -39,7 +39,19 @@ pub struct SystemTrack {
     pub v_north: f64,
     /// Whether the track is confirmed (vs. still tentative). The neutral port
     /// reports both and leaves the publish/suppress policy to the adapter.
+    /// Maps to the CNF bit of ASTERIX CAT062 I062/080.
     pub confirmed: bool,
+    /// Whether the track is currently *coasting* — extrapolated from prediction
+    /// because it had no fresh measurement this scan. Maps to the CST bit of
+    /// CAT062 I062/080. A track may be both `confirmed` and `coasting`.
+    pub coasting: bool,
+    /// Update age: data-time since the last real measurement, seconds. `0` right
+    /// after a hit, growing while coasting. Maps to CAT062 I062/290 (track ages).
+    pub update_age: f64,
+    /// Position uncertainty: the 1σ semi-major axis of the error ellipse, metres
+    /// — the tracker's honest "how sure am I about this position right now".
+    /// Maps to CAT062 I062/500 (estimated accuracies).
+    pub position_uncertainty: f64,
 }
 
 impl SystemTrack {
@@ -79,6 +91,9 @@ mod tests {
             v_east,
             v_north,
             confirmed: true,
+            coasting: false,
+            update_age: 0.0,
+            position_uncertainty: 0.0,
         }
     }
 

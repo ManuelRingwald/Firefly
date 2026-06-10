@@ -191,6 +191,23 @@ impl LinearKalman {
     pub fn position_covariance(&self) -> Matrix2<f64> {
         self.p.fixed_view::<2, 2>(0, 0).into_owned()
     }
+
+    /// The 1σ **semi-major axis** of the position error ellipse, in metres —
+    /// a single honest scalar for "how uncertain is the position right now".
+    ///
+    /// The position covariance is anisotropic (the same cigar shape as the
+    /// measurement and the gate), so we report its *longest* 1σ spread: the
+    /// square root of the larger eigenvalue of the 2×2 position block. For a
+    /// symmetric `[[a, b], [b, c]]` the eigenvalues have the closed form
+    /// `(a+c)/2 ± sqrt(((a−c)/2)² + b²)` — exact, no iteration.
+    pub fn position_uncertainty(&self) -> f64 {
+        let p = self.position_covariance();
+        let (a, b, c) = (p[(0, 0)], p[(0, 1)], p[(1, 1)]);
+        let mean = 0.5 * (a + c);
+        let half_diff = 0.5 * (a - c);
+        let radius = (half_diff * half_diff + b * b).sqrt();
+        (mean + radius).max(0.0).sqrt()
+    }
 }
 
 #[cfg(test)]
@@ -237,6 +254,31 @@ mod tests {
             kf.position_covariance()[(0, 0)] < before,
             "update should sharpen"
         );
+    }
+
+    /// The position uncertainty is the 1σ semi-major axis of the error ellipse:
+    /// the square root of the *larger* eigenvalue of the 2×2 position block.
+    /// REQ: FR-TRK-008
+    #[test]
+    fn position_uncertainty_is_semi_major_one_sigma() {
+        // Anisotropic, axis-aligned: variances 100 (east) and 25 (north).
+        let kf = LinearKalman {
+            x: Vector4::zeros(),
+            p: {
+                let mut p = Matrix4::zeros();
+                p[(0, 0)] = 100.0;
+                p[(1, 1)] = 25.0;
+                p
+            },
+        };
+        // Larger eigenvalue is 100 → semi-major 1σ = 10 m (not sqrt(125)).
+        assert!((kf.position_uncertainty() - 10.0).abs() < 1e-9);
+
+        // Prediction grows the cigar, so the semi-major axis grows too.
+        let mut moving = kf;
+        let before = moving.position_uncertainty();
+        moving.predict(10.0, &ProcessNoise::new(1.0));
+        assert!(moving.position_uncertainty() > before);
     }
 
     /// A very precise measurement pulls the estimate almost onto it; a very

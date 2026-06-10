@@ -33,6 +33,9 @@ pub struct Track {
     pub(crate) filter: LinearKalman,
     /// Data time of the last predict/update, seconds.
     pub(crate) last_time: f64,
+    /// Data time of the last *real* measurement (hit), seconds. Drives the
+    /// update age — how long the track has been running on prediction alone.
+    pub(crate) last_hit_time: f64,
     /// Recent association outcomes (true = hit), capped to the confirmation
     /// window; most recent at the back.
     recent: Vec<bool>,
@@ -48,6 +51,7 @@ impl Track {
             status: TrackStatus::Tentative,
             filter,
             last_time: time,
+            last_hit_time: time, // the founding plot is a hit
             recent: Vec::new(),
             consecutive_misses: 0,
         }
@@ -66,6 +70,18 @@ impl Track {
     /// Whether the track is confirmed.
     pub fn is_confirmed(&self) -> bool {
         self.status == TrackStatus::Confirmed
+    }
+
+    /// Whether the track is currently *coasting* — running on prediction alone
+    /// because its last association outcome was a miss (no fresh measurement).
+    pub fn is_coasting(&self) -> bool {
+        self.consecutive_misses > 0
+    }
+
+    /// Update age: data-time elapsed since the last real measurement, seconds.
+    /// `0` right after a hit; grows by one scan interval per coasted scan.
+    pub fn update_age(&self) -> f64 {
+        self.last_time - self.last_hit_time
     }
 
     /// Estimated position `[east, north]`, metres.

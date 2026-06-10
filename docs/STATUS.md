@@ -4,10 +4,10 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-09
+- **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M2 Häppchen 2.8 — Güte-Metriken (RMSE, Track-Kontinuität)
-  in `firefly-track`. **M2 abgeschlossen.**
+- **Letzter Commit:** Nachtrag zu M2 — safety-relevanter `SystemTrack`-Status
+  (coasting / Update-Alter / Positions-Unsicherheit), ADR 0008, FR-TRK-008.
 - **PR:** #1 (offen).
 
 ---
@@ -26,11 +26,14 @@
   `Tracker::system_tracks(&LocalFrame)` — der ASD-Port Richtung CAT062.
   **2.8**: Güte-Metriken (`Rmse`, `TrackContinuity`) gegen Ground Truth; E2E-Test
   mit Positions-RMSE < 40 m, 0 ID-Wechsel, Coverage > 90 %.
+  **Nachtrag (ADR 0008, FR-TRK-008):** der `SystemTrack` trägt jetzt den
+  safety-relevanten Status — `coasting`, `update_age`, `position_uncertainty`
+  (1σ-Halbachse aus `P`) → bereitet CAT062 I062/080, /290, /500 vor.
   Externe Abhängigkeiten `nalgebra` (ADR 0005), `serde` (ADR 0007).
-- Qualität: **65 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
+- Qualität: **67 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
-- **Dokumentation** aufgebaut: Glossar, M1-Erklärung, ADRs 0001–0004,
+- **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0008,
   Anforderungs-Register mit Rückverfolgbarkeit.
 
 ## 2. Gesetzte Entscheidungen (Fundament, nicht mehr offen)
@@ -48,19 +51,21 @@
 
 ## 3. Nächster Schritt (hier geht es weiter!)
 
-✅ **M2 ist abgeschlossen.** Der Single-Radar-Tracker steht vollständig:
-Messung → Filter → Gate → Zuordnung → Lebenszyklus → Snapshot/Replay → neutraler
-WGS84-Output → Güte-Metriken.
+✅ **M2 ist abgeschlossen** (inkl. Nachtrag: safety-relevanter `SystemTrack`-Status,
+ADR 0008). Der Single-Radar-Tracker steht vollständig: Messung → Filter → Gate →
+Zuordnung → Lebenszyklus → Snapshot/Replay → neutraler WGS84-Output mit
+Safety-Status → Güte-Metriken.
 
-➡️ **Als Nächstes: zwei mögliche Richtungen** — der Projektverantwortliche wählt:
+➡️ **Als Nächstes: Härtungs-Häppchen (NFR-CLOUD-004) — Timing-Robustheit.**
+Ein Integrationstest (`tests/timing.rs`), der zeigt: (1) eine lange Scan-Lücke
+*mit* Daten erhält Identität und Spur (kein Reset), (2) Löschung hängt an der
+**Fehltreffer-Anzahl**, nicht an verstrichener Zeit. Klein, schnell, und genau das
+Argument für die Chef-Vorführung. **Erklärung steht bereits** (siehe Chat), wartet
+auf **Go**. *(S3 · Sonnet · Effort mittel.)*
 
-1. **Härtungs-Häppchen (NFR-CLOUD-004) — Timing-Robustheit.** Ein Test mit
-   künstlich langen/ungleichen Scan-Lücken, der zeigt, dass Firefly Tracks
-   *durchhält* statt sie zu verwerfen. *(S3 · Sonnet · Effort mittel.)* Klein,
-   schnell, und liefert genau das Argument für die Chef-Vorführung.
-2. **Start von M3** — Web-Frontend mit Live-2D-Karte über WebSocket; hier wird
-   auch die Ein-Befehl-Demo (NFR-OPS-001) konkret. *(Größer; WebSocket-Server
-   S4 · Opus/Fable 5, Map-Frontend S3 · Sonnet — siehe §4.)*
+Danach: **Start von M3** — Web-Frontend mit Live-2D-Karte über WebSocket; hier wird
+auch die Ein-Befehl-Demo (NFR-OPS-001) konkret. *(Größer; WebSocket-Server
+S4 · Opus/Fable 5, Map-Frontend S3 · Sonnet — siehe §4.)*
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 

@@ -110,6 +110,12 @@ muss (oft „M aus N": z. B. in 3 von 4 Scans wiedergesehen).
 Wenn ein bestätigter Track in einem Scan keinen Plot bekommt (Ziel kurz nicht
 gesehen), „segelt" er auf Basis der Vorhersage weiter, statt sofort zu sterben.
 
+**Update-Alter (*Track Update Age*)**
+Wie viel **Datenzeit** seit dem letzten *realen Treffer* eines Tracks vergangen
+ist. 0 s = gerade frisch gemessen; wächst, solange der Track coastet. Sagt dem
+Verbraucher (Anzeige), wie „frisch" eine Spur ist — ohne die Wanduhr. In ASTERIX
+CAT062 als I062/290 geführt.
+
 **Track-Lebenszyklus (tentativ / bestätigt)**
 Die „Lebensphasen" eines Tracks: Er wird **tentativ** (auf Probe) geboren,
 wird nach Bewährung (M-aus-N) **bestätigt** (*confirmed*) und der Luftlage
@@ -251,6 +257,13 @@ selten. Mess- und Modellfehler werden meist so beschrieben.
 Die „Unsicherheit in mehreren Dimensionen" — beschreibt nicht nur, wie ungenau
 einzelne Werte sind, sondern auch, wie ihre Fehler zusammenhängen (z. B.
 Position und Geschwindigkeit). Der Kalman-Filter rechnet ständig damit.
+
+**Fehlerellipse / 1σ-Halbachse**
+Die anschauliche Form der Positions-Unsicherheit: eine Ellipse (die „Zigarre"),
+deren Achsen aus der Kovarianz folgen. Die **lange Halbachse** (Wurzel des
+größten Eigenwerts der 2×2-Positions-Kovarianz) ist ein einzelnes, ehrliches Maß
+für „wie unsicher ist die Position gerade" — das Maß, das der Tracker als
+Positions-Unsicherheit ausgibt (CAT062 I062/500).
 
 **Mahalanobis-Distanz**
 Ein „fairer" Abstand, der die Unsicherheit berücksichtigt: Ein Plot, der in

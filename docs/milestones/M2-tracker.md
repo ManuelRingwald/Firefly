@@ -367,3 +367,46 @@ Lebenszyklus → Snapshot/Replay → neutraler WGS84-Output → Güte-Metriken. 
 **M3** (Web-Frontend mit Live-2D-Karte über WebSocket) — dort wird auch die
 einfache, vorführbare Demo (NFR-OPS-001) konkret, samt einer Szene, die die
 Timing-Robustheit (NFR-CLOUD-004) sichtbar macht.
+
+---
+
+## Nachtrag — Safety-relevanter Status auf dem `SystemTrack` (ADR 0008)
+
+**Status:** ✅ umgesetzt · Anforderung `FR-TRK-008`
+
+### Die Idee (fachlich)
+
+Aus einer wichtigen Frage zur Architektur entstand [ADR 0008](../decisions/0008-safety-track-zustand-im-tracker.md):
+Die Entscheidung „ist dieser Track noch vertrauenswürdig genug, um ihn dem Lotsen
+zu zeigen?" ist **safety-relevant** und gehört in den **assured Tracker**, nicht
+in die darstellende ASD — sonst würde aus der „dummen ASD" ein safety-kritisches
+Element mit hoher SWAL. Der Tracker muss seine Einschätzung daher **explizit
+mitliefern**; die ASD stellt sie nur dar.
+
+### Die Umsetzung (technisch)
+
+Der `SystemTrack` trägt jetzt — neben `confirmed` — drei safety-relevante Felder,
+die der Tracker selbst entscheidet und füllt:
+- **`coasting`** — wird der Track gerade extrapoliert (kein frischer Treffer)?
+  (CAT062 I062/080, CST-Bit; unabhängig vom CNF-Bit `confirmed`.)
+- **`update_age`** — Datenzeit seit dem letzten realen Treffer (CAT062 I062/290).
+- **`position_uncertainty`** — die **1σ-Halbachse** der Fehlerellipse, geschlossen
+  aus dem größten Eigenwert der 2×2-Positions-Kovarianz `P` (CAT062 I062/500).
+
+Dafür merkt sich der `Track` die Datenzeit des letzten Treffers (`last_hit_time`);
+`LinearKalman` bekommt `position_uncertainty()`. Alles datenzeit-getrieben — kein
+Widerspruch zum No-Wanduhr-Prinzip (NFR-CLOUD-004).
+
+### Der Kern-Nachweis
+
+Ein Filter-Test belegt die geschlossene Eigenwert-Form (lange Halbachse, nicht
+RMS). Ein Tracker-Test zeigt den ganzen Bogen: frisch getroffen → `coasting=false`,
+Alter 0; ein Fehltreffer → `coasting=true`, Alter = ein Scan-Intervall, Unsicherheit
+**wächst**; ein neuer Plot → Alter 0, Unsicherheit **schrumpft**.
+
+### Abgrenzung
+
+Das **Drop-Kriterium** bleibt unverändert (Löschung nach Fehltreffer-Anzahl);
+hier wird die Unsicherheit nur *sichtbar gemacht*, damit später ein
+kovarianzbasiertes Kriterium möglich ist. Die **volle 2×2-Kovarianz** (für
+CAT062 I062/500 mit Korrelation) folgt mit dem CAT062-Encoder.
