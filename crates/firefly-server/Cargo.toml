@@ -1,0 +1,33 @@
+[package]
+name = "firefly-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The Firefly M3 web server: streams the tracker's frame stream to a browser over WebSocket."
+
+[dependencies]
+firefly-core = { workspace = true }
+firefly-geo = { workspace = true }
+firefly-sim = { workspace = true }
+firefly-track = { workspace = true }
+firefly-io = { workspace = true }
+firefly-player = { workspace = true }
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "signal",
+    "sync",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
+tower = { version = "0.5", features = ["util"] }

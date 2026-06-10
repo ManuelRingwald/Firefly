@@ -483,6 +483,18 @@ Konfiguration über Umgebungsvariablen statt fest im Code).
 Kleine Selbstauskünfte eines Dienstes: „Lebe ich noch?" (health) und „Bin ich
 bereit, Last anzunehmen?" (readiness). Kubernetes nutzt sie zum Steuern.
 
+**Geordnetes Herunterfahren (Graceful Shutdown)**
+Beim Stopp-Signal (z. B. SIGTERM, das Kubernetes vor dem Beenden schickt) fährt
+der Dienst *kontrolliert* herunter: keine neuen Verbindungen mehr annehmen,
+laufende sauber beenden, dann erst aussteigen — statt einfach „abgewürgt" zu
+werden. Wichtig, damit beim Skalieren/Neustart in der Cloud nichts hart abreißt.
+
+**Tempo-Faktor / Playback-Geschwindigkeit**
+Beim Abspielen eines aufgezeichneten/simulierten Datenstroms: das Verhältnis von
+**Datenzeit zu Wanduhr** (z. B. „2× so schnell"). Liegt bewusst am *Ausgabe-Rand*
+(Server), nicht im Tracker — den Strom schneller, langsamer oder pausiert
+*zuzustellen* ändert keine einzige Track-Entscheidung (ADR 0003, NFR-CLOUD-004).
+
 **Observability (Beobachtbarkeit)**
 Die Fähigkeit, von außen zu verstehen, was ein laufendes System tut — über
 **Logs** (Ereignis-Protokolle), **Metriken** (Messzahlen) und **Tracing**

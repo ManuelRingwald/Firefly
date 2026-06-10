@@ -6,9 +6,10 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M3 Häppchen 3.2 — „Player": neue Crate `firefly-player`
-  führt ein Szenario durch den Tracker und erzeugt den vollständigen,
-  deterministischen Frame-Strom (FR-IO-002).
+- **Letzter Commit:** M3 Häppchen 3.3 — WebSocket-Server: neue Crate
+  `firefly-server` (axum/Tokio) streamt den Frame-Strom live, mit
+  Health-/Readiness-Probes, 12-Factor-Config, geordnetem Shutdown und
+  strukturierten Logs (FR-NET-001, NFR-OBS-001).
 - **PR:** #1 (offen).
 
 ---
@@ -35,7 +36,7 @@
   Externe Abhängigkeiten `nalgebra` (ADR 0005), `serde` (ADR 0007).
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
-- **M3 läuft:** Häppchen **3.0–3.1 erledigt.**
+- **M3 läuft:** Häppchen **3.0–3.3 erledigt.**
   **3.0**: Architektur-Entscheidung (ADR 0009): Async-Server **Tokio + axum**,
   Transport **WebSocket**, erster Ausgabe-Adapter **JSON**, Karten-Frontend
   **MapLibre GL** (GPU-Vektorkarte, anbieter-neutral, mit Blick auf M4).
@@ -46,10 +47,15 @@
   **3.2**: neue Crate **`firefly-player`** — `Player::new(&scenario, config)` +
   `.frames()` führt das Szenario (M1) durch den Tracker (M2) und erzeugt den
   **Frame-Strom** (ein `Frame` je Scan-Zeit) über `firefly-io` (FR-IO-002). Rein
-  und deterministisch (kein Netz, keine Wanduhr) — Tempo-Steuerung ist eine
-  spätere, getrennte Hülle (3.3/3.5).
-- Qualität: **76 Tests + 1 Doctest grün** (4 neu in `firefly-player`), Clippy
-  sauber, `cargo fmt` ok.
+  und deterministisch.
+  **3.3**: neue Crate **`firefly-server`** (axum/Tokio) streamt den Frame-Strom
+  über **WebSocket** (`/ws`) an den Browser, getaktet nach Datenzeit am
+  Ausgabe-Rand (Tempo-Faktor `FIREFLY_SPEED`); dazu Health-/Readiness-Probes,
+  12-Factor-Config (`FIREFLY_PORT`), geordnetes Shutdown (SIGTERM) und
+  strukturierte `tracing`-Logs (FR-NET-001, NFR-OBS-001). Start mit **einem
+  Befehl**: `cargo run -p firefly-server` → `http://localhost:8080`.
+- Qualität: **88 Tests + 1 Doctest grün** (12 neu in `firefly-server`, inkl.
+  echtem WebSocket-Integrationstest), Clippy sauber, `cargo fmt` ok.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
 
@@ -76,18 +82,19 @@ Safety-Status → Güte-Metriken.
 ✅ **Timing-Härtung (NFR-CLOUD-004) erledigt** — `tests/timing.rs` beweist beide
 Eigenschaften. Damit ist M2 inkl. aller Veredelungen abgeschlossen.
 
-✅ **M3 Häppchen 3.0–3.2 erledigt** — ADR 0009 steht (Tokio/axum, WebSocket,
-JSON, MapLibre GL); `firefly-io` liefert das neutrale `Frame` als JSON
-(FR-IO-001); `firefly-player` liefert daraus den vollständigen, deterministischen
-Frame-Strom für ein Szenario (FR-IO-002).
+✅ **M3 Häppchen 3.0–3.3 erledigt** — ADR 0009 steht; `firefly-io` liefert das
+`Frame` als JSON (FR-IO-001); `firefly-player` den deterministischen Frame-Strom
+(FR-IO-002); `firefly-server` streamt ihn live über WebSocket mit Probes,
+12-Factor-Config, Shutdown und Logs (FR-NET-001, NFR-OBS-001). Der Server läuft
+mit einem Befehl und zeigt unter `/` eine Platzhalter-Textansicht des Stroms.
 
-➡️ **Als Nächstes: Häppchen 3.3 — WebSocket-Server.** Ein axum/Tokio-Server, der
-`Player::frames()` über eine WebSocket-Verbindung an den Browser pusht — inkl.
-Health-/Readiness-Probes, 12-Factor-Konfiguration, geordnetem Shutdown und
-strukturierten Logs (NFR-OBS-001). Hier kommt die **Tempo-Steuerung** dazu (wie
-schnell der Frame-Strom gesendet wird) — getrennt von der reinen Player-Logik.
-Danach 3.4 MapLibre-Frontend → 3.5 Ein-Befehl-Demo (NFR-OPS-001, inkl. sichtbarer
-Timing-Robustheit). CAT062-Encoder (3.X) folgt nach der Demo.
+➡️ **Als Nächstes: Häppchen 3.4 — MapLibre-Frontend.** Die Platzhalter-Seite
+durch eine echte 2D-Karte ersetzen: Tracks als Symbole, coasting gestrichelt,
+Unsicherheits-Ellipse aus `position_uncertainty_m`, Geschwindigkeitsvektor aus
+Kurs/Speed. Statisches HTML/JS (vom Server ausgeliefert), das den `/ws`-Strom
+konsumiert. Danach 3.5 Ein-Befehl-Demo (NFR-OPS-001, inkl. sichtbarer
+Timing-Robustheit via „Verzug"-Auslöser). CAT062-Encoder (3.X) folgt nach der
+Demo.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
@@ -96,7 +103,7 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 - [x] **3.0** Architektur-Entscheidung (ADR 0009: Tokio/axum, WebSocket, JSON, MapLibre) — *S2 · Sonnet · Effort niedrig*
 - [x] **3.1** JSON-Ausgabe-Adapter (`Frame` = Zeit + Sensor + `SystemTrack[]`, `serde_json`; Crate `firefly-io`, FR-IO-001) — *S2–S3 · Sonnet · Effort niedrig–mittel*
 - [x] **3.2** „Player": Szenario → Tracker → Frame-Strom (reine Logik, Tempo getrennt vom Kern; Crate `firefly-player`, FR-IO-002) — *S3 · Sonnet · Effort mittel*
-- [ ] **3.3** WebSocket-Server (axum/tokio, Health/Readiness, 12-Factor, Shutdown, Logs/NFR-OBS-001) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
+- [x] **3.3** WebSocket-Server (axum/tokio, Health/Readiness, 12-Factor, Shutdown, Logs/NFR-OBS-001; Crate `firefly-server`, FR-NET-001) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
 - [ ] **3.4** Frontend 2D-Karte mit Live-Tracks (MapLibre; coasting gestrichelt, Unsicherheits-Ellipse aus `position_uncertainty`) — *S3 · Sonnet · Effort mittel*
 - [ ] **3.5** Demo-Erlebnis (ein Befehl, Demo-Szene, „Verzug"-Auslöser zeigt Timing-Robustheit) — *S3 · Sonnet · Effort mittel*
 - [ ] **3.X** CAT062-Encoder-Adapter (parallel/später, nach der Demo) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
