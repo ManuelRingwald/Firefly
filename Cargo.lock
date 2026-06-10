@@ -39,6 +39,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-io"
+version = "0.1.0"
+dependencies = [
+ "firefly-core",
+ "firefly-geo",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "firefly-sim"
 version = "0.1.0"
 dependencies = [

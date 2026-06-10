@@ -6,9 +6,9 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/radar-track-calculator-BoaU8`
-- **Letzter Commit:** M3 gestartet — Häppchen 3.0: Architektur-Entscheidung
-  (ADR 0009 — Tokio/axum, WebSocket, JSON-Adapter, **MapLibre GL**), Glossar +
-  M3-Plan.
+- **Letzter Commit:** M3 Häppchen 3.1 — JSON-Ausgabe-Adapter: neue Crate
+  `firefly-io` mit `Frame`/`FrameTrack` (web-freundliche Drahtform: Grad +
+  abgeleitete Geschwindigkeit/Kurs), verlustfreier JSON-Roundtrip (FR-IO-001).
 - **PR:** #1 (offen).
 
 ---
@@ -33,14 +33,18 @@
   **Härtung (NFR-CLOUD-004):** `tests/timing.rs` beweist — lange Scan-Lücke mit
   Daten erhält Identität; Löschung nach Fehltreffer-*Anzahl*, nicht nach Zeit.
   Externe Abhängigkeiten `nalgebra` (ADR 0005), `serde` (ADR 0007).
-- Qualität: **69 Tests + 1 Doctest grün**, Clippy sauber, `cargo fmt` ok.
 - Die **Arbeitsregeln** stehen (`CLAUDE.md`): *erst erklären, dann bauen*;
   keine unerklärten Begriffe; Doku ist Teil der Leistung.
-- **M3 gestartet:** Häppchen **3.0 erledigt** — Architektur-Entscheidung für das
-  Web-Frontend steht (ADR 0009): Async-Server **Tokio + axum**, Transport
-  **WebSocket**, erster Ausgabe-Adapter **JSON** (`Frame` = Zeit + Sensor +
-  System-Tracks), Karten-Frontend **MapLibre GL** (GPU-Vektorkarte, anbieter-
-  neutral, mit Blick auf M4). Noch kein Server-/Frontend-Code — das folgt ab 3.1.
+- **M3 läuft:** Häppchen **3.0–3.1 erledigt.**
+  **3.0**: Architektur-Entscheidung (ADR 0009): Async-Server **Tokio + axum**,
+  Transport **WebSocket**, erster Ausgabe-Adapter **JSON**, Karten-Frontend
+  **MapLibre GL** (GPU-Vektorkarte, anbieter-neutral, mit Blick auf M4).
+  **3.1**: neue Crate **`firefly-io`** mit dem neutralen `Frame` (Datenzeit +
+  Sensor + `SystemTrack[]`) und `FrameTrack`; web-freundliche Drahtform (Position
+  in **Grad**, abgeleitete Geschwindigkeit/Kurs), verlustfreier JSON-Roundtrip
+  (FR-IO-001). Reine, testbare Funktion — **noch kein Netzwerk** (kommt in 3.3).
+- Qualität: **72 Tests + 1 Doctest grün** (4 neu in `firefly-io`), Clippy sauber,
+  `cargo fmt` ok.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
 
@@ -67,22 +71,24 @@ Safety-Status → Güte-Metriken.
 ✅ **Timing-Härtung (NFR-CLOUD-004) erledigt** — `tests/timing.rs` beweist beide
 Eigenschaften. Damit ist M2 inkl. aller Veredelungen abgeschlossen.
 
-✅ **M3 Häppchen 3.0 (Architektur) erledigt** — ADR 0009 steht: Tokio/axum,
-WebSocket, JSON-Adapter, MapLibre GL. Die Kartenbibliothek-Frage ist damit
-entschieden (MapLibre).
+✅ **M3 Häppchen 3.0–3.1 erledigt** — ADR 0009 steht (Tokio/axum, WebSocket,
+JSON, MapLibre GL); die Crate `firefly-io` liefert das neutrale `Frame` als
+JSON (FR-IO-001), web-freundlich und verlustfrei roundtrip-getestet.
 
-➡️ **Als Nächstes: Häppchen 3.1 — JSON-Ausgabe-Adapter.** Ein neutrales `Frame`
-(Zeit + Sensor + `SystemTrack[]`) mit `serde_json` serialisieren — der erste
-Ausgabe-Pfad nach außen, noch ohne Netzwerk (rein, testbar). Danach 3.2 Player →
-3.3 WebSocket-Server → 3.4 MapLibre-Frontend → 3.5 Ein-Befehl-Demo (NFR-OPS-001,
-inkl. sichtbarer Timing-Robustheit). CAT062-Encoder (3.X) folgt nach der Demo.
+➡️ **Als Nächstes: Häppchen 3.2 — „Player".** Eine reine, testbare Logik, die ein
+Szenario (M1-Simulator) durch den Tracker (M2) schiebt und pro Scan ein `Frame`
+ausgibt — der **Frame-Strom**. Tempo-Steuerung (Echtzeit/schneller/Pause) bleibt
+*getrennt* vom Kern, damit die Verarbeitung deterministisch nach Datenzeit bleibt
+(ADR 0003). Danach 3.3 WebSocket-Server → 3.4 MapLibre-Frontend → 3.5
+Ein-Befehl-Demo (NFR-OPS-001, inkl. sichtbarer Timing-Robustheit). CAT062-Encoder
+(3.X) folgt nach der Demo.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
 ## 4. M3-Plan in Häppchen (mit Komplexität / Modell)
 
 - [x] **3.0** Architektur-Entscheidung (ADR 0009: Tokio/axum, WebSocket, JSON, MapLibre) — *S2 · Sonnet · Effort niedrig*
-- [ ] **3.1** JSON-Ausgabe-Adapter (`Frame` = Zeit + Sensor + `SystemTrack[]`, `serde_json`) — *S2–S3 · Sonnet · Effort niedrig–mittel*
+- [x] **3.1** JSON-Ausgabe-Adapter (`Frame` = Zeit + Sensor + `SystemTrack[]`, `serde_json`; Crate `firefly-io`, FR-IO-001) — *S2–S3 · Sonnet · Effort niedrig–mittel*
 - [ ] **3.2** „Player": Szenario → Tracker → Frame-Strom (reine Logik, Tempo getrennt vom Kern) — *S3 · Sonnet · Effort mittel*
 - [ ] **3.3** WebSocket-Server (axum/tokio, Health/Readiness, 12-Factor, Shutdown, Logs/NFR-OBS-001) — *S4 · Opus 4.8 / Fable 5 · Effort hoch*
 - [ ] **3.4** Frontend 2D-Karte mit Live-Tracks (MapLibre; coasting gestrichelt, Unsicherheits-Ellipse aus `position_uncertainty`) — *S3 · Sonnet · Effort mittel*
