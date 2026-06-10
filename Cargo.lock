@@ -166,6 +166,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-asterix"
+version = "0.1.0"
+dependencies = [
+ "firefly-core",
+ "firefly-geo",
+]
+
+[[package]]
 name = "firefly-core"
 version = "0.1.0"
 dependencies = [

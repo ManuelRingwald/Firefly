@@ -74,6 +74,43 @@ austauschen. In „Kategorien" gegliedert:
 - **CAT021:** ADS-B-Meldungen.
 - **CAT062:** fertige System-Tracks (die fusionierte Luftlage).
 
+ASTERIX ist **bit-genau und binär**: Ein Datenblock ist `[CAT][LEN][Record…]`
+(CAT = Kategorie-Nummer, LEN = Gesamtlänge), jeder Record beginnt mit einem
+*FSPEC* (s. u.), gefolgt von den vorhandenen *Data Items* in fester Reihenfolge.
+
+**Data Item (Datenfeld) / I062/NNN**
+Ein einzelnes, genormtes Feld innerhalb einer Kategorie — z. B. `I062/070`
+(Zeitstempel) oder `I062/105` (Position). `NNN` ist die feste Feldnummer im
+Standard. Jedes Item hat eine definierte Byte-Breite und, bei Zahlen, einen
+festen *LSB* (s. u.).
+
+**FSPEC** (*Field Specification*, Feld-Spezifikation)
+Die einleitende **Bitmaske** eines Records: Jedes der sieben oberen Bits eines
+Octets sagt „dieses Datenfeld ist vorhanden ja/nein"; das unterste Bit (**FX**,
+*Field Extension*) bedeutet „es folgt noch ein FSPEC-Octet". So weiß der
+Empfänger, welche Felder in welcher Reihenfolge kommen — ohne dass leere Felder
+übertragen werden müssen.
+
+**UAP** (*User Application Profile*)
+Die verbindliche **Zuordnung** „welches Bit der FSPEC steht für welches
+Datenfeld". Das Bit wird über die **FRN** (*Field Reference Number*, laufende
+Nummer im UAP) adressiert: FRN 1 = oberstes Bit des ersten Octets, FRN 8 =
+oberstes Bit des zweiten Octets usw.
+
+**SAC/SIC** (*System Area Code / System Identification Code*)
+Die zweiteilige **Quell-Kennung** in ASTERIX (Datenfeld I062/010): *wer* hat die
+Meldung erzeugt — welche geografische Stelle (SAC) und welches System dort (SIC).
+
+**LSB / Skalierungsfaktor** (*Least Significant Bit*)
+Der Wert, den das **kleinste Bit** eines Festkomma-Felds darstellt — z. B. ist
+der LSB der CAT062-Position `180/2²⁵` Grad. Ein Bruchwert (etwa 12,0 Sekunden)
+wird so zu einer ganzen Zahl von LSB-Schritten (12,0 s ÷ (1/128 s) = 1536).
+
+**Festkomma (*fixed-point*)**
+Eine Zahl als **Ganzzahl mal festem LSB** kodieren, statt als Fließkomma. In
+ASTERIX die übliche Form — kompakt, eindeutig und ohne Rundungs-Überraschungen
+des Fließkomma-Formats.
+
 ---
 
 ## Tracking-Grundbegriffe (was der Tracker tut)

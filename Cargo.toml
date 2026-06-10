@@ -8,6 +8,7 @@ members = [
     "crates/firefly-io",
     "crates/firefly-player",
     "crates/firefly-server",
+    "crates/firefly-asterix",
 ]
 
 [workspace.package]
@@ -24,6 +25,7 @@ firefly-sim = { path = "crates/firefly-sim" }
 firefly-io = { path = "crates/firefly-io" }
 firefly-track = { path = "crates/firefly-track" }
 firefly-player = { path = "crates/firefly-player" }
+firefly-asterix = { path = "crates/firefly-asterix" }
 nalgebra = "0.33"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

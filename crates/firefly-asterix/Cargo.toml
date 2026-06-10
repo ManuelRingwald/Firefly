@@ -1,0 +1,14 @@
+[package]
+name = "firefly-asterix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "ASTERIX CAT062 output adapter: encodes the Firefly tracker's neutral system tracks into the binary wire format the ASD expects (ADR 0006)."
+
+[dependencies]
+firefly-core = { workspace = true }
+
+[dev-dependencies]
+firefly-geo = { workspace = true }
