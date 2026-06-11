@@ -4,31 +4,21 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-11
-- **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **M6.1-Nachträge — Multi-Radar-Geister behoben (ADR 0011)
-  + adaptiver Track-Lebenszyklus für asynchrone Radare (ADR 0012).**
-  Die zwei verbliebenen Geister-Spuren der Frankfurt-Szene waren
-  Fusions-Artefakte (kein IMM-Manöver): (a) sequenzielle Tor-Verengung —
-  Sensor A faltet seinen Plot ein, das Tor wird enger, Sensor Bs Plot (selbes
-  Flugzeug) fällt heraus → Duplikat-Track; (b) ein 3σ-Ausreißer-Plot gebärt
-  sofort einen eigenen Track. **Behoben** durch eine zu Scan-Beginn
-  eingefrorene, gemeinsame Fusions-Referenz (alle Sensoren gaten/assoziieren
-  gegen die Prädiktion, nicht den schon aktualisierten Live-Track) plus ein
-  getrenntes, weiteres Initiierungs-Sperr-Tor `init_gate` (Default `0,9999`,
-  FR-TRK-020). Frankfurt läuft wieder mit Standard-Tor `0,99` und acht Tracks.
-  Danach der **adaptive Lebenszyklus** (FR-TRK-021): Bestätigung/Löschung
-  zählen nicht mehr Scan-*Aufrufe*, sondern `coast_reference = max(revisit_interval,
-  cadence)` Sekunden — `revisit_interval` ist ein EWMA der Treffer-Zeitlücken
-  je Track, `cadence` die vom Tracker geschätzte Feed-Taktung. Damit läuft die
-  Frankfurt-Szene jetzt dauerhaft mit **versetzten Radar-Scanzeiten**
-  (`scan_offset = 0 / 1.3 / 2.6 s`) bei weiterhin **acht** stabilen Track-IDs
-  statt der zuvor beobachteten 28–90. Ein Bootstrap-Sonderfall (`cadence = ∞`,
-  solange keine Sensor-Periode bekannt ist) verhindert, dass ein im ersten
-  Augenblick geborener Track gelöscht wird, bevor sein eigener Sensor erneut
-  scannt. NFR-CLOUD-004 bleibt grün (`timing::*`). Details: ADR 0011, ADR 0012.
-  **Als Nächstes:** M6.2 (OSM-Hintergrundkarte), M6.3 (Roh-Plot-Ebene), M6.4
-  (Container-Setup) — jeweils mit eigenem Go.
+- **Zuletzt aktualisiert:** 2026-06-11 (aktuelle Sitzung, M6.2 hinzugefügt)
+- **Branch:** `claude/m6-2-osm-openaip` (M6.2 in progress; main ist aktuell)
+- **Letzter Commit (main):** M6.1-Nachträge (ADR 0011, ADR 0012) — alle Tests grün, gepusht.
+- **Aktuell (M6.2):** **Frontend-Kartendarstellung — OSM + OpenAIP-Lufträume.**
+  Basiskarte wechselt von MapLibre-Demotiles zu echten OpenStreetMap-Tiles
+  (`tile.openstreetmap.org`), ersetzt die externe Style-JSON durch eine inline
+  MapLibre-Style-Definition (Wartbarkeit, schneller Laden). Neue Airspace-Overlay-
+  Ebene hinzugefügt: Lufträume (TMA, CTR, Restricted) aus GeoJSON
+  (`/airspaces.geojson`, aktuell mit Frankfurt-Beispieldaten); Layer-Toggle im
+  HUD („airspaces"-Button). Beispiel-GeoJSON in `static/airspaces.geojson`
+  mit vereinfachten Lufträumen der Frankfurt-Gegend (wird später durch echte
+  OpenAIP-API ersetzt). Tests aktualisiert (`index_html_is_the_maplibre_frontend`
+  prüft jetzt OSM-URL und airspaces-Erwähnung statt demotiles). Alle Tests grün,
+  build erfolgreich. **Nächste Schritte (mit eigenem Go):** M6.3 (Roh-Plot-Ebene),
+  M6.4 (Container-Setup).
 - **PR:** keiner offen.
 
 ---
