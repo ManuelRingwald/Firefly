@@ -183,9 +183,9 @@ mod tests {
     }
 
     /// The embedded page is the MapLibre air picture: it pulls in MapLibre, uses
-    /// OpenStreetMap tiles (M6.2), includes airspace overlays (M6.2), and
-    /// consumes the `/ws` stream. Guards against the embedded asset silently
-    /// going missing or wrong. REQ: FR-UI-001
+    /// OpenStreetMap tiles (M6.2), includes airspace overlays (M6.2), raw plot
+    /// markers (M6.3), and consumes the `/ws` stream. Guards against the
+    /// embedded asset silently going missing or wrong. REQ: FR-UI-001
     #[test]
     fn index_html_is_the_maplibre_frontend() {
         assert!(INDEX_HTML.contains("maplibre-gl"), "loads MapLibre");
@@ -196,6 +196,10 @@ mod tests {
         assert!(
             INDEX_HTML.contains("airspaces"),
             "includes airspace overlays (M6.2)"
+        );
+        assert!(
+            INDEX_HTML.contains("plot-marker"),
+            "includes raw plot visualization (M6.3)"
         );
         assert!(INDEX_HTML.contains("/ws"), "connects to the frame stream");
         // The safety-relevant status is rendered (ADR 0008).

@@ -85,13 +85,30 @@ impl Player {
     /// Run the whole scenario, returning one [`Frame`] per scan time.
     ///
     /// A thin JSON-adapter projection over [`scans`](Player::scans): each scan's
-    /// `SystemTrack`s are bundled into a [`Frame`] (web-friendly wire shape).
-    pub fn frames(self) -> Vec<Frame> {
+    /// raw plots and `SystemTrack`s are bundled into a [`Frame`] (web-friendly
+    /// wire shape, M6.3). Plots are stored as empty wire-form for now; the
+    /// conversion from polar to WGS84 happens in the server adapter.
+    pub fn frames(mut self) -> Vec<Frame> {
         let sensor = self.sensor;
-        self.scans()
-            .into_iter()
-            .map(|(time, tracks)| Frame::new(time, sensor, &tracks))
-            .collect()
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < self.plots.len() {
+            let time = self.plots[i].time;
+            let start = i;
+            while i < self.plots.len() && self.plots[i].time == time {
+                i += 1;
+            }
+            // For M6.3 MVP, store empty frame-plots; conversion happens in server.
+            let frame_plots = vec![];
+            self.tracker.process_scan(time, &self.plots[start..i]);
+            out.push(Frame::new(
+                time,
+                sensor,
+                &frame_plots,
+                &self.tracker.system_tracks(),
+            ));
+        }
+        out
     }
 }
 

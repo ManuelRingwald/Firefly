@@ -6,6 +6,35 @@ use serde::{Deserialize, Serialize};
 
 use firefly_core::{SensorId, SystemTrack, Timestamp, TrackId};
 
+/// One raw radar plot in the wire form, for visualization (M6.3).
+///
+/// Built from a [`Plot`]: position in **degrees**, and a flag indicating whether
+/// SSR identity was present. Used to show the **input** to the tracker (raw
+/// detections) alongside the **output** (tracks).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FramePlot {
+    /// Latitude in decimal degrees (positive north).
+    pub lat_deg: f64,
+    /// Longitude in decimal degrees (positive east).
+    pub lon_deg: f64,
+    /// Whether SSR reply (Mode 3/A, Mode S) was present.
+    pub has_ssr: bool,
+}
+
+impl FramePlot {
+    /// Project a neutral [`Plot`] into wire form.
+    ///
+    /// The plot is assumed to have been lifted to the tracking frame's geodetic
+    /// reference already (via `Player`). We extract the position and SSR status.
+    pub fn from_plot(lat_deg: f64, lon_deg: f64, has_ssr: bool) -> Self {
+        Self {
+            lat_deg,
+            lon_deg,
+            has_ssr,
+        }
+    }
+}
+
 /// One track in the wire form, in web-map-friendly units.
 ///
 /// Built from a [`SystemTrack`] (see [`FrameTrack::from_system_track`]): position
@@ -59,8 +88,9 @@ impl FrameTrack {
 /// A complete picture of the air situation at one data time, ready to send out.
 ///
 /// This is the unit the M3 server will push over a WebSocket: the data time, the
-/// reporting sensor, and the tracks at that time. It is built from the tracker's
-/// neutral output and serialises losslessly to and from JSON.
+/// reporting sensor, the **raw plots** (input to the tracker, M6.3), and the
+/// **tracks** (output from the tracker). It is built from the tracker's neutral
+/// output and serialises losslessly to and from JSON.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Frame {
     /// Data time of this picture (seconds; ASTERIX time-of-day later).
@@ -68,16 +98,24 @@ pub struct Frame {
     /// The reporting sensor. Single-radar for M2/M3; multi-radar provenance
     /// generalises in M4.
     pub sensor: SensorId,
+    /// Raw radar plots (input to the tracker) at this data time, for visualization (M6.3).
+    pub plots: Vec<FramePlot>,
     /// The tracks at this data time, in wire form.
     pub tracks: Vec<FrameTrack>,
 }
 
 impl Frame {
-    /// Bundle the tracks of one scan into a frame, converting each to wire form.
-    pub fn new(time: Timestamp, sensor: SensorId, tracks: &[SystemTrack]) -> Self {
+    /// Bundle the plots and tracks of one scan into a frame, converting each to wire form.
+    pub fn new(
+        time: Timestamp,
+        sensor: SensorId,
+        plots: &[FramePlot],
+        tracks: &[SystemTrack],
+    ) -> Self {
         Self {
             time,
             sensor,
+            plots: plots.to_vec(),
             tracks: tracks.iter().map(FrameTrack::from_system_track).collect(),
         }
     }
@@ -150,7 +188,7 @@ mod tests {
     #[test]
     fn frame_round_trips_through_json() {
         let tracks = [sample_track(1), sample_track(2)];
-        let frame = Frame::new(Timestamp(12.0), SensorId(1), &tracks);
+        let frame = Frame::new(Timestamp(12.0), SensorId(1), &[], &tracks);
 
         let json = frame.to_json().expect("serialise");
         let back = Frame::from_json(&json).expect("deserialise");
@@ -162,7 +200,7 @@ mod tests {
     /// are present, and the newtypes serialise as bare numbers. REQ: FR-IO-001
     #[test]
     fn json_is_self_describing() {
-        let frame = Frame::new(Timestamp(12.0), SensorId(3), &[sample_track(5)]);
+        let frame = Frame::new(Timestamp(12.0), SensorId(3), &[], &[sample_track(5)]);
         let json = frame.to_json().expect("serialise");
 
         for key in [
@@ -191,7 +229,7 @@ mod tests {
     /// An empty scan yields a valid frame with no tracks. REQ: FR-IO-001
     #[test]
     fn empty_frame_has_no_tracks() {
-        let frame = Frame::new(Timestamp(0.0), SensorId(1), &[]);
+        let frame = Frame::new(Timestamp(0.0), SensorId(1), &[], &[]);
         let json = frame.to_json().expect("serialise");
         let back = Frame::from_json(&json).expect("deserialise");
         assert!(back.tracks.is_empty());

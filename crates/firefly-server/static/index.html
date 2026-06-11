@@ -65,6 +65,7 @@
   </div>
   <div class="layer-toggle">
     <button id="btn-airspaces" class="active">airspaces</button>
+    <button id="btn-plots">raw plots</button>
   </div>
   <button id="delay-btn" type="button">Verzug simulieren (5 s)</button>
 </div>
@@ -143,6 +144,8 @@
   function addLayers() {
     // Airspaces source (initially empty, loaded asynchronously).
     map.addSource('airspaces', { type: 'geojson', data: EMPTY });
+    // Raw radar plots (M6.3): input to the tracker, before association.
+    map.addSource('plots', { type: 'geojson', data: EMPTY });
     map.addSource('uncertainty', { type: 'geojson', data: EMPTY });
     map.addSource('velocity', { type: 'geojson', data: EMPTY });
     map.addSource('tracks', { type: 'geojson', data: EMPTY });
@@ -155,6 +158,16 @@
     map.addLayer({
       id: 'airspaces-outline', type: 'line', source: 'airspaces',
       paint: { 'line-color': '#7c3aed', 'line-width': 1.2, 'line-opacity': 0.6 },
+    });
+
+    // Raw radar plots (M6.3): small marker for each detection (input to tracker).
+    map.addLayer({
+      id: 'plot-marker', type: 'circle', source: 'plots',
+      paint: {
+        'circle-radius': 3,
+        'circle-color': '#ef4444',
+        'circle-opacity': 0.6,
+      },
     });
 
     // Uncertainty ring — solid when fresh, dashed when coasting (two layers
@@ -217,6 +230,12 @@
     map.setLayoutProperty('airspaces-outline', 'visibility', visible ? 'none' : 'visible');
   }
 
+  // ---- Plots layer (M6.3) -------------------------------------------------
+  function togglePlots() {
+    const visible = map.getLayoutProperty('plot-marker', 'visibility') === 'visible';
+    map.setLayoutProperty('plot-marker', 'visibility', visible ? 'none' : 'visible');
+  }
+
   // ---- Live stream --------------------------------------------------------
   let fitted = false;
   let socket = null;
@@ -225,12 +244,18 @@
   const sensorEl = document.getElementById('sensor');
   const countEl = document.getElementById('count');
   const airspacesBtn = document.getElementById('btn-airspaces');
+  const plotsBtn = document.getElementById('btn-plots');
   const delayBtn = document.getElementById('delay-btn');
   const delayBanner = document.getElementById('delay-banner');
 
   airspacesBtn.addEventListener('click', () => {
     toggleAirspaces();
     airspacesBtn.classList.toggle('active');
+  });
+
+  plotsBtn.addEventListener('click', () => {
+    togglePlots();
+    plotsBtn.classList.toggle('active');
   });
 
   // Ask the server to pause delivery for a few seconds (NFR-CLOUD-004): the
@@ -252,6 +277,17 @@
   }
 
   function render(frame) {
+    const plots = [];
+    // M6.3: Render raw plots from the frame (currently empty in MVP,
+    // to be filled with actual converted polar→WGS84 data later).
+    for (const p of (frame.plots || [])) {
+      plots.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [p.lon_deg, p.lat_deg] },
+        properties: { has_ssr: p.has_ssr },
+      });
+    }
+
     const tracks = [], unc = [], vel = [];
     for (const t of frame.tracks) {
       const lng = t.lon_deg, lat = t.lat_deg;
@@ -275,6 +311,7 @@
       });
     }
 
+    map.getSource('plots').setData({ type: 'FeatureCollection', features: plots });
     map.getSource('tracks').setData({ type: 'FeatureCollection', features: tracks });
     map.getSource('uncertainty').setData({ type: 'FeatureCollection', features: unc });
     map.getSource('velocity').setData({ type: 'FeatureCollection', features: vel });
