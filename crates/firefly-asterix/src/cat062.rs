@@ -8,7 +8,12 @@
 //! status: confirmation/coasting (I062/080), update age (I062/290) and position
 //! accuracy (I062/500) — the same status the tracker decides (ADR 0008).
 //!
-//! REQ: FR-IO-003, FR-TRK-008
+//! When a track carries an SSR identity (FR-TRK-009) the record additionally
+//! carries the Mode 3/A code (I062/060) and the Mode S 24-bit address as the
+//! Target Address subfield of Aircraft Derived Data (I062/380); both items are
+//! omitted for a primary-only track.
+//!
+//! REQ: FR-IO-003, FR-TRK-008, FR-TRK-009
 
 use firefly_core::{SystemTrack, Timestamp};
 
@@ -29,6 +34,10 @@ mod uap {
     pub const POSITION_WGS84: u8 = 5;
     /// I062/185 — Calculated Track Velocity (Cartesian).
     pub const VELOCITY_CARTESIAN: u8 = 7;
+    /// I062/060 — Track Mode 3/A Code.
+    pub const MODE_3A_CODE: u8 = 9;
+    /// I062/380 — Aircraft Derived Data (here: the Target Address subfield).
+    pub const AIRCRAFT_DERIVED_DATA: u8 = 11;
     /// I062/040 — Track Number.
     pub const TRACK_NUMBER: u8 = 12;
     /// I062/080 — Track Status.
@@ -52,6 +61,13 @@ const VELOCITY_LSB_MPS: f64 = 0.25;
 const AGE_LSB_SECONDS: f64 = 0.25;
 /// I062/500 APC stores each position-accuracy component in 0.5-metre steps.
 const ACCURACY_LSB_METRES: f64 = 0.5;
+/// I062/060 carries the Mode 3/A reply in its low 12 bits (4 octal digits); the
+/// upper bits (V/G/CH/spare) stay zero — validated, not garbled, unchanged.
+const MODE_3A_CODE_MASK: u16 = 0x0FFF;
+/// I062/380 primary subfield, bit 8 (spec "ADR"): the 24-bit Target Address
+/// (Mode S address) subfield is present. Verified against
+/// SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.24.
+const ADR_TARGET_ADDRESS_PRESENT: u8 = 0x80;
 
 /// The field-extension bit (lowest bit of an octet): "another octet follows".
 /// Used both by the FSPEC and, here, *inside* the variable-length I062/080.
@@ -111,8 +127,12 @@ impl Cat062Encoder {
     }
 
     /// One CAT062 record for one track: FSPEC + the present items in UAP order.
+    ///
+    /// The identity items (I062/060, I062/380) are only added when the track
+    /// actually carries that identity; the [`RecordBuilder`] then reflects their
+    /// presence in the FSPEC automatically.
     fn record(&self, time: Timestamp, track: &SystemTrack) -> Vec<u8> {
-        RecordBuilder::new()
+        let mut builder = RecordBuilder::new()
             .item(
                 uap::DATA_SOURCE_IDENTIFIER,
                 encode_data_source(&self.source),
@@ -123,8 +143,16 @@ impl Cat062Encoder {
             .item(uap::TRACK_NUMBER, encode_track_number(track))
             .item(uap::TRACK_STATUS, encode_track_status(track))
             .item(uap::UPDATE_AGES, encode_update_ages(track))
-            .item(uap::ESTIMATED_ACCURACIES, encode_accuracies(track))
-            .finish()
+            .item(uap::ESTIMATED_ACCURACIES, encode_accuracies(track));
+
+        if let Some(code) = track.mode_3a {
+            builder = builder.item(uap::MODE_3A_CODE, encode_mode_3a(code));
+        }
+        if let Some(address) = track.icao_address {
+            builder = builder.item(uap::AIRCRAFT_DERIVED_DATA, encode_target_address(address));
+        }
+
+        builder.finish()
     }
 }
 
@@ -172,6 +200,23 @@ fn encode_velocity(track: &SystemTrack) -> Vec<u8> {
 fn encode_velocity_component(mps: f64) -> [u8; 2] {
     let ticks = (mps / VELOCITY_LSB_MPS).round() as i16;
     ticks.to_be_bytes()
+}
+
+/// I062/060 — Track Mode 3/A Code: two octets carrying the 12-bit reply (four
+/// octal digits) in the low bits. The validation flags (V/G/CH, top bits) stay
+/// zero: the tracker reports a clean, validated code. Our internal `mode_3a`
+/// already stores the code as that 12-bit octal value, so it maps straight in.
+fn encode_mode_3a(code: u16) -> Vec<u8> {
+    (code & MODE_3A_CODE_MASK).to_be_bytes().to_vec()
+}
+
+/// I062/380 — Aircraft Derived Data, here just the **Target Address** (ADR)
+/// subfield: a primary subfield announcing ADR, then the 24-bit Mode S address,
+/// big-endian. The address is the eventual correlation key for multi-radar
+/// fusion (FR-TRK-009); only its low 24 bits are meaningful.
+fn encode_target_address(address: u32) -> Vec<u8> {
+    let octets = address.to_be_bytes(); // [b3, b2, b1, b0]; b3 is always 0
+    vec![ADR_TARGET_ADDRESS_PRESENT, octets[1], octets[2], octets[3]]
 }
 
 /// I062/040 — the 16-bit track number, big-endian. CAT062 track numbers are
@@ -341,6 +386,74 @@ mod tests {
     fn velocity_scales_to_quarter_mps_and_signs_via_twos_complement() {
         let t = track_at(1, 0.0, 0.0, 100.0, -50.0);
         assert_eq!(encode_velocity(&t), vec![0x01, 0x90, 0xFF, 0x38]);
+    }
+
+    /// Mode 3/A: the 12-bit octal reply lands in the low bits, validation flags
+    /// zero. 0o2613 = 0x58B → [0x05, 0x8B]; bits above the 12 are masked off.
+    /// REQ: FR-IO-003, FR-TRK-009
+    #[test]
+    fn mode_3a_carries_the_octal_reply_in_low_twelve_bits() {
+        assert_eq!(encode_mode_3a(0o2613), vec![0x05, 0x8B]);
+        // 0o7777 fills all twelve bits; anything above is masked away.
+        assert_eq!(encode_mode_3a(0o7777), vec![0x0F, 0xFF]);
+        assert_eq!(encode_mode_3a(0xF000 | 0o1234), encode_mode_3a(0o1234));
+    }
+
+    /// Target address: I062/380 with only the ADR subfield present (0x80) and
+    /// the 24-bit Mode S address big-endian. 0x3C65AC → [0x80,0x3C,0x65,0xAC].
+    /// REQ: FR-IO-003, FR-TRK-009
+    #[test]
+    fn target_address_uses_adr_subfield_with_24_bit_address() {
+        assert_eq!(
+            encode_target_address(0x3C_65_AC),
+            vec![0x80, 0x3C, 0x65, 0xAC]
+        );
+    }
+
+    /// A track with an SSR identity adds I062/060 (FRN 9) and I062/380 (FRN 11);
+    /// the FSPEC reflects both and the payloads land in UAP order between the
+    /// velocity and the track number. REQ: FR-IO-003, FR-TRK-009
+    #[test]
+    fn identity_items_appear_only_when_present() {
+        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02));
+
+        // FRN 9 and FRN 11 both live in the *second* FSPEC octet: FRN 9 → bit
+        // 1<<(7-((9-1)%7)) = 0x40, FRN 11 → 0x10. Octet 1 is untouched.
+        let frn9_bit = 0x40;
+        let frn11_bit = 0x10;
+
+        // Baseline: no identity → neither bit set, octet 2 stays 0x0F.
+        let plain = encoder.encode(Timestamp(12.0), &[track(1)]);
+        assert_eq!(plain[3], 0x9B, "octet 1 unchanged by identity");
+        assert_eq!(plain[4], 0x0F, "no identity → FRN 9 and 11 absent");
+
+        // With identity → both bits appear in FSPEC octet 2.
+        let mut t = track(1);
+        t.mode_3a = Some(0o2613);
+        t.icao_address = Some(0x3C_65_AC);
+        let block = encoder.encode(Timestamp(12.0), &[t]);
+        assert_eq!(block[3], 0x9B, "octet 1 still unchanged");
+        assert_eq!(
+            block[4],
+            0x0F | frn9_bit | frn11_bit,
+            "FRN 9 and 11 present"
+        );
+
+        // The two payloads sit in UAP order: I062/060 right after velocity, and
+        // I062/380 right after it (both before the track number 0x00,0x01).
+        let mode_3a = encode_mode_3a(0o2613);
+        let address = encode_target_address(0x3C_65_AC);
+        let velocity = [0x01, 0x90, 0xFF, 0x38];
+        let needle: Vec<u8> = velocity
+            .iter()
+            .chain(mode_3a.iter())
+            .chain(address.iter())
+            .copied()
+            .collect();
+        assert!(
+            block.windows(needle.len()).any(|w| w == needle.as_slice()),
+            "velocity, Mode 3/A, then Target Address appear contiguously in UAP order"
+        );
     }
 
     /// Track status is one octet unless the track is coasting. CNF (bit 2) marks

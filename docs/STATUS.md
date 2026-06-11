@@ -6,17 +6,15 @@
 
 - **Zuletzt aktualisiert:** 2026-06-10
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** Häppchen **4.A.4** — Sensor-Provenienz im `SystemTrack`:
-  `Track` merkt sich pro Scan, welche Sensoren ihn getroffen haben
-  (`contributing_sensors`, je Scan zurückgesetzt und neu befüllt); `SystemTrack`
-  führt sie als sortierten `Vec<SensorId>` mit (leer beim Coasten). Löst die
-  Single-Sensor-Vereinfachung „update_age → PSR-Alter" für Multi-Radar auf
-  (FR-TRK-010 erweitert). Neuer Test
-  `tracker::system_track_reports_contributing_sensors_per_scan`. **126 Tests
-  grün.**
-  (Davor 4.A.3: Multi-Radar **Ende-zu-Ende** durch den Player —
-  `firefly-player/tests/multi_radar.rs`, zwei überlappende Radare auf ein
-  Flugzeug → ein stabiler Track.)
+- **Letzter Commit:** Häppchen **4.2** — CAT062-Identitätsfelder kodiert
+  (`firefly-asterix`): bei vorhandener SSR-Identität trägt der Record jetzt
+  **I062/060** (Mode 3/A, 12-Bit-Oktalcode in den unteren Bits) und
+  **I062/380/ADR** (Mode-S-24-Bit-Adresse als Target-Address-Subfeld); beide
+  Items entfallen bei reinen Primär-Tracks und tauchen automatisch im FSPEC auf
+  (FRN 9 bzw. 11). LSB-/Subfeld-Werte gegen SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10
+  verifiziert. Neue Tests `cat062::mode_3a_*`, `cat062::target_address_*`,
+  `cat062::identity_items_appear_only_when_present`. **129 Tests grün.**
+  (Davor 4.A.4: Sensor-Provenienz `contributing_sensors` im `SystemTrack`.)
 - **PR:** keiner offen.
 
 ---
@@ -98,7 +96,7 @@
   Präzision (Rohmessungen) bei gleicher Cloud-Tauglichkeit; Synergie mit dem
   System-Referenzpunkt der CAT062-Ausgabe (ADR 0006). Noch offen:
   Umsetzung in 4.A.1–4.A.4 und CAT062-Kodierung der Identität (4.2).
-- Qualität: **126 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+- Qualität: **129 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -154,13 +152,14 @@ Koordinatenfrage geklärt — **UDP-Multicast** + **System-Stereografisch**
 I062/100-Encoder, Multicast-Versand) sind als Zielbild in ADR 0006
 festgehalten und werden voraussichtlich im Umfeld von M4 eingeplant.
 
-✅ **M4 Häppchen 4.1 + 4.0 + 4.A.1–4.A.4 erledigt:** SSR-Identität durchgereicht
-(FR-TRK-009); Architektur entschieden — **zentrale Mess-Fusion** (ADR 0010);
-Frame-Transform, Multi-Sensor-Tracker, E2E-Fusionstest und Sensor-Provenienz
-alle umgesetzt.
+✅ **M4 Häppchen 4.0 + 4.1 + 4.A.1–4.A.4 + 4.2 erledigt:** SSR-Identität
+durchgereicht (FR-TRK-009); Architektur entschieden — **zentrale Mess-Fusion**
+(ADR 0010); Frame-Transform, Multi-Sensor-Tracker, E2E-Fusionstest,
+Sensor-Provenienz und CAT062-Identitätskodierung alle umgesetzt.
 
-➡️ **Als Nächstes:** **4.2** — CAT062-Identitätsfelder kodieren
-(`firefly-asterix`, unabhängig). *S3–S4 · Opus 4.8 · Effort mittel–hoch.*
+➡️ **Als Nächstes:** **Sensor-Registrierung / Bias-Korrektur** (S5) — oder
+M4-Abschluss-Doku (Meilenstein-Erklärung `docs/milestones/`). Entscheidung mit
+dem Projektverantwortlichen, womit M4 weitergeht.
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)
 
@@ -170,7 +169,7 @@ alle umgesetzt.
 - [x] **4.A.2** `firefly-track` auf Multi-Sensor: gemeinsamer Tracking-Frame, Plot-Umrechnung + sequenzielle Fusion, Pro-Sensor-Rauschmodell (FR-TRK-010) — *S4–S5 · Opus 4.8 · Effort hoch*
 - [x] **4.A.3** Multi-Radar-Szenario (zwei überlappende Radare) + E2E-Test: ein Flugzeug → **ein** Track (FR-TRK-010) — *S4 · Opus 4.8 · Effort hoch*
 - [x] **4.A.4** Sensor-Provenienz im `SystemTrack` (welche Sensoren tragen bei, FR-TRK-010) — *S3 · Sonnet · Effort mittel*
-- [ ] **4.2** CAT062-Identitätsfelder kodieren (`firefly-asterix`, unabhängig) — *S3–S4 · Opus 4.8 · Effort mittel–hoch*
+- [x] **4.2** CAT062-Identitätsfelder kodieren (I062/060, I062/380/ADR; `firefly-asterix`, FR-IO-003/FR-TRK-009) — *S3–S4 · Opus 4.8 · Effort mittel–hoch*
 - [ ] *(später)* Sensor-Registrierung / Bias-Korrektur — *S5 · Fable 5 / Opus 4.8*
 
 Offen/optional: Sichtprüfung des Frontends (inkl. „Verzug"-Knopf) im Browser

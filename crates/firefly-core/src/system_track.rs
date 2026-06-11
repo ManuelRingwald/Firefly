@@ -54,12 +54,13 @@ pub struct SystemTrack {
     pub position_uncertainty: f64,
     /// Most recently reported Mode 3/A code ("squawk"), if any SSR-equipped
     /// plot has ever associated with this track. `None` for a primary-only
-    /// track. Will feed a CAT062 identity item (exact item TBD, M4).
+    /// track. Encoded as CAT062 I062/060 when present (FR-TRK-009).
     pub mode_3a: Option<u16>,
     /// Most recently reported Mode S 24-bit ICAO aircraft address, if any
     /// SSR-equipped plot has ever associated with this track. `None` for a
-    /// primary-only track. Will feed a CAT062 identity item (exact item TBD,
-    /// M4) and is the eventual correlation key for multi-radar fusion.
+    /// primary-only track. Encoded as the Target Address (ADR) subfield of
+    /// CAT062 I062/380 when present, and is the eventual correlation key for
+    /// multi-radar fusion.
     pub icao_address: Option<u32>,
     /// Sensors that contributed a hit to this track in the **most recent
     /// scan** (ADR 0010, central measurement fusion). Empty while coasting —
