@@ -230,7 +230,33 @@ Die Annahme darüber, *wie* ein Ziel sich bewegt:
 
 **IMM** (*Interacting Multiple Model*)
 Lässt mehrere Bewegungsmodelle parallel laufen und gewichtet sie laufend — gut
-für Flugzeuge, die mal geradeaus fliegen, mal Kurven fliegen.
+für Flugzeuge, die mal geradeaus fliegen, mal Kurven fliegen. Jedes Modell hat
+eine eigene Filter-Schätzung *und* eine **Modellwahrscheinlichkeit** `μ` (wie gut
+es die Messungen gerade erklärt). Das ausgegebene Ergebnis ist die mit `μ`
+gewichtete Mischung — auf der Geraden trägt das CV-Modell, in der Kurve das
+CT-Modell, und der Übergang ist weich. Ein IMM-Zyklus hat vier Stufen:
+**Mischung/Interaktion** (jedes Modell startet aus einem gewichteten Mix aller
+Modelle), **modellbedingtes Filtern** (jedes Modell prädiziert + aktualisiert),
+**Modellwahrscheinlichkeits-Update** (die Likelihoods justieren `μ` neu),
+**Kombination** (gewichtetes Zusammenführen zur Ausgabe).
+
+**Mischung / Interaktion (IMM-Mixing)**
+Die erste IMM-Stufe und das, was die Filter überhaupt koppelt: Bevor ein Modell
+für sich filtert, startet es nicht aus seiner *eigenen* letzten Schätzung,
+sondern aus einer **Mischung** aller Modell-Schätzungen — gewichtet damit, wie
+wahrscheinlich ein Ziel gerade *in dieses* Modell gewechselt ist. So erbt selbst
+ein eben noch unwahrscheinliches Modell einen sinnvollen Startzustand, wenn das
+Ziel gerade dorthin manövriert. Die gemischte Unsicherheit bekommt zusätzlich
+einen **„Spread-of-the-Means"-Term**: Sind sich die Modelle über den Zustand
+uneins, ist der gemischte Start ehrlich unsicherer.
+
+**Markov-Übergangsmatrix (Modellwechsel)**
+Beschreibt, wie ein Ziel zwischen den Bewegungsmodellen springt: `π_ij` ist die
+Wahrscheinlichkeit, im nächsten Scan von Modell `i` nach Modell `j` zu wechseln.
+Jede Zeile summiert sich zu 1 (*zeilenstochastisch*). Eine hohe Diagonale heißt
+„Modelle sind träge" (selten Wechsel), kleine Nebendiagonalen erlauben
+gelegentliches Umschalten — die zentrale Stellschraube, wie flink der IMM auf
+ein Manöver reagiert.
 
 **Zuordnungsproblem (*assignment problem*)**
 Die Aufgabe, Zeilen (Tracks) und Spalten (Plots) einer Kostentabelle so paarweise

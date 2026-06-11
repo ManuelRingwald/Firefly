@@ -6,17 +6,17 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **Häppchen M5.1 (zweites Bewegungsmodell)** — neues Modul
-  `firefly-track::motion` mit dem Enum `MotionModel` (`ConstantVelocity` und
-  `CoordinatedTurn { rate }`). Die CT-Übergangsmatrix dreht den
-  Geschwindigkeitsvektor pro Schritt um `ω·dt` und integriert den Kreisbogen in
-  die Position (Speed bleibt erhalten), geht für `ω → 0` exakt in CV über
-  (numerisch abgesichert). `LinearKalman::predict_with(&MotionModel, …)`
-  prädiziert unter einem expliziten Modell; `predict` bleibt der CV-Standard.
-  Das ist der zweite Filter, den der **IMM** (M5.2+) parallel laufen lässt.
-  162 Tests grün (+4). FR-TRK-011 neu, Glossar (CT) ergänzt.
-  (Davor: D.3 — Multicast-Empfänger; D.2 — I062/100-Rückprojektion; D.1 —
-  CAT062-Decoder.)
+- **Letzter Commit:** **Häppchen M5.2 (IMM-Mischungs-Schritt)** — neues Modul
+  `firefly-track::imm` mit der Struktur `Imm`: eine **Bank** von Kalman-Filtern
+  unter verschiedenen Bewegungsmodellen, je mit Modellwahrscheinlichkeit `μ` und
+  einer zeilenstochastischen **Markov-Übergangsmatrix**. Implementiert die erste
+  IMM-Stufe (Interaktion/Mischung): prädizierte Modellwahrscheinlichkeiten
+  `c_j = Σ_i π_ij·μ_i`, Mischungsgewichte `μ_{i|j}` und die gemischten
+  Anfangsbedingungen `(x_0j, P_0j)` je Modell — Kovarianz inkl.
+  „Spread-of-the-Means"-Term. Reine, deterministische Funktion. 167 Tests grün
+  (+5). FR-TRK-012 neu, Glossar (Mixing, Markov-Übergangsmatrix) ergänzt.
+  (Davor: M5.1 — Coordinated-Turn-Modell; D.3 — Multicast-Empfänger; D.2 —
+  I062/100-Rückprojektion.)
 - **PR:** keiner offen.
 
 ---
@@ -134,10 +134,12 @@
   tritt der Multicast-Gruppe bei, `recv_records`/`run` empfangen und
   dekodieren CAT062-Datagramme. Ende-zu-Ende-Test: Sender → Socket →
   Empfänger → Decoder liefert die ursprünglichen Track-Daten zurück.
-- **M5 läuft:** Häppchen **M5.1 erledigt** — `firefly-track::motion` mit
+- **M5 läuft:** Häppchen **M5.1 + M5.2 erledigt** — `firefly-track::motion` mit
   `MotionModel` (CV + Coordinated-Turn); `LinearKalman::predict_with` prädiziert
-  unter einem expliziten Modell. Zweiter Filter fürs IMM (FR-TRK-011).
-- Qualität: **162 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+  unter einem expliziten Modell (FR-TRK-011). `firefly-track::imm` mit der
+  Struktur `Imm`: Filter-Bank + Markov-Übergangsmatrix und der IMM-Mischungs-
+  Schritt (gemischte Anfangsbedingungen je Modell, FR-TRK-012).
+- Qualität: **167 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -239,18 +241,25 @@ Geschwindigkeitsvektor um `ω·dt` und integriert den Bogen in die Position;
 `ω → 0` ergibt exakt CV. `LinearKalman::predict_with(&MotionModel, …)` als Haken
 für mehrere parallele Modelle (FR-TRK-011).
 
-➡️ **Als Nächstes (M5):** **M5.2** — IMM-Grundgerüst (Mischung/„Mixing" der
-Modellzustände nach Markov-Übergangswahrscheinlichkeiten), dann **M5.3**
-(Modellwahrscheinlichkeits-Update + kombinierte Schätzung) und **M5.4**
-(Integration in den `Tracker`). JPDA für dichten Verkehr danach. *(Erklärungen
-für M5 auf Wunsch des Projektverantwortlichen übersprungen — direkte
-Umsetzung in kleinen, getesteten Häppchen.)*
+✅ **Häppchen M5.2 erledigt:** IMM-Mischungs-Schritt. `firefly-track::imm`
+mit der Struktur `Imm` (Filter-Bank + Modellwahrscheinlichkeiten +
+Markov-Übergangsmatrix). Implementiert die Interaktions-/Mischungs-Stufe:
+`predicted_model_probabilities`, `mixing_probabilities`,
+`mixed_initial_conditions` (gemischter Mittelwert + Kovarianz mit
+Spread-of-the-Means-Term) — FR-TRK-012.
+
+➡️ **Als Nächstes (M5):** **M5.3** — modellbedingtes Filtern (jedes Modell
+prädiziert + aktualisiert aus seiner gemischten Anfangsbedingung und liefert
+eine Likelihood), Modellwahrscheinlichkeits-Update und Kombination zur Ausgabe.
+Danach **M5.4** (IMM in den `Tracker` einhängen). JPDA für dichten Verkehr
+danach. *(Erklärungen für M5 auf Wunsch des Projektverantwortlichen
+übersprungen — direkte Umsetzung in kleinen, getesteten Häppchen.)*
 
 ### M5-Plan in Häppchen (IMM zuerst)
 
 - [x] **M5.1** Zweites Bewegungsmodell: Coordinated-Turn-Übergangsmatrix neben CV, gemeinsamer 4-D-Zustand (FR-TRK-011) — *S4 · Opus 4.8 · Effort hoch*
-- [ ] **M5.2** IMM-Grundgerüst: Mischung der Modellzustände nach Markov-Übergangswahrscheinlichkeiten — *S5 · Opus 4.8 · Effort max*
-- [ ] **M5.3** Modellwahrscheinlichkeits-Update (Likelihood je Modell) + kombinierte Schätzung — *S5 · Opus 4.8 · Effort max*
+- [x] **M5.2** IMM-Grundgerüst: Bank + Markov-Mischung der Modellzustände (FR-TRK-012) — *S5 · Opus 4.8 · Effort max*
+- [ ] **M5.3** Modellbedingtes Filtern + Modellwahrscheinlichkeits-Update (Likelihood je Modell) + kombinierte Schätzung — *S5 · Opus 4.8 · Effort max*
 - [ ] **M5.4** IMM in den `Tracker` einhängen (ersetzt den einzelnen `LinearKalman` je Track) — *S4 · Opus 4.8 · Effort hoch*
 - [ ] *(später)* JPDA für dichten Verkehr / überlappende Gates — *S5 · Fable 5 / Opus 4.8 · Effort max*
 
