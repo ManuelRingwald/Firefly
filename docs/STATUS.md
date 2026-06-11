@@ -6,14 +6,15 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **Häppchen C.1 (ADR-0006-Nachtrag)** — `firefly-geo`
-  bekommt `StereographicProjection`: konforme (winkeltreue) Projektion
-  WGS84 → System-Stereografische Ebene und zurück, nach EUROCONTROL/ARTAS-Art
-  (konforme Breite über Gaußsche Hilfskugel + sphärische schiefachsige
-  stereografische Projektion, Snyder-Formeln). Referenzpunkt = beliebiger
-  WGS84-Punkt (für CAT062 später: `tracking_frame`-Ursprung). Neu: FR-GEO-004,
-  Glossar-Eintrag „Konforme Breite / Gaußsche Kugel". 133 Tests grün (+4).
-  (Davor: M4-Abschluss-Doku, M4 vollständig abgeschlossen.)
+- **Letzter Commit:** **Häppchen C.2 (ADR-0006-Nachtrag)** — `firefly-asterix`
+  kodiert jetzt zusätzlich **I062/100** (System-Stereografische Position,
+  X/Y je 24-Bit Zweierkomplement, LSB 0,5 m): `Cat062Encoder::new` nimmt einen
+  `system_reference_point: Wgs84` entgegen und projiziert jede Track-Position
+  damit über `StereographicProjection` (C.1, FR-GEO-004). I062/100 sitzt als
+  neues FRN 6 zwischen I062/105 und I062/185 (FSPEC-Bit 0x04 in Oktett 1).
+  135 Tests grün (+2). Glossar-Eintrag „I062/100" ergänzt, FR-IO-003
+  aktualisiert.
+  (Davor: C.1 — `StereographicProjection` in `firefly-geo`, FR-GEO-004.)
 - **PR:** keiner offen.
 
 ---
@@ -108,9 +109,12 @@
 - **Häppchen C.1 (ADR-0006-Nachtrag) erledigt:** `firefly-geo` bekommt
   `StereographicProjection` (FR-GEO-004) — konforme WGS84 ↔ System-
   Stereografisch-Projektion (konforme Breite + Gaußsche Hilfskugel +
-  sphärische schiefachsige Stereografie, EUROCONTROL/ARTAS-Art). Grundlage für
-  C.2 (I062/100-Encoder).
-- Qualität: **133 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+  sphärische schiefachsige Stereografie, EUROCONTROL/ARTAS-Art).
+- **Häppchen C.2 (ADR-0006-Nachtrag) erledigt:** `firefly-asterix` kodiert
+  I062/100 (System-Stereografische Position, X/Y, FRN 6) zusätzlich zu
+  I062/105 — Projektion über `StereographicProjection`, Referenzpunkt als
+  Konstruktorparameter von `Cat062Encoder::new`.
+- Qualität: **135 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -176,12 +180,18 @@ Sensor-Provenienz und CAT062-Identitätskodierung alle umgesetzt.
 `firefly-geo` (FR-GEO-004) — konforme WGS84 ↔ System-Stereografisch-Projektion,
 Referenzpunkt frei wählbar (für CAT062 später: `tracking_frame`-Ursprung).
 
-➡️ **Als Nächstes:** **Häppchen C.2** — I062/100-Encoder in `firefly-asterix`:
-6 Oktette, X/Y je 24-Bit Zweierkomplement, LSB 0,5 m (Spec verifiziert),
-zusätzlich zu I062/105 in den Record aufnehmen, Referenzpunkt =
-`tracking_frame`-Ursprung. Danach **C.3** (UDP-Multicast-Versand). Alternativ
-weiter mit **Sensor-Registrierung/Bias-Korrektur** (S5) oder **M5** (IMM/JPDA)
-— mit dem Projektverantwortlichen klären.
+✅ **Häppchen C.2 (ADR-0006-Nachtrag) erledigt:** I062/100-Encoder in
+`firefly-asterix` — `Cat062Encoder::new(source, system_reference_point)`
+projiziert jede Track-Position über `StereographicProjection` und kodiert
+X/Y zusätzlich zu I062/105 (FRN 6, FSPEC-Bit 0x04 in Oktett 1).
+
+➡️ **Als Nächstes:** **Häppchen C.3** — UDP-Multicast-Versand-Adapter (CAT062
+data block per UDP an eine Multicast-Adresse, ED-109A-Stil, ADR 0006). Dabei
+klären: wo lebt der Adapter (`firefly-server` vs. neue Crate), 12-Factor-Config
+für Adresse/Port, woher kommt der `system_reference_point` (Konfiguration vs.
+`tracking_frame`-Ursprung). Alternativ weiter mit
+**Sensor-Registrierung/Bias-Korrektur** (S5) oder **M5** (IMM/JPDA) — mit dem
+Projektverantwortlichen klären.
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)
 
@@ -203,7 +213,7 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
 
 - [x] **C.1** `firefly-geo`: konforme WGS84 ↔ System-Stereografisch-Projektion
   (`StereographicProjection`, FR-GEO-004) — *S4 · Opus 4.8 · Effort hoch*
-- [ ] **C.2** I062/100-Encoder (`firefly-asterix`, X/Y 24-Bit Zweierkomplement,
+- [x] **C.2** I062/100-Encoder (`firefly-asterix`, X/Y 24-Bit Zweierkomplement,
   LSB 0,5 m, zusätzlich zu I062/105) — *S2–S3 · Sonnet · Effort niedrig–mittel*
 - [ ] **C.3** UDP-Multicast-Versand-Adapter — *S3 · Sonnet/Opus · Effort mittel*
 

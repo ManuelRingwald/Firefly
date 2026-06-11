@@ -293,6 +293,16 @@ Address"): die weltweit eindeutige 24-Bit-**ICAO-Adresse** des Flugzeugs — der
 Schlüssel, der bei der Multi-Radar-Fusion *dasselbe* Flugzeug über
 verschiedene Sensoren hinweg identifiziert.
 
+**I062/100 (Calculated Track Position, Cartesian)**
+CAT062-Datenfeld für die Track-Position als **X/Y in Metern** auf der
+System-Stereografischen Ebene (siehe oben), relativ zum System-
+Referenzpunkt. Sechs Oktette: X (3 Oktette) und Y (3 Oktette), je ein
+24-Bit-Zweierkomplement mit LSB 0,5 m. Wird **zusätzlich** zu I062/105
+(WGS84) gesendet — das ASD nutzt I062/100 für seine interne Geometrie
+(ADR 0006-Nachtrag). Berechnet aus der WGS84-Position des `SystemTrack` über
+die System-Stereografische Projektion (`StereographicProjection`,
+FR-GEO-004).
+
 **Track-Kontinuität**
 Maß dafür, ob *ein* Ziel *eine* durchgehende Track-Spur behält. Zwei Teilzahlen:
 **Coverage** (Anteil der Scans, in denen das Ziel überhaupt einen bestätigten

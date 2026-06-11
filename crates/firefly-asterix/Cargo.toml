@@ -9,6 +9,4 @@ description = "ASTERIX CAT062 output adapter: encodes the Firefly tracker's neut
 
 [dependencies]
 firefly-core = { workspace = true }
-
-[dev-dependencies]
 firefly-geo = { workspace = true }
