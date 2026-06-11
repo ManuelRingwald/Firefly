@@ -6,18 +6,21 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **Häppchen M5.4 (IMM im Tracker)** — jeder `Track` trägt
-  jetzt statt eines einzelnen `LinearKalman` eine **IMM-Bank** (`Imm`,
-  konfiguriert über `ImmConfig` in `TrackerConfig`; Standard `cv_and_turns`:
-  CV + Coordinated-Turn ±0,052 rad/s, klebrige Markov-Matrix). Pro-Scan-Ablauf
-  unverändert: Prädiktion → `Imm::predict`, Gating/Assoziation über
-  `Track::estimate` (kombinierte Schätzung), Update → `Imm::update`. Neue Tracks
-  via `ImmConfig::seed`. Geradeausflug-Verhalten erhalten (RMSE-/Identitäts-Tests
-  grün, nach leichter Sticky-Tuning der Bank); E2E-Test: kurvendes Ziel → das
-  passende CT-Modell dominiert. **Der IMM ist damit Ende-zu-Ende im Tracker
-  wirksam.** 173 Tests grün (+1). FR-TRK-014 neu, Meilenstein-Doku
-  `docs/milestones/M5-imm.md`. (Davor: M5.3 — IMM-Zyklus; M5.2 — Mischung;
-  M5.1 — CT-Modell.)
+- **Letzter Commit:** **Häppchen M5.5–M5.9 (JPDA) — M5 vollständig
+  abgeschlossen.** Neues Modul `pda` (Assoziationswahrscheinlichkeiten `β`,
+  Clutter-Modell, FR-TRK-015); `LinearKalman::update_pda` und `Imm::update_pda`
+  falten alle gegateten Plots gewichtet ein (Spread-of-the-Means wie beim
+  IMM-Mixing, FR-TRK-016/017); neues Modul `jpda` löst die Exklusivität
+  zwischen Tracks bei überlappenden Toren über Clustering + erschöpfende
+  Ereignis-Aufzählung (FR-TRK-018). Im Tracker ersetzt JPDA die harte
+  GNN-Zuordnung je Sensor (FR-TRK-019); `TrackerConfig` trägt ein
+  `ClutterModel` (~1 Falschplot/10 km², getunt um eine RMSE-Regression auf
+  sauberen Einzeltracks zu vermeiden). Neuer E2E-Test: zwei eng benachbarte
+  parallele Ziele bleiben über alle Scans zwei unterscheidbare, bestätigte
+  Tracks (dokumentierte „Track-Koaleszenz" als bekanntes JPDA-Merkmal).
+  **Damit ist M5 (IMM + JPDA) komplett.** Meilenstein-Doku erweitert:
+  `docs/milestones/M5-imm.md` (Teil 2: JPDA). (Davor: M5.1–M5.4 — IMM
+  komplett.)
 - **PR:** keiner offen.
 
 ---
@@ -135,16 +138,24 @@
   tritt der Multicast-Gruppe bei, `recv_records`/`run` empfangen und
   dekodieren CAT062-Datagramme. Ende-zu-Ende-Test: Sender → Socket →
   Empfänger → Decoder liefert die ursprünglichen Track-Daten zurück.
-- **M5 läuft:** Häppchen **M5.1 – M5.4 erledigt (IMM komplett)** —
+- **M5 ist abgeschlossen** (`docs/milestones/M5-imm.md`): Häppchen
+  **M5.1 – M5.4 (IMM)** —
   `firefly-track::motion` mit `MotionModel` (CV + Coordinated-Turn);
   `LinearKalman::predict_with` (FR-TRK-011). `firefly-track::imm` mit `Imm`:
   Filter-Bank + Markov-Übergangsmatrix, IMM-Mischung (FR-TRK-012) und der
-  vollständige IMM-Zyklus mit Likelihood-Gewichtung (FR-TRK-013). **Im Tracker
-  wirksam (FR-TRK-014):** jeder Track trägt eine IMM-Bank, Prädiktion/Update über
-  `Imm::predict`/`Imm::update`, Gating über die kombinierte Schätzung. Offen in
-  M5: nur noch **JPDA** (dichter Verkehr). Meilenstein-Doku
-  `docs/milestones/M5-imm.md`.
-- Qualität: **173 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+  vollständige IMM-Zyklus mit Likelihood-Gewichtung (FR-TRK-013). Im Tracker
+  wirksam (FR-TRK-014): jeder Track trägt eine IMM-Bank, Prädiktion/Update über
+  `Imm::predict`/`Imm::update`, Gating über die kombinierte Schätzung.
+  **M5.5 – M5.9 (JPDA)** — `firefly-track::pda` berechnet
+  Assoziationswahrscheinlichkeiten `β` unter einem Clutter-Modell
+  (FR-TRK-015); `LinearKalman::update_pda`/`Imm::update_pda` falten alle
+  gegateten Plots gewichtet ein (FR-TRK-016/017); `firefly-track::jpda` löst
+  die Exklusivität bei überlappenden Toren über Clustering + Ereignis-
+  Aufzählung (FR-TRK-018); im Tracker ersetzt JPDA die harte GNN-Zuordnung je
+  Sensor (FR-TRK-019), `TrackerConfig` trägt ein `ClutterModel`. E2E-Test:
+  zwei eng benachbarte parallele Ziele bleiben zwei unterscheidbare,
+  bestätigte Tracks („Track-Koaleszenz" als dokumentiertes JPDA-Merkmal).
+- Qualität: **Alle Tests grün** (Workspace), Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -267,20 +278,51 @@ Prädiktion/Update über `Imm::predict`/`Imm::update`, Gating über
 `Track::estimate`. Geradeausflug-Verhalten erhalten; kurvendes Ziel → passendes
 CT-Modell dominiert (FR-TRK-014). **IMM-Teil von M5 abgeschlossen.**
 
-➡️ **Als Nächstes:** **JPDA** (Joint Probabilistic Data Association) für dichten
-Verkehr mit überlappenden Toren — die probabilistische Ergänzung zur heutigen
-„harten" 1:1-Zuordnung (GNN). Vor Beginn mit dem Projektverantwortlichen
-abstimmen (eigenes Häppchen-Schema). *(Erklärungen für M5 auf Wunsch des
-Projektverantwortlichen übersprungen — direkte Umsetzung in kleinen, getesteten
-Häppchen.)*
+✅ **Häppchen M5.5 erledigt:** PDA-Assoziationswahrscheinlichkeiten `β`. Neues
+Modul `firefly-track::pda` mit `ClutterModel` und
+`association_probabilities` — `β_0` (kein Treffer) und `β_j` je gegatetem
+Plot, aus Likelihood vs. Clutter-Term `b` (FR-TRK-015).
 
-### M5-Plan in Häppchen (IMM zuerst)
+✅ **Häppchen M5.6 erledigt:** PDA-gewichtetes Kalman-Update.
+`LinearKalman::update_pda` faltet alle Hypothesen (kein Treffer + je Plot)
+gewichtet ein, Spread-of-the-Means wie beim IMM-Mixing (FR-TRK-016).
+
+✅ **Häppchen M5.7 erledigt:** PDA-gewichtetes IMM-Update. `Imm::update_pda`
+überträgt M5.6 auf die ganze Modell-Bank (Zweig 0 = Bank nach `predict`,
+Zweig `1+j` = `Imm::update(measurements[j])` auf Kopie der Bank), mischt
+Modellzustände und -wahrscheinlichkeiten `β`-gewichtet (FR-TRK-017).
+
+✅ **Häppchen M5.8 erledigt:** JPDA-Kern. Neues Modul `firefly-track::jpda`
+mit `joint_association_probabilities` — Clustering (Union-Find) +
+erschöpfende Aufzählung zulässiger gemeinsamer Zuordnungen je Cluster, daraus
+marginalisierte `β_ij` mit Exklusivität (FR-TRK-018).
+
+✅ **Häppchen M5.9 erledigt:** JPDA im Tracker. Die harte GNN-Zuordnung ist je
+Sensor durch JPDA ersetzt; `Imm::update_pda` faltet alle gegateten Plots eines
+Tracks gewichtet ein, der Plot mit größtem `β` liefert die Identität;
+`TrackerConfig` trägt ein `ClutterModel` (~1 Falschplot/10 km², getunt gegen
+RMSE-Regression). E2E-Test: zwei eng benachbarte parallele Ziele bleiben zwei
+unterscheidbare, bestätigte Tracks — „Track-Koaleszenz" als dokumentiertes
+JPDA-Merkmal (FR-TRK-019). **M5 (IMM + JPDA) ist damit vollständig
+abgeschlossen.**
+
+➡️ **Als Nächstes:** Mit M5 sind alle in `CLAUDE.md` ursprünglich vorgesehenen
+Meilensteine M1–M5 bearbeitet (M3/M4/M5 teils außer der Reihe). Vorschlag:
+gemeinsam mit dem Projektverantwortlichen den weiteren Fahrplan festlegen —
+z. B. offene Punkte aus Abschnitt 5 (Sensor-Registrierung/Bias, FHA/Hazards,
+Coverage-Werkzeug, Out-of-order-Eingang) oder neue fachliche Erweiterungen.
+
+### M5-Plan in Häppchen (abgeschlossen)
 
 - [x] **M5.1** Zweites Bewegungsmodell: Coordinated-Turn-Übergangsmatrix neben CV, gemeinsamer 4-D-Zustand (FR-TRK-011) — *S4 · Opus 4.8 · Effort hoch*
 - [x] **M5.2** IMM-Grundgerüst: Bank + Markov-Mischung der Modellzustände (FR-TRK-012) — *S5 · Opus 4.8 · Effort max*
 - [x] **M5.3** Modellbedingtes Filtern + Modellwahrscheinlichkeits-Update (Likelihood je Modell) + kombinierte Schätzung (FR-TRK-013) — *S5 · Opus 4.8 · Effort max*
 - [x] **M5.4** IMM in den `Tracker` einhängen (ersetzt den einzelnen `LinearKalman` je Track, FR-TRK-014) — *S4 · Opus 4.8 · Effort hoch*
-- [ ] *(später)* JPDA für dichten Verkehr / überlappende Gates — *S5 · Fable 5 / Opus 4.8 · Effort max*
+- [x] **M5.5** PDA-Assoziationswahrscheinlichkeiten `β` + Clutter-Modell (FR-TRK-015) — *S4 · Opus 4.8 · Effort hoch*
+- [x] **M5.6** PDA-gewichtetes Kalman-Update (FR-TRK-016) — *S4 · Opus 4.8 · Effort hoch*
+- [x] **M5.7** PDA-gewichtetes IMM-Update (FR-TRK-017) — *S5 · Opus 4.8 · Effort max*
+- [x] **M5.8** JPDA-Kern: Clustering + Ereignis-Aufzählung + Marginalisierung (FR-TRK-018) — *S5 · Opus 4.8 · Effort max*
+- [x] **M5.9** JPDA im `Tracker` einhängen, ersetzt GNN je Sensor (FR-TRK-019) — *S4 · Opus 4.8 · Effort hoch*
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)
 
@@ -390,15 +432,15 @@ sind und die Anforderung im Register rückverfolgbar steht.
   zerstörend (ADR 0008). Die Entscheidung selbst liegt schon im Tracker.
 - **Vorführbarkeit (NFR-OPS-001):** Ein-Befehl-Demo ohne Programmierkenntnisse
   für Präsentationen — Umsetzung mit dem Frontend in M3.
-- **GNN-Assoziationskosten (latent, später):** Die Ungarische Methode nutzt heute
-  reine `d²`-Kosten. Statistisch korrekt wäre die negative Log-Likelihood
-  `d² + ln(det S)`, die *unsichere* Tracks bestraft. Beim Identitäts-Bugfix
-  geprüft: hier **nicht** ursächlich (jede Dublette entstand aus einem Plot
-  *außerhalb* des Gates, nicht aus Fehlzuordnung). Lohnt erst bei dichtem Verkehr
-  / überlappenden Gates (M5/JPDA). Kein eigener Commit jetzt.
-- **Manöver-Handling (M5):** Ein einzelnes `Q` deckt nur einen Manöver-Bereich ab.
-  Für starke Manöver ist **IMM** (mehrere Modelle parallel) die saubere Antwort —
-  geplant für M5. Bis dahin: `Q` je Szenario passend wählen.
+- **GNN-Assoziationskosten (erledigt durch JPDA):** Die alte Notiz betraf die
+  harte 1:1-Zuordnung (Ungarische Methode, reine `d²`-Kosten) bei dichtem
+  Verkehr/überlappenden Gates. Mit M5.5–M5.9 ist die harte Zuordnung durch
+  **JPDA** ersetzt (FR-TRK-018/019), das genau dieses Problem über
+  Assoziationswahrscheinlichkeiten `β` und Exklusivität löst — kein separater
+  Kostenterm mehr nötig.
+- **Manöver-Handling (erledigt durch IMM):** Ein einzelnes `Q` deckt nur einen
+  Manöver-Bereich ab. M5.1–M5.4 lösen das mit **IMM** (mehrere Bewegungsmodelle
+  parallel, FR-TRK-011–014).
 
 ## 6. So steige ich wieder ein (Kurzbefehle)
 

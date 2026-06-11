@@ -268,6 +268,61 @@ Modellwahrscheinlichkeit `μ` hinzu (`μ_j ∝ c_j·Λ_j`). So „erkennt" der I
 das Ziel gerade geradeaus fliegt oder kurvt — ganz ohne separaten
 Manöver-Detektor.
 
+**PDA** (*Probabilistic Data Association*)
+Die „weiche" Alternative zu GNN: Statt einem Track *einen* Plot fest zuzuweisen,
+betrachtet PDA **alle** Plots im Tor gleichzeitig und gewichtet jeden mit einer
+**Assoziationswahrscheinlichkeit** `β` — wie wahrscheinlich ist *dieser* Plot die
+wahre Rückmeldung? Zusätzlich gibt es `β_0`: die Wahrscheinlichkeit, dass *gar
+kein* Plot im Tor zum Ziel gehört (Fehldetektion oder reiner Clutter). Die `β`
+summieren sich zu 1 und gehen gewichtet ins Filter-Update ein — eine
+Fehlentscheidung bei mehrdeutiger Lage wirkt sich so weniger dramatisch aus als
+bei GNNs hartem 0/1-Pick.
+
+**Assoziationswahrscheinlichkeit `β` (Beta)**
+Das Gewicht, mit dem PDA/JPDA einen Plot (oder „kein Treffer", `β_0`) in die
+Schätzung einfließen lässt. Ergibt sich aus dem Verhältnis „wie gut passt dieser
+Plot zur Vorhersage" (Likelihood `Λ`, s. o.) zu „wie plausibel ist Clutter/keine
+Detektion" (Term `b`, aus dem Clutter-Modell). Ein Plot, der perfekt auf die
+Vorhersage passt und in einer ruhigen (clutterarmen) Umgebung liegt, bekommt ein
+`β` nahe 1; in dichtem Clutter sinkt sein `β` zugunsten von `β_0`.
+
+**Clutter-Dichte `λ` (Falschalarm-Dichte) / Clutter-Modell**
+Wie viele Falschalarme pro Flächeneinheit (z. B. pro km²) im Mittel zu erwarten
+sind — ein Maß für „wie verrauscht/unruhig ist die Umgebung". Zusammen mit der
+Detektionswahrscheinlichkeit `P_D` (s. *Erfassungswahrscheinlichkeit*) bildet sie
+das **Clutter-Modell** (`ClutterModel`), aus dem PDA/JPDA den Term `b` ableiten —
+je höher `λ` oder je niedriger `P_D`, desto eher erklärt PDA einen Plot im Tor
+als „nur Rauschen" (`β_0` steigt).
+
+**JPDA** (*Joint Probabilistic Data Association*)
+Die Erweiterung von PDA auf **mehrere Tracks gleichzeitig**, wenn sich ihre Tore
+überlappen — etwa zwei Flugzeuge im Formationsflug. Die Kernidee:
+**Exklusivität** — ein einzelner Plot kann in einem „gemeinsamen Ereignis" nicht
+gleichzeitig zu Track A *und* Track B gehören. JPDA zählt alle so zulässigen
+gemeinsamen Zuordnungen auf, gewichtet jede nach Plausibilität und summiert
+daraus die `β_ij` je Track-Plot-Paar — eine Verfeinerung gegenüber „jeder Track
+rechnet PDA für sich", die der gegenseitigen Konkurrenz um dieselben Plots
+gerecht wird.
+
+**Cluster (JPDA)**
+Eine Gruppe von Tracks und Plots, die — direkt oder über mehrere Schritte —
+durch gemeinsame Tore miteinander verbunden sind (z. B. Track A teilt sich ein
+Tor mit Plot X, und Plot X liegt auch im Tor von Track B → A, B und X bilden ein
+Cluster). Innerhalb eines Clusters muss JPDA die Exklusivität gemeinsam
+auflösen; Tracks/Plots *außerhalb* jedes Clusters sind unabhängig und werden wie
+gewohnt (PDA bzw. „sicher kein Treffer") behandelt. In der realen Luftlage sind
+Cluster meist klein (eine Handvoll Tracks), was die Aufzählung aller Ereignisse
+praktikabel hält.
+
+**Track-Koaleszenz (*Track Coalescence*)**
+Eine bekannte Eigenheit von PDA/JPDA bei eng benachbarten Zielen: Weil jeder
+Plot *weich* (mit `β<1`) auf mehrere Tracks verteilt wird statt ihn fest einem
+zuzuschlagen, ziehen sich die Schätzungen mehrerer naher Tracks ein Stück
+**aufeinander zu** (zu den geteilten Plots hin), statt exakt getrennt zu bleiben.
+Die Tracks bleiben dabei unterscheidbar — verschmelzen also nicht zu einem —,
+rücken aber näher zusammen als ihre wahren Positionen. Ein dokumentierter
+Kompromiss von JPDA, kein Fehler.
+
 **Zuordnungsproblem (*assignment problem*)**
 Die Aufgabe, Zeilen (Tracks) und Spalten (Plots) einer Kostentabelle so paarweise
 zuzuordnen, dass die Gesamtkosten minimal werden — jede Zeile/Spalte höchstens
