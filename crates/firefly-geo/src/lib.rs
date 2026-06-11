@@ -12,17 +12,24 @@
 //!   WGS84  <->  ECEF  <->  ENU (local tangent plane)  <->  Polar (radar)
 //! ```
 //!
+//! It also provides the *system-stereographic* projection
+//! ([`StereographicProjection`]), a conformal WGS84-to-plane map tangent at
+//! one shared system reference point, used by output adapters such as CAT062
+//! Item I062/100 (see ADR 0006).
+//!
 //! All angles are in **radians** and all distances in **metres** unless a type
 //! or field name says otherwise.
 
 mod ecef;
 mod enu;
 mod polar;
+mod stereographic;
 mod wgs84;
 
 pub use ecef::Ecef;
 pub use enu::{Enu, LocalFrame};
 pub use polar::Polar;
+pub use stereographic::StereographicProjection;
 pub use wgs84::Wgs84;
 
 /// WGS84 reference ellipsoid parameters.

@@ -6,14 +6,14 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **M4-Abschluss-Doku** — neue Meilenstein-Erklärung
-  `docs/milestones/M4-multi-radar-fusion.md` (Häppchen 4.0–4.2, 4.A.1–4.A.4:
-  zentrale Mess-Fusion, Frame-Transformation, Multi-Sensor-Tracker, E2E-Test,
-  Sensor-Provenienz, CAT062-Identitätsfelder); Glossar um `Sensor-Provenienz`,
-  `I062/060` und `I062/380/Target Address` ergänzt; Doku-Wegweiser
-  (`docs/README.md`) verlinkt jetzt M3, M3.X und M4. **M4 ist damit
-  abgeschlossen.** 129 Tests grün (unverändert).
-  (Davor 4.2: CAT062-Identitätsfelder I062/060 + I062/380/ADR kodiert.)
+- **Letzter Commit:** **Häppchen C.1 (ADR-0006-Nachtrag)** — `firefly-geo`
+  bekommt `StereographicProjection`: konforme (winkeltreue) Projektion
+  WGS84 → System-Stereografische Ebene und zurück, nach EUROCONTROL/ARTAS-Art
+  (konforme Breite über Gaußsche Hilfskugel + sphärische schiefachsige
+  stereografische Projektion, Snyder-Formeln). Referenzpunkt = beliebiger
+  WGS84-Punkt (für CAT062 später: `tracking_frame`-Ursprung). Neu: FR-GEO-004,
+  Glossar-Eintrag „Konforme Breite / Gaußsche Kugel". 133 Tests grün (+4).
+  (Davor: M4-Abschluss-Doku, M4 vollständig abgeschlossen.)
 - **PR:** keiner offen.
 
 ---
@@ -105,7 +105,12 @@
   Scan beigetragen haben (nicht sticky, leer beim Coasten).
   **4.2**: CAT062-Identitätsfelder I062/060 (Mode 3/A) und I062/380/ADR
   (Mode-S-Adresse) — nur bei vorhandener Identität, automatisch im FSPEC.
-- Qualität: **129 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+- **Häppchen C.1 (ADR-0006-Nachtrag) erledigt:** `firefly-geo` bekommt
+  `StereographicProjection` (FR-GEO-004) — konforme WGS84 ↔ System-
+  Stereografisch-Projektion (konforme Breite + Gaußsche Hilfskugel +
+  sphärische schiefachsige Stereografie, EUROCONTROL/ARTAS-Art). Grundlage für
+  C.2 (I062/100-Encoder).
+- Qualität: **133 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -167,11 +172,16 @@ durchgereicht (FR-TRK-009); Architektur entschieden — **zentrale Mess-Fusion**
 (ADR 0010); Frame-Transform, Multi-Sensor-Tracker, E2E-Fusionstest,
 Sensor-Provenienz und CAT062-Identitätskodierung alle umgesetzt.
 
-➡️ **Als Nächstes:** Mit dem Projektverantwortlichen klären, womit es
-weitergeht — Kandidaten: **Sensor-Registrierung / Bias-Korrektur** (S5,
-ADR-0010-Abgrenzung), die offenen **ADR-0006-Transport-Häppchen**
-(System-Stereografische Projektion + I062/100, UDP-Multicast-Versand), oder
-**M5** (IMM/JPDA für Manöver & dichten Verkehr).
+✅ **Häppchen C.1 (ADR-0006-Nachtrag) erledigt:** `StereographicProjection` in
+`firefly-geo` (FR-GEO-004) — konforme WGS84 ↔ System-Stereografisch-Projektion,
+Referenzpunkt frei wählbar (für CAT062 später: `tracking_frame`-Ursprung).
+
+➡️ **Als Nächstes:** **Häppchen C.2** — I062/100-Encoder in `firefly-asterix`:
+6 Oktette, X/Y je 24-Bit Zweierkomplement, LSB 0,5 m (Spec verifiziert),
+zusätzlich zu I062/105 in den Record aufnehmen, Referenzpunkt =
+`tracking_frame`-Ursprung. Danach **C.3** (UDP-Multicast-Versand). Alternativ
+weiter mit **Sensor-Registrierung/Bias-Korrektur** (S5) oder **M5** (IMM/JPDA)
+— mit dem Projektverantwortlichen klären.
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)
 
@@ -188,6 +198,14 @@ Offen/optional: Sichtprüfung des Frontends (inkl. „Verzug"-Knopf) im Browser
 durch den Projektverantwortlichen.
 
 Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
+
+### Häppchen C — ADR-0006-Transport (System-Stereografisch + UDP-Multicast)
+
+- [x] **C.1** `firefly-geo`: konforme WGS84 ↔ System-Stereografisch-Projektion
+  (`StereographicProjection`, FR-GEO-004) — *S4 · Opus 4.8 · Effort hoch*
+- [ ] **C.2** I062/100-Encoder (`firefly-asterix`, X/Y 24-Bit Zweierkomplement,
+  LSB 0,5 m, zusätzlich zu I062/105) — *S2–S3 · Sonnet · Effort niedrig–mittel*
+- [ ] **C.3** UDP-Multicast-Versand-Adapter — *S3 · Sonnet/Opus · Effort mittel*
 
 ## 4. M3-Plan in Häppchen (mit Komplexität / Modell)
 

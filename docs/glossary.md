@@ -345,6 +345,19 @@ ganzes System (z. B. einen Flughafen/FIR), nicht pro Sensor. CAT062 kann
 Positionen wahlweise in WGS84 (I062/105) oder in dieser System-Ebene (I062/100)
 übertragen — siehe ADR 0006.
 
+**Konforme Breite / Gaußsche Kugel** (Bausteine der exakten stereografischen
+Projektion)
+Das WGS84-Erdmodell ist ein *Ellipsoid* (an den Polen leicht abgeplattet), die
+stereografische Projektion ist aber ursprünglich für eine *Kugel* definiert.
+EUROCONTROL/ARTAS lösen das mit einem Zwischenschritt: Zuerst wird das
+Ellipsoid *winkeltreu* (konform) auf eine Hilfskugel abgebildet, deren Radius
+zum System-Referenzpunkt passt (die „Gaußsche Kugel"). Dabei wird aus der
+geodätischen Breite (normales Lat/Lon) eine leicht verschobene „konforme
+Breite". Erst auf dieser Hilfskugel wird die eigentliche stereografische
+Projektion gerechnet. Ergebnis: Winkel und Formen bleiben auch über größere
+Entfernungen vom Referenzpunkt erhalten („konform" = winkeltreu) — wichtig,
+damit Abstände und Richtungen auf der Karte stimmen.
+
 ---
 
 ## Mathematik & Statistik (das Handwerkszeug)
