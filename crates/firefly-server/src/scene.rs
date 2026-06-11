@@ -9,7 +9,7 @@ use firefly_geo::{Enu, LocalFrame, Wgs84};
 use firefly_io::Frame;
 use firefly_player::Player;
 use firefly_sim::{Leg, Radar, RadarParams, Scenario, State, Target};
-use firefly_track::{Gate, ProcessNoise, SensorErrorModel, TrackerConfig};
+use firefly_track::{ProcessNoise, SensorErrorModel, TrackerConfig};
 
 /// The geodetic origin of the demo scene — also the system reference point the
 /// CAT062 multicast feed measures I062/100 from.
@@ -157,7 +157,10 @@ fn frankfurt_player() -> Player {
         .with_sensor(SensorId(2), LocalFrame::new(site_west), error)
         .with_sensor(SensorId(3), LocalFrame::new(site_northeast), error);
     tracker.process_noise = ProcessNoise::new(60.0);
-    tracker.gate = Gate::from_probability(0.999);
+    // The default association gate (P_G = 0.99) now suffices: multi-radar
+    // "ghost" tracks are prevented at the source by the scan-start fusion
+    // reference and the wider initiation-suppression gate (ADR 0011), not by
+    // widening this gate.
 
     Player::new(&scenario, tracker)
 }

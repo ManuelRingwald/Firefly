@@ -478,12 +478,26 @@ sind und die Anforderung im Register rückverfolgbar steht.
   `airborne_target_maps_to_one_point_from_two_sensors`). Frankfurt läuft damit
   wieder mit realistischen, überlappenden Reichweiten (100 km) und einem echten
   Nord-Handover auf 8 km Höhe — stabil bei acht Tracks.
-- **Instabilität bei asynchronen Radar-Scans (`scan_offset`, M6.1-Befund):**
-  In der dichten 8-Flugzeug/3-Radar-Szene führte ein realistischer
-  Scan-Versatz (z. B. 1,3 s/2,6 s bei 4-s-Periode) zu massiver
-  Track-ID-Instabilität (50–90 statt 8 IDs) — Ursache nicht analysiert. M6.1
-  nutzt synchrone Scans als Workaround. Root-Cause-Analyse als Folge-Häppchen
-  — *S4, Opus 4.8/Fable 5*.
+- **Multi-Radar-Geister-Tracks bei Gate 0,99 (M6.1-Befund — BEHOBEN, ADR 0011):**
+  Bei Gate `0,99` entstanden zwei „Geister"-Spuren. Diagnose: **kein**
+  IMM-Manöver, sondern Fusions-Artefakte — (a) sequenzielle Tor-Verengung
+  (Sensor A aktualisiert → Tor enger → Sensor Bs Plot fällt heraus → Duplikat)
+  und (b) ein einzelner 3σ-Ausreißer-Plot, der sofort einen Track gebärt.
+  **Behoben:** eine zu Scan-Beginn eingefrorene Fusions-Referenz (alle Sensoren
+  gaten gegen die Prädiktion, keine Zwischen-Verengung) + ein getrenntes,
+  weiteres Initiierungs-Sperr-Tor (`init_gate`, Default `0,9999`). FR-TRK-020,
+  Test `tracker::outlier_plot_does_not_spawn_a_ghost`. Frankfurt läuft damit
+  wieder mit dem Standard-Tor `0,99` und acht Tracks.
+- **Instabilität bei asynchronen Radar-Scans (`scan_offset`, M6.1-Befund —
+  Ursache analysiert, Fix als Nächstes):** In der dichten 8-Flugzeug/3-Radar-Szene
+  führte ein Scan-Versatz zu massiver Track-ID-Instabilität (50–90 statt 8 IDs).
+  **Ursache:** Der Lebenszyklus bucht Treffer/Fehltreffer **pro
+  `process_scan`-Aufruf**; `Player::scans` gruppiert Plots nach exakt gleicher
+  Zeit, also trägt mit Versatz jeder Aufruf nur **einen** Sensor — ein Flugzeug,
+  das gerade nur Radar B sieht, kassiert beim Offset-Scan von Radar A einen
+  falschen „Miss" → Löschung → Respawn. **Geplanter Fix (gewählt):** ein
+  **zeitbasierter Lebenszyklus** (Löschung bei `t − last_hit_time > Timeout`,
+  Bestätigung über ein Zeitfenster) — *S4, Opus 4.8/Fable 5*.
 
 ## 6. So steige ich wieder ein (Kurzbefehle)
 

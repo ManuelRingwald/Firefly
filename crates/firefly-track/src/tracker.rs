@@ -62,8 +62,17 @@ pub struct TrackerConfig {
     /// The IMM bank recipe stamped onto every new track (motion models, Markov
     /// switching, prior model probabilities) — Häppchen M5.4.
     pub imm: ImmConfig,
-    /// The validation gate.
+    /// The validation gate used for **association**: which plots are folded
+    /// into a track's estimate.
     pub gate: Gate,
+    /// The (wider) gate used only to **suppress track initiation** (ADR 0011).
+    /// A plot inside this gate of some existing track does not seed a *new*
+    /// track — it is treated as that track's own (possibly outlier) detection,
+    /// not a new aircraft. Made looser than [`gate`](Self::gate) so a rare
+    /// 3σ-tail plot of an already-tracked target cannot spawn a confirmable
+    /// "ghost"; association itself still uses the tighter [`gate`](Self::gate),
+    /// keeping the state estimate precise.
+    pub init_gate: Gate,
     /// The clutter environment for JPDA association (Häppchen M5.9):
     /// expected false-plot density and detection probability.
     pub clutter: ClutterModel,
@@ -91,6 +100,10 @@ impl TrackerConfig {
             // A civil rate-one turn is ~3°/s ≈ 0.052 rad/s.
             imm: ImmConfig::cv_and_turns(0.052),
             gate: Gate::from_probability(0.99),
+            // The initiation-suppression gate is deliberately wider than the
+            // association gate: a plot up to this far from an existing track is
+            // its own outlier, not a new aircraft, so it must not seed a ghost.
+            init_gate: Gate::from_probability(0.9999),
             // A sparse clutter environment: ~1 false plot per 10 km², detected
             // 95% of the time. Mainly relevant when two tracks' gates overlap
             // (JPDA exclusivity); for an isolated track and plot it leaves the
@@ -211,6 +224,7 @@ impl Tracker {
         // without holding a borrow on `self.config` (which now owns a map).
         let process_noise = self.config.process_noise;
         let gate = self.config.gate;
+        let init_gate = self.config.init_gate;
         let confirm_m = self.config.confirm_m;
         let confirm_n = self.config.confirm_n;
         let initial_velocity_std = self.config.initial_velocity_std;
@@ -257,21 +271,35 @@ impl Tracker {
             }
         }
 
-        // 3. Sequentially associate & update, one sensor at a time, using JPDA
-        //    (Häppchen M5.5–M5.9): every track folds in *all* its gated plots
-        //    at once via `Imm::update_pda`, weighted by joint association
-        //    probabilities `β` that respect exclusivity — two tracks cannot
-        //    both "claim" the same plot in the same event. A track is
-        //    recorded as hit (this scan) when at least one plot fell in its
-        //    gate (`β_0 < 1`); the gated plot with the largest `β` is used for
-        //    identity bookkeeping (Mode 3/A, ICAO address), which is not part
-        //    of the kinematic blend.
+        // 3. Associate & update each sensor in turn with JPDA (Häppchen
+        //    M5.5–M5.9): every track folds in *all* its gated plots at once via
+        //    `Imm::update_pda`, weighted by joint association probabilities `β`
+        //    that respect exclusivity — two tracks cannot both "claim" the same
+        //    plot. A track is recorded as hit (this scan) when at least one plot
+        //    fell in its gate (`β_0 < 1`); the gated plot with the largest `β`
+        //    is used for identity bookkeeping (Mode 3/A, ICAO address).
+        //
+        //    Crucially, all sensors gate and associate against **one common
+        //    reference frozen at scan start** (ADR 0011), not against each
+        //    track's live estimate. Processing one sensor folds a plot into a
+        //    track and *shrinks* its covariance; gating the next sensor against
+        //    that tightened track would push the same aircraft's plot from a
+        //    second radar out of the gate, and step 3's initiation would then
+        //    spawn a duplicate ("ghost"). Freezing the reference removes that
+        //    sequential tightening. State fusion stays sequential, which for
+        //    independent measurements yields the same joint posterior.
         let mut hit_ids: BTreeSet<TrackId> = BTreeSet::new();
+        // `reference[k]` is the gating/association estimate for `self.tracks[k]`:
+        // the scan-start prediction for tracks that existed then (frozen for the
+        // whole scan), or the fresh estimate of a track initiated *during* this
+        // scan — appended so a later sensor associates to it instead of starting
+        // its own (one aircraft, one track). It stays index-aligned with
+        // `self.tracks`, both growing together as tracks are born.
+        let mut reference: Vec<LinearKalman> = self.tracks.iter().map(|tr| tr.estimate()).collect();
+
         for (&sensor, items) in &by_sensor {
             let measurements: Vec<CartesianMeasurement> = items.iter().map(|(_, m)| *m).collect();
-            // Gate and associate against each track's IMM combined estimate.
-            let filters: Vec<LinearKalman> = self.tracks.iter().map(|tr| tr.estimate()).collect();
-            let betas = joint_association_probabilities(&filters, &measurements, &gate, &clutter);
+            let betas = joint_association_probabilities(&reference, &measurements, &gate, &clutter);
 
             for (ti, track_betas) in betas.iter().enumerate() {
                 if track_betas[0] >= 1.0 - NO_DETECTION_EPSILON {
@@ -306,10 +334,23 @@ impl Tracker {
             }
 
             // Initiate a new tentative track from each plot that fell in *no*
-            // track's gate; it becomes visible to the *next* sensor's
-            // association this scan.
+            // reference track's gate. The veto uses `reference` as frozen at the
+            // *start* of this sensor's block, so two close-but-distinct plots
+            // from the *same* sensor (a sensor reports each target at most once
+            // per scan) do not veto one another — they are different targets and
+            // must each seed a track. The new tracks are appended only *after*
+            // the loop, so they veto the *next* sensor's plots (one aircraft seen
+            // by two radars → one track), not their own siblings.
+            let mut newborn = Vec::new();
             for (mi, m) in measurements.iter().enumerate() {
-                if filters.iter().any(|f| gate.accepts_measurement(f, m)) {
+                // Suppress initiation with the wider `init_gate`: a plot near an
+                // existing track is its own (outlier) detection, not a new
+                // aircraft — this is what stops a 3σ-tail plot of a tracked
+                // target from spawning a ghost (ADR 0011).
+                if reference
+                    .iter()
+                    .any(|f| init_gate.accepts_measurement(f, m))
+                {
                     continue;
                 }
                 let filter = LinearKalman::from_first_measurement(m, initial_velocity_std);
@@ -319,9 +360,11 @@ impl Tracker {
                 let mut track = Track::new(id, imm, t);
                 track.update_identity(&items[mi].0.mode_ac);
                 track.record_hit_from(sensor);
+                newborn.push(track.estimate());
                 self.tracks.push(track);
                 hit_ids.insert(id);
             }
+            reference.extend(newborn);
         }
 
         // 4. Book one hit/miss per track for this scan, then run the lifecycle.
@@ -816,6 +859,64 @@ mod tests {
             diff < separation,
             "some coalescence toward the shared plots is expected, got {diff} m: {easts:?}"
         );
+    }
+
+    /// A rare outlier plot of an already-tracked target — outside the tight
+    /// association gate but still near the track — must not spawn a competing
+    /// "ghost" track. The wider initiation-suppression gate (ADR 0011) absorbs
+    /// it; with a tight initiation gate (== the association gate) the very same
+    /// plot seeds a duplicate. This is the multi-radar ghost the Frankfurt
+    /// showcase used to mask behind a widened association gate.
+    /// REQ: FR-TRK-020
+    #[test]
+    fn outlier_plot_does_not_spawn_a_ghost() {
+        // Confirm one track on a steady target due north at 50 km.
+        let establish = |tracker: &mut Tracker| {
+            for k in 0..5 {
+                let t = k as f64 * 4.0;
+                tracker.process_scan(Timestamp(t), &[plot(t, 50_000.0, 0.0)]);
+            }
+        };
+
+        // An unassociated outlier ~250 m east of the track: a ~3.5σ cross-range
+        // jump (≈ 3.8σ), outside the association gate but inside the wider
+        // initiation gate.
+        let az_offset = (400.0_f64 / 50_000.0).atan();
+        let outlier = plot(20.0, 50_000.0, az_offset);
+
+        // Control — initiation gate == association gate: the outlier spawns a
+        // second (ghost) track.
+        let mut tight = {
+            let mut c = config();
+            c.init_gate = c.gate;
+            Tracker::new(c)
+        };
+        establish(&mut tight);
+        let before = tight.tracks().len();
+        tight.process_scan(Timestamp(20.0), std::slice::from_ref(&outlier));
+        assert!(
+            tight.tracks().len() > before,
+            "control: a tight initiation gate lets the outlier seed a ghost"
+        );
+
+        // The shipped default — a wider initiation gate: no ghost.
+        let mut wide = Tracker::new(config());
+        assert!(
+            wide_init_is_wider(&wide),
+            "the default initiation gate must be wider than the association gate"
+        );
+        establish(&mut wide);
+        let before = wide.tracks().len();
+        wide.process_scan(Timestamp(20.0), std::slice::from_ref(&outlier));
+        assert_eq!(
+            wide.tracks().len(),
+            before,
+            "the wider initiation gate must suppress the outlier ghost"
+        );
+    }
+
+    fn wide_init_is_wider(tracker: &Tracker) -> bool {
+        tracker.config.init_gate.threshold > tracker.config.gate.threshold
     }
 
     /// A plot from a sensor the tracker does not know about cannot be geolocated

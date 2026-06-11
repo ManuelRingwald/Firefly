@@ -98,23 +98,29 @@ es im Tracker-Kern behoben** war:
      ein. Genau der Fall, der vorher Geister erzeugte; jetzt bleibt es **eine**
      Spur.
 
-Zwei weitere Tuning-Entscheidungen bleiben **bewusst** bestehen — beide sind
-vom Höhenfehler unabhängig und als eigenständige Folge-Themen unter „Offene
-Punkte" in `docs/STATUS.md` vermerkt:
+2. **Geister-Spuren bei Gate `0,99` (behoben, ADR 0011).** Anfangs war das
+   Assoziations-Tor auf `0,999` geweitet, um zwei „Geister"-Spuren zu
+   unterdrücken. Eine Diagnose zeigte: das sind **Multi-Radar-Fusions-Artefakte**
+   (kein IMM-Manöver), mit zwei Ursachen — (a) die **sequenzielle Tor-Verengung**
+   (Sensor A aktualisiert → Tor enger → Sensor Bs Plot fällt heraus → Duplikat)
+   und (b) ein einzelner **3σ-Ausreißer-Plot**, der sofort einen Track gebärt.
+   Beide sind jetzt an der Wurzel behoben: eine **zu Scan-Beginn eingefrorene
+   Fusions-Referenz** und ein **getrenntes, weiteres Initiierungs-Sperr-Tor**
+   (FR-TRK-020). Die Szene läuft damit wieder mit dem **Standard-Tor `0,99`**.
 
-2. **JPDA-Tor leicht geweitet:** `tracker.gate = Gate::from_probability(0.999)`
-   statt des Standards `0.99` — behebt zwei „Geister"-Spuren, die an den
-   Manöver-Übergängen von `departure_turning` (AC4, IMM-Schaufenster) entstehen
-   (kurzer Gate-Verlust beim Wechsel Beschleunigung → Kurve → Geradeausflug).
-   Ein IMM-Manöver-Thema, kein Höhenfehler.
+Eine Tuning-Entscheidung bleibt vorerst bestehen und ist als offener Punkt in
+`docs/STATUS.md` vermerkt:
+
 3. **Synchrone Radar-Scans.** Ein realistisches Setup hätte die drei Radare
    zeitversetzt scannen lassen (`scan_offset`). In dieser dichten Szene führte
-   das zu massiver Track-Instabilität (50–90 statt 8 IDs) — Ursache noch nicht
-   analysiert; M6.1 nutzt daher synchrone Scans (`scan_period = 4.0`, kein
-   `scan_offset`).
+   das zu massiver Track-Instabilität (50–90 statt 8 IDs); Ursache: der
+   Lebenszyklus bucht Treffer/Fehltreffer **pro `process_scan`-Aufruf**, aber
+   mit Versatz trägt jeder Aufruf nur **einen** Sensor (siehe „Offene Punkte").
+   M6.1 nutzt daher synchrone Scans (`scan_period = 4.0`, kein `scan_offset`);
+   der zeitbasierte Lebenszyklus dafür ist der nächste Schritt.
 
-Mit dem Höhenfix und diesen zwei Anpassungen läuft die Szene über die vollen
-240 s mit exakt acht Track-IDs und nie mehr als acht Tracks pro Frame.
+Mit dem Höhenfix, dem Geister-Fix und synchronen Scans läuft die Szene über die
+vollen 240 s mit exakt acht Track-IDs und nie mehr als acht Tracks pro Frame.
 
 ---
 

@@ -24,3 +24,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0008 — Safety-relevante Track-Zustandsentscheidung im Tracker](0008-safety-track-zustand-im-tracker.md)
 - [0009 — Frontend-Architektur M3 (Async-Server, WebSocket, JSON, MapLibre)](0009-frontend-architektur-m3.md)
 - [0010 — Multi-Radar-Fusions-Architektur M4 (zentrale Mess-Fusion)](0010-multi-radar-fusion-architektur-m4.md)
+- [0011 — Gemeinsame Scan-Referenz & getrenntes Initiierungs-Tor gegen Geister-Tracks](0011-scan-fusion-referenz-und-initiierungs-tor.md)
