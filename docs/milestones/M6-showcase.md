@@ -70,46 +70,51 @@ wie `demo_player`/`demo_frames`/`demo_scans`:
   `main.rs` wählt anhand von `config.scene` zwischen `scene::demo_*` und
   `scene::frankfurt_*` für *beide* Ausgabe-Adapter (WebSocket und CAT062).
 
-### Tuning-Entscheidungen — ehrlich dokumentiert
+### Multi-Radar-Handover auf Flughöhe — und der dafür behobene Höhenfehler
 
 Eine Szene mit drei Radaren und acht Flugzeugen ist deutlich anspruchsvoller
-für den Tracker als die Zwei-Flugzeug-Demo. Beim Aufbau sind zwei reale
-Fusions-Phänomene aufgetreten, die hier bewusst **durch Szenen-Design
-umschifft** statt im Tracker-Kern behoben wurden — beides sind aber
-interessante, eigenständige Folge-Themen (siehe „Offene Punkte" in
-`docs/STATUS.md`):
+für den Tracker als die Zwei-Flugzeug-Demo. Beim Aufbau trat ein reales
+Fusions-Phänomen auf, das die Frankfurt-Szene erst sauber machte, **nachdem
+es im Tracker-Kern behoben** war:
 
-1. **Höhenfehler beim späten Eintritt in ein zweites Radar
-   („Höhen-Projektionsfehler")** — Wenn ein hoch fliegendes Flugzeug erst
-   *mitten im Flug* in die Reichweite eines zweiten Radars eintritt, während
-   sein Track vom ersten Radar bereits eng eingerastet ist (enges Tor), kann
-   die erste Messung des zweiten Radars knapp **außerhalb** dieses engen
-   Tores liegen — Ursache ist, dass `horizontal_from` eine Bodenmessung
-   entlang der jeweiligen lokalen „Oben"-Richtung projiziert, und diese
-   Richtung sich zwischen zwei ~50–90 km entfernten Radarstandorten leicht
-   unterscheidet (wenige zehn bis ~100 m Unterschied in der Bodenposition bei
-   10 km Höhe). Das reicht, um eine zusätzliche, bestätigte „Geister"-Spur zu
-   erzeugen. In der Realität korrigieren ATC-Systeme genau das über
-   höhenabhängige „System-Error"-Korrekturen.
-   - **Workaround in M6.1:** Die Reichweiten von `radar_west` (80 km) und
-     `radar_northeast` (65 km) sowie die Startposition von `arrival_north`
-     sind so gewählt, dass kein Flugzeug erst mitten im Flug in die
-     Reichweite eines zweiten Radars eintritt — jedes Flugzeug ist von Anfang
-     an entweder im Überlappungsbereich oder gar nicht.
-2. **Asynchrone Radar-Scans (`scan_offset`)** — Ein realistisches Setup hätte
-   die drei Radare zeitversetzt scannen lassen (z. B. 0 s/1,3 s/2,6 s
-   Versatz bei 4-s-Scan-Periode). In dieser dichten 8-Flugzeug-Szene führte
-   das jedoch zu massiver Track-Instabilität (50–90 statt 8 Track-IDs) — die
-   genaue Ursache ist noch nicht analysiert.
-   - **Workaround in M6.1:** Alle drei Radare scannen synchron
-     (`scan_period = 4.0`, kein `scan_offset`).
-3. **JPDA-Tor leicht geweitet:** `tracker.gate = Gate::from_probability(0.999)`
-   statt des Standards `0.99` — behebt zwei verbleibende „Geister"-Spuren, die
-   genau an den Manöver-Übergängen von `departure_turning` (AC4, IMM-Schaufenster)
-   entstanden (kurzer Gate-Verlust beim Wechsel Beschleunigung → Kurve → Geradeausflug).
+1. **Höhen-Projektionsfehler (behoben, FR-GEO-003).** Tritt ein hoch fliegendes
+   Flugzeug erst *mitten im Flug* in die Reichweite eines zweiten Radars ein,
+   während sein Track vom ersten Radar bereits eng eingerastet ist (enges Tor),
+   lag die erste Messung des zweiten Radars früher knapp **außerhalb** dieses
+   Tores — Ursache: `horizontal_from` projizierte die Messung im *Quellrahmen*
+   auf den Boden (`up = 0`), und diese „Senkrechte" zeigt an zwei zig Kilometer
+   entfernten Radarstandorten leicht verschieden (wenige zehn bis ~100 m
+   Versatz bei 10 km Höhe) → zusätzliche, bestätigte „Geister"-Spur. **Die
+   Lösung** (eigener Schritt, vor diesem Häppchen): `horizontal_from` bekommt
+   die Zielhöhe, rekonstruiert den **vollständigen 3D-Punkt** und projiziert
+   **erst im gemeinsamen Tracking-Frame** auf den Boden — damit ist das
+   Horizontalergebnis sensor-unabhängig. Details im Glossar
+   („Höhen-Projektionsfehler") und im Regressionstest
+   `airborne_target_maps_to_one_point_from_two_sensors`.
+   - **Wirkung in M6.1:** Die Radare laufen wieder mit **realistischen,
+     überlappenden Reichweiten** (Center 120 km, West/Nordost je 100 km), und
+     `arrival_north` ist bewusst ein **Handover auf 8 km Höhe** — es wird zuerst
+     nur vom Nordost-Radar gesehen und tritt mitten im Flug in das Zentrum-Radar
+     ein. Genau der Fall, der vorher Geister erzeugte; jetzt bleibt es **eine**
+     Spur.
 
-Mit allen drei Anpassungen läuft die Szene über die vollen 240 s mit exakt
-acht Track-IDs und nie mehr als acht Tracks pro Frame.
+Zwei weitere Tuning-Entscheidungen bleiben **bewusst** bestehen — beide sind
+vom Höhenfehler unabhängig und als eigenständige Folge-Themen unter „Offene
+Punkte" in `docs/STATUS.md` vermerkt:
+
+2. **JPDA-Tor leicht geweitet:** `tracker.gate = Gate::from_probability(0.999)`
+   statt des Standards `0.99` — behebt zwei „Geister"-Spuren, die an den
+   Manöver-Übergängen von `departure_turning` (AC4, IMM-Schaufenster) entstehen
+   (kurzer Gate-Verlust beim Wechsel Beschleunigung → Kurve → Geradeausflug).
+   Ein IMM-Manöver-Thema, kein Höhenfehler.
+3. **Synchrone Radar-Scans.** Ein realistisches Setup hätte die drei Radare
+   zeitversetzt scannen lassen (`scan_offset`). In dieser dichten Szene führte
+   das zu massiver Track-Instabilität (50–90 statt 8 IDs) — Ursache noch nicht
+   analysiert; M6.1 nutzt daher synchrone Scans (`scan_period = 4.0`, kein
+   `scan_offset`).
+
+Mit dem Höhenfix und diesen zwei Anpassungen läuft die Szene über die vollen
+240 s mit exakt acht Track-IDs und nie mehr als acht Tracks pro Frame.
 
 ---
 

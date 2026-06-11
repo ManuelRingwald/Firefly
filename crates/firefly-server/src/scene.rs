@@ -125,14 +125,14 @@ fn frankfurt_player() -> Player {
     let radar_west = Radar::new(
         Sensor::new(SensorId(2), site_west),
         RadarParams {
-            max_range: 80_000.0,
+            max_range: 100_000.0,
             ..RadarParams::default()
         },
     );
     let radar_northeast = Radar::new(
         Sensor::new(SensorId(3), site_northeast),
         RadarParams {
-            max_range: 65_000.0,
+            max_range: 100_000.0,
             ..RadarParams::default()
         },
     );
@@ -307,14 +307,19 @@ fn holding_pattern() -> Target {
     }
 }
 
-/// An arrival descending from the north, seen by the north-east radar and the
-/// centre radar throughout — a multi-radar overlap showcase.
+/// An arrival descending from the far north at 8 km, crossing from the
+/// north-east radar's coverage into the centre radar's — a multi-radar
+/// **handover** showcase. Because the aircraft is already tracked (and tightly
+/// gated) by the north-east radar when it enters the centre radar's range, this
+/// is exactly the late-entry-at-altitude case that used to spawn a duplicate
+/// "ghost" track via the height-projection bias; with the height-aware frame
+/// lift (FR-GEO-003) it stays a single track across the handover.
 fn arrival_north() -> Target {
     Target {
         id: TargetId(17),
         initial: State {
-            position: Enu::new(15_000.0, 85_000.0, 4_000.0),
-            speed: 140.0,
+            position: Enu::new(10_000.0, 115_000.0, 8_000.0),
+            speed: 200.0,
             heading: 180.0_f64.to_radians(),
             climb_rate: -2.0,
         },

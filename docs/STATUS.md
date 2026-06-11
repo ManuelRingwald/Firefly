@@ -6,7 +6,16 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **M6.1 — Frankfurt-Showcase-Szene.** Neue Funktionen
+- **Letzter Commit:** **M6.1-Nachtrag — Höhen-Projektionsfehler behoben +
+  Frankfurt realistischer.** `LocalFrame::horizontal_from` nimmt jetzt die
+  Zielhöhe und hebt den vollständigen 3D-Punkt in den Tracking-Frame (Projektion
+  erst dort) → sensor-unabhängig, kein Geister-Track beim späten Eintritt eines
+  hoch fliegenden Ziels in ein zweites Radar (FR-GEO-003, Regressionstest
+  `airborne_target_maps_to_one_point_from_two_sensors`; Tracker rekonstruiert
+  die Höhe am Naht-Punkt aus dem Polar-Plot). Frankfurt damit wieder mit
+  realistischen, überlappenden Reichweiten (Center 120 km, West/Nordost je
+  100 km) und `arrival_north` als echtem Handover auf 8 km Höhe — stabil bei
+  acht Tracks. (Davor: **M6.1 — Frankfurt-Showcase-Szene.**) Neue Funktionen
   `frankfurt_player`/`frankfurt_frames`/`frankfurt_scans` in
   `crates/firefly-server/src/scene.rs`: drei Radare (Center/West/Nordost) mit
   überlappender Reichweite und acht Flugzeuge — JPDA-Nahpaar (zwei
@@ -323,9 +332,9 @@ Warteschleife, Multi-Radar-Überlappung), acht stabile Track-IDs über 240 s,
   analog zur Cloud.
 
 Danach: gemeinsam mit dem Projektverantwortlichen den weiteren Fahrplan
-festlegen — z. B. offene Punkte aus Abschnitt 5 (Höhen-Projektionsfehler,
-asynchrone Radar-Scans, Sensor-Registrierung/Bias, FHA/Hazards,
-Coverage-Werkzeug, Out-of-order-Eingang) oder neue fachliche Erweiterungen.
+festlegen — z. B. offene Punkte aus Abschnitt 5 (asynchrone Radar-Scans,
+Sensor-Registrierung/Bias, FHA/Hazards, Coverage-Werkzeug, Out-of-order-Eingang)
+oder neue fachliche Erweiterungen. (Der Höhen-Projektionsfehler ist behoben.)
 
 ### M5-Plan in Häppchen (abgeschlossen)
 
@@ -456,17 +465,19 @@ sind und die Anforderung im Register rückverfolgbar steht.
 - **Manöver-Handling (erledigt durch IMM):** Ein einzelnes `Q` deckt nur einen
   Manöver-Bereich ab. M5.1–M5.4 lösen das mit **IMM** (mehrere Bewegungsmodelle
   parallel, FR-TRK-011–014).
-- **Höhen-Projektionsfehler bei `horizontal_from` (M6.1-Befund):** Wenn ein
-  hoch fliegendes Ziel *mitten im Flug* in die Reichweite eines zweiten Radars
-  eintritt, während sein Track vom ersten Radar bereits eng eingerastet ist,
-  kann die erste Messung des zweiten Radars knapp außerhalb des engen Tores
-  liegen — `horizontal_from` projiziert die Bodenmessung entlang der jeweiligen
-  lokalen „Oben"-Richtung, und diese unterscheidet sich zwischen zwei
-  ~50–90 km entfernten Radarstandorten um wenige zehn bis ~100 m (bei 10 km
-  Höhe). Folge: eine zusätzliche, bestätigte „Geister"-Spur. In M6.1 durch
-  Szenen-Design umschifft (Radar-Reichweiten/Positionierung); eine echte
-  Lösung wäre eine höhenabhängige „System-Error"-Korrektur in `firefly-geo`
-  — *S4, Opus 4.8/Fable 5*.
+- **Höhen-Projektionsfehler bei `horizontal_from` (M6.1-Befund — BEHOBEN):**
+  Trat ein hoch fliegendes Ziel *mitten im Flug* in die Reichweite eines
+  zweiten Radars ein, während sein Track vom ersten Radar bereits eng
+  eingerastet war, lag die erste Messung des zweiten Radars knapp außerhalb des
+  engen Tores — `horizontal_from` projizierte die Bodenmessung im *Quellrahmen*
+  (`up=0`) entlang der je Standort verschiedenen lokalen „Oben"-Richtung
+  (wenige zehn bis ~100 m Versatz bei 10 km Höhe) → „Geister"-Spur. **Behoben:**
+  `horizontal_from(source, z, height, r)` hebt jetzt den vollständigen
+  3D-Punkt in den Tracking-Frame und projiziert erst dort auf den Boden →
+  sensor-unabhängig (FR-GEO-003, Regressionstest
+  `airborne_target_maps_to_one_point_from_two_sensors`). Frankfurt läuft damit
+  wieder mit realistischen, überlappenden Reichweiten (100 km) und einem echten
+  Nord-Handover auf 8 km Höhe — stabil bei acht Tracks.
 - **Instabilität bei asynchronen Radar-Scans (`scan_offset`, M6.1-Befund):**
   In der dichten 8-Flugzeug/3-Radar-Szene führte ein realistischer
   Scan-Versatz (z. B. 1,3 s/2,6 s bei 4-s-Periode) zu massiver
