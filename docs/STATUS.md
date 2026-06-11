@@ -6,21 +6,24 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **Häppchen M5.5–M5.9 (JPDA) — M5 vollständig
-  abgeschlossen.** Neues Modul `pda` (Assoziationswahrscheinlichkeiten `β`,
-  Clutter-Modell, FR-TRK-015); `LinearKalman::update_pda` und `Imm::update_pda`
-  falten alle gegateten Plots gewichtet ein (Spread-of-the-Means wie beim
-  IMM-Mixing, FR-TRK-016/017); neues Modul `jpda` löst die Exklusivität
-  zwischen Tracks bei überlappenden Toren über Clustering + erschöpfende
-  Ereignis-Aufzählung (FR-TRK-018). Im Tracker ersetzt JPDA die harte
-  GNN-Zuordnung je Sensor (FR-TRK-019); `TrackerConfig` trägt ein
-  `ClutterModel` (~1 Falschplot/10 km², getunt um eine RMSE-Regression auf
-  sauberen Einzeltracks zu vermeiden). Neuer E2E-Test: zwei eng benachbarte
-  parallele Ziele bleiben über alle Scans zwei unterscheidbare, bestätigte
-  Tracks (dokumentierte „Track-Koaleszenz" als bekanntes JPDA-Merkmal).
-  **Damit ist M5 (IMM + JPDA) komplett.** Meilenstein-Doku erweitert:
-  `docs/milestones/M5-imm.md` (Teil 2: JPDA). (Davor: M5.1–M5.4 — IMM
-  komplett.)
+- **Letzter Commit:** **M6.1 — Frankfurt-Showcase-Szene.** Neue Funktionen
+  `frankfurt_player`/`frankfurt_frames`/`frankfurt_scans` in
+  `crates/firefly-server/src/scene.rs`: drei Radare (Center/West/Nordost) mit
+  überlappender Reichweite und acht Flugzeuge — JPDA-Nahpaar (zwei
+  West-Anflüge ~150 m parallel), IMM-Manöver (kurvender Abflug), SSR- und
+  primary-only-Überflug, Warteschleife, Multi-Radar-Nordanflug. Über die
+  vollen 240 s genau acht Track-IDs, nie mehr als acht Tracks/Frame
+  (`frankfurt_scene_is_non_trivial`,
+  `frankfurt_scene_keeps_one_identity_per_aircraft`). Szenenauswahl per
+  12-Factor: neues `Scene`-Enum (`Demo`/`Frankfurt`) und
+  `FIREFLY_SCENE=frankfurt` in `firefly-server::config`, verdrahtet in
+  `main.rs` für WebSocket *und* CAT062-Multicast. Tuning-Trade-offs (Radar-
+  Reichweiten/Positionierung gegen Höhen-Projektionsfehler, synchrone Scans
+  statt `scan_offset`, Gate auf 0,999 geweitet) ehrlich dokumentiert in
+  `docs/milestones/M6-showcase.md`; zwei neue Folge-Themen unter „Offene
+  Punkte" (Höhen-Projektionsfehler in `horizontal_from`, Instabilität bei
+  asynchronen Radar-Scans). **Als Nächstes:** M6.2 (OSM-Hintergrundkarte),
+  M6.3 (Roh-Plot-Ebene), M6.4 (Container-Setup) — jeweils mit eigenem Go.
 - **PR:** keiner offen.
 
 ---
@@ -306,10 +309,22 @@ unterscheidbare, bestätigte Tracks — „Track-Koaleszenz" als dokumentiertes
 JPDA-Merkmal (FR-TRK-019). **M5 (IMM + JPDA) ist damit vollständig
 abgeschlossen.**
 
-➡️ **Als Nächstes:** Mit M5 sind alle in `CLAUDE.md` ursprünglich vorgesehenen
-Meilensteine M1–M5 bearbeitet (M3/M4/M5 teils außer der Reihe). Vorschlag:
-gemeinsam mit dem Projektverantwortlichen den weiteren Fahrplan festlegen —
-z. B. offene Punkte aus Abschnitt 5 (Sensor-Registrierung/Bias, FHA/Hazards,
+✅ **M6.1 — Frankfurt-Showcase-Szene erledigt** (`docs/milestones/M6-showcase.md`):
+drei Radare, acht Flugzeuge (JPDA-Nahpaar, IMM-Manöver, SSR/primary-only,
+Warteschleife, Multi-Radar-Überlappung), acht stabile Track-IDs über 240 s,
+`FIREFLY_SCENE=frankfurt` zur Szenenauswahl (12-Factor).
+
+➡️ **Als Nächstes (M6, je mit eigenem Go):**
+- **M6.2** OpenStreetMap-Hintergrundkarte im Frontend.
+- **M6.3** Roh-Plot-Transparenz-Ebene (zeigt Radar-Plots vor der Tracker-
+  Verarbeitung, inkl. `overflight_primary` ohne SSR-Identität) — berührt den
+  `Frame`/`FrameTrack`-Vertrag (FR-IO-001), braucht ggf. ADR-Nachtrag.
+- **M6.4** Container-Setup (Dockerfile/docker-compose) für lokalen Start
+  analog zur Cloud.
+
+Danach: gemeinsam mit dem Projektverantwortlichen den weiteren Fahrplan
+festlegen — z. B. offene Punkte aus Abschnitt 5 (Höhen-Projektionsfehler,
+asynchrone Radar-Scans, Sensor-Registrierung/Bias, FHA/Hazards,
 Coverage-Werkzeug, Out-of-order-Eingang) oder neue fachliche Erweiterungen.
 
 ### M5-Plan in Häppchen (abgeschlossen)
@@ -441,6 +456,23 @@ sind und die Anforderung im Register rückverfolgbar steht.
 - **Manöver-Handling (erledigt durch IMM):** Ein einzelnes `Q` deckt nur einen
   Manöver-Bereich ab. M5.1–M5.4 lösen das mit **IMM** (mehrere Bewegungsmodelle
   parallel, FR-TRK-011–014).
+- **Höhen-Projektionsfehler bei `horizontal_from` (M6.1-Befund):** Wenn ein
+  hoch fliegendes Ziel *mitten im Flug* in die Reichweite eines zweiten Radars
+  eintritt, während sein Track vom ersten Radar bereits eng eingerastet ist,
+  kann die erste Messung des zweiten Radars knapp außerhalb des engen Tores
+  liegen — `horizontal_from` projiziert die Bodenmessung entlang der jeweiligen
+  lokalen „Oben"-Richtung, und diese unterscheidet sich zwischen zwei
+  ~50–90 km entfernten Radarstandorten um wenige zehn bis ~100 m (bei 10 km
+  Höhe). Folge: eine zusätzliche, bestätigte „Geister"-Spur. In M6.1 durch
+  Szenen-Design umschifft (Radar-Reichweiten/Positionierung); eine echte
+  Lösung wäre eine höhenabhängige „System-Error"-Korrektur in `firefly-geo`
+  — *S4, Opus 4.8/Fable 5*.
+- **Instabilität bei asynchronen Radar-Scans (`scan_offset`, M6.1-Befund):**
+  In der dichten 8-Flugzeug/3-Radar-Szene führte ein realistischer
+  Scan-Versatz (z. B. 1,3 s/2,6 s bei 4-s-Periode) zu massiver
+  Track-ID-Instabilität (50–90 statt 8 IDs) — Ursache nicht analysiert. M6.1
+  nutzt synchrone Scans als Workaround. Root-Cause-Analyse als Folge-Häppchen
+  — *S4, Opus 4.8/Fable 5*.
 
 ## 6. So steige ich wieder ein (Kurzbefehle)
 
