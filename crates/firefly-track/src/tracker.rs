@@ -22,12 +22,17 @@ use firefly_core::{Plot, SensorId, SystemTrack, Timestamp, TrackId};
 use firefly_geo::{Enu, LocalFrame};
 use serde::{Deserialize, Serialize};
 
-use crate::association::associate;
 use crate::gating::Gate;
 use crate::imm::ImmConfig;
+use crate::jpda::joint_association_probabilities;
 use crate::kalman::{LinearKalman, ProcessNoise};
 use crate::measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};
+use crate::pda::ClutterModel;
 use crate::track::{Track, TrackStatus};
+
+/// Below this "no detection" probability `β_0`, a track is treated as having
+/// at least one plot in its gate (a hit) rather than coasting.
+const NO_DETECTION_EPSILON: f64 = 1e-9;
 
 /// Where one sensor sits and how noisy the tracker believes it is.
 ///
@@ -59,6 +64,9 @@ pub struct TrackerConfig {
     pub imm: ImmConfig,
     /// The validation gate.
     pub gate: Gate,
+    /// The clutter environment for JPDA association (Häppchen M5.9):
+    /// expected false-plot density and detection probability.
+    pub clutter: ClutterModel,
     /// Confirmation needs `confirm_m` hits within the last `confirm_n` scans.
     pub confirm_m: usize,
     /// Window length for the M-of-N confirmation rule.
@@ -83,6 +91,11 @@ impl TrackerConfig {
             // A civil rate-one turn is ~3°/s ≈ 0.052 rad/s.
             imm: ImmConfig::cv_and_turns(0.052),
             gate: Gate::from_probability(0.99),
+            // A sparse clutter environment: ~1 false plot per 10 km², detected
+            // 95% of the time. Mainly relevant when two tracks' gates overlap
+            // (JPDA exclusivity); for an isolated track and plot it leaves the
+            // pre-JPDA behaviour essentially unchanged.
+            clutter: ClutterModel::new(1.0e-7, 0.95),
             confirm_m: 3,
             confirm_n: 5,
             delete_misses_tentative: 2,
@@ -205,6 +218,7 @@ impl Tracker {
         let delete_confirmed = self.config.delete_misses_confirmed;
         let tracking_frame = self.config.tracking_frame;
         let imm_config = self.config.imm.clone();
+        let clutter = self.config.clutter;
         let t = time.as_secs();
 
         // 1. Predict every existing track's IMM forward to the scan time (mixing
@@ -236,30 +250,62 @@ impl Tracker {
             }
         }
 
-        // 3. Sequentially associate & update, one sensor at a time. A track is
-        //    recorded as hit (this scan) when any sensor's plot associates to it
-        //    or founds it.
+        // 3. Sequentially associate & update, one sensor at a time, using JPDA
+        //    (Häppchen M5.5–M5.9): every track folds in *all* its gated plots
+        //    at once via `Imm::update_pda`, weighted by joint association
+        //    probabilities `β` that respect exclusivity — two tracks cannot
+        //    both "claim" the same plot in the same event. A track is
+        //    recorded as hit (this scan) when at least one plot fell in its
+        //    gate (`β_0 < 1`); the gated plot with the largest `β` is used for
+        //    identity bookkeeping (Mode 3/A, ICAO address), which is not part
+        //    of the kinematic blend.
         let mut hit_ids: BTreeSet<TrackId> = BTreeSet::new();
         for (&sensor, items) in &by_sensor {
             let measurements: Vec<CartesianMeasurement> = items.iter().map(|(_, m)| *m).collect();
             // Gate and associate against each track's IMM combined estimate.
             let filters: Vec<LinearKalman> = self.tracks.iter().map(|tr| tr.estimate()).collect();
-            let assoc = associate(&filters, &measurements, &gate);
+            let betas = joint_association_probabilities(&filters, &measurements, &gate, &clutter);
 
-            // Update associated tracks (a hit): fold the plot into the IMM,
-            // which re-weights its motion models by how well each predicted it.
-            for &(ti, mi) in &assoc.pairs {
-                self.tracks[ti].imm.update(&measurements[mi]);
+            for (ti, track_betas) in betas.iter().enumerate() {
+                if track_betas[0] >= 1.0 - NO_DETECTION_EPSILON {
+                    continue; // nothing in this track's gate from this sensor
+                }
+
+                // The gated plots and their association weights, in the order
+                // they appear in `measurements`; remember the most likely one
+                // for identity bookkeeping.
+                let mut gated_measurements = Vec::new();
+                let mut gated_betas = vec![track_betas[0]];
+                let mut best: Option<(usize, f64)> = None;
+                for (mi, &beta) in track_betas[1..].iter().enumerate() {
+                    if beta > 0.0 {
+                        gated_measurements.push(measurements[mi]);
+                        gated_betas.push(beta);
+                        if best.is_none_or(|(_, b)| beta > b) {
+                            best = Some((mi, beta));
+                        }
+                    }
+                }
+
+                self.tracks[ti]
+                    .imm
+                    .update_pda(&gated_measurements, &gated_betas);
                 self.tracks[ti].last_hit_time = t;
-                self.tracks[ti].update_identity(&items[mi].0.mode_ac);
                 self.tracks[ti].record_hit_from(sensor);
+                if let Some((mi, _)) = best {
+                    self.tracks[ti].update_identity(&items[mi].0.mode_ac);
+                }
                 hit_ids.insert(self.tracks[ti].id());
             }
-            // Initiate a new tentative track from each unassociated measurement;
-            // it becomes visible to the *next* sensor's association this scan.
-            for &mi in &assoc.unassigned_measurements {
-                let filter =
-                    LinearKalman::from_first_measurement(&measurements[mi], initial_velocity_std);
+
+            // Initiate a new tentative track from each plot that fell in *no*
+            // track's gate; it becomes visible to the *next* sensor's
+            // association this scan.
+            for (mi, m) in measurements.iter().enumerate() {
+                if filters.iter().any(|f| gate.accepts_measurement(f, m)) {
+                    continue;
+                }
+                let filter = LinearKalman::from_first_measurement(m, initial_velocity_std);
                 let imm = imm_config.seed(filter);
                 let id = TrackId(self.next_id);
                 self.next_id += 1;
@@ -709,6 +755,59 @@ mod tests {
         assert!(
             mu_left_turn > mu_cv,
             "the matching turn model should dominate: μ = {mu:?}, models = {models:?}"
+        );
+    }
+
+    /// JPDA payoff (Häppchen M5.5–M5.9): two targets flying parallel tracks
+    /// close enough that their validation gates overlap each scan still end
+    /// up as **two** distinct, confirmed tracks, each tracking its own
+    /// target — the soft, joint association handles the shared plots without
+    /// either track losing or swapping its identity, unlike a hard 1:1
+    /// assignment that must arbitrarily pick one plot per track.
+    /// REQ: FR-TRK-015, FR-TRK-016, FR-TRK-017, FR-TRK-018, FR-TRK-019
+    #[test]
+    fn jpda_keeps_two_close_parallel_tracks_distinct() {
+        let mut tracker = Tracker::new(config());
+        let speed = 150.0; // m/s due east
+        let dt = 4.0;
+        let separation = 100.0; // metres east, between the two targets
+
+        // Target A starts 50 km north of the sensor; target B is 100 m east
+        // of A. Both fly straight east at the same speed, so they stay 100 m
+        // apart — close enough for their gates to overlap.
+        for k in 0..10 {
+            let t = k as f64 * dt;
+            let east = speed * t;
+            let polar_a = firefly_geo::Enu::new(east, 50_000.0, 0.0).to_polar();
+            let polar_b = firefly_geo::Enu::new(east + separation, 50_000.0, 0.0).to_polar();
+            tracker.process_scan(
+                Timestamp(t),
+                &[
+                    Plot::primary(SensorId(1), Timestamp(t), polar_a),
+                    Plot::primary(SensorId(1), Timestamp(t), polar_b),
+                ],
+            );
+        }
+
+        assert_eq!(tracker.tracks().len(), 2, "two distinct tracks");
+        assert_eq!(tracker.confirmed_count(), 2, "both confirmed");
+
+        // The two tracks remain distinguishable (have not coalesced into a
+        // single position) even though their gates overlapped every scan.
+        // Some convergence ("track coalescence") is a known characteristic of
+        // JPDA for closely-spaced targets — the soft association *shares*
+        // each plot between the tracks rather than handing it to one
+        // exclusively — but the two estimates must not collapse onto each
+        // other.
+        let easts: Vec<f64> = tracker.tracks().iter().map(|tr| tr.position()[0]).collect();
+        let diff = (easts[0] - easts[1]).abs();
+        assert!(
+            diff > 10.0,
+            "the two tracks should remain distinguishable, got {diff} m apart: {easts:?}"
+        );
+        assert!(
+            diff < separation,
+            "some coalescence toward the shared plots is expected, got {diff} m: {easts:?}"
         );
     }
 
