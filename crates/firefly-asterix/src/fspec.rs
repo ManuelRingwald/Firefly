@@ -49,6 +49,32 @@ impl RecordBuilder {
     }
 }
 
+/// Parse the FSPEC at the start of `bytes`: the set of FRNs it marks present,
+/// and the number of FSPEC octets consumed (the inverse of [`fspec`]).
+///
+/// Reads octets while their FX bit (the lowest bit, `0x01`) is set, stopping
+/// after the first octet whose FX bit is clear. An empty `bytes` yields an
+/// empty FRN set and zero octets consumed — the caller decides whether that is
+/// an error (e.g. truncated input).
+pub fn parse(bytes: &[u8]) -> (BTreeSet<u8>, usize) {
+    let mut frns = BTreeSet::new();
+    let mut consumed = 0;
+
+    for &octet in bytes {
+        consumed += 1;
+        for position in 0..7u8 {
+            if octet & (1 << (7 - position)) != 0 {
+                frns.insert((consumed - 1) as u8 * 7 + position + 1);
+            }
+        }
+        if octet & 0x01 == 0 {
+            break;
+        }
+    }
+
+    (frns, consumed)
+}
+
 /// Compute the FSPEC octets for a set of present FRNs.
 ///
 /// The result is just long enough to reach the highest present FRN: one octet per
@@ -127,5 +153,35 @@ mod tests {
             .finish();
         // FSPEC for {1,12} = [0x81, 0x08], then FRN 1's bytes, then FRN 12's.
         assert_eq!(record, vec![0x81, 0x08, 0x11, 0x22, 0xAA, 0xBB]);
+    }
+
+    /// `parse` is the inverse of `fspec`: for every FRN set we can build, parsing
+    /// the resulting octets recovers the same set and consumes exactly those
+    /// octets (nothing more).
+    #[test]
+    fn parse_inverts_fspec() {
+        for frns in [
+            vec![1u8],
+            vec![1, 4],
+            vec![1, 4, 12],
+            vec![7],
+            vec![8],
+            vec![1, 4, 5, 6, 7, 12, 13, 14, 16],
+        ] {
+            let set: BTreeSet<u8> = frns.iter().copied().collect();
+            let octets = fspec(&set);
+            let (parsed, consumed) = parse(&octets);
+            assert_eq!(parsed, set, "frns = {frns:?}");
+            assert_eq!(consumed, octets.len(), "frns = {frns:?}");
+        }
+    }
+
+    /// An empty input yields an empty FRN set and consumes nothing — the caller
+    /// must treat that as truncated input, not as "no items present".
+    #[test]
+    fn parse_of_empty_input_consumes_nothing() {
+        let (frns, consumed) = parse(&[]);
+        assert!(frns.is_empty());
+        assert_eq!(consumed, 0);
     }
 }

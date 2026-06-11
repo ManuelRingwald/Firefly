@@ -22,10 +22,12 @@
 //!
 //! REQ: FR-IO-003, FR-TRK-008, FR-TRK-009, FR-GEO-004
 
+use std::collections::BTreeSet;
+
 use firefly_core::{SystemTrack, Timestamp};
 use firefly_geo::{StereographicProjection, Wgs84};
 
-use crate::fspec::RecordBuilder;
+use crate::fspec::{self, RecordBuilder};
 
 /// The ASTERIX category number for system tracks.
 const CATEGORY: u8 = 62;
@@ -343,6 +345,316 @@ fn data_block(records: &[Vec<u8>]) -> Vec<u8> {
         out.extend_from_slice(record);
     }
     out
+}
+
+/// One decoded CAT062 record — the inverse of [`Cat062Encoder::record`].
+///
+/// Mirrors the fields of [`SystemTrack`], plus the wire-level extras
+/// (`source`, `track_number`, `cartesian`) that don't have a place in the
+/// neutral track but are useful to a recorder verifying the feed.
+///
+/// [`position`](Self::position) comes from I062/105 (WGS-84); its `height` is
+/// always `0`, since CAT062 carries no height for system tracks.
+/// [`cartesian`](Self::cartesian) is I062/100's X/Y in metres, *not yet*
+/// converted back to latitude/longitude — that needs the system reference
+/// point's [`StereographicProjection`] (a follow-up häppchen).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecodedRecord {
+    /// I062/010 — the data source that produced this track.
+    pub source: DataSourceId,
+    /// I062/070 — time of track, as a time-of-day (wraps every 24 hours).
+    pub time: Timestamp,
+    /// I062/105 — geodetic position (height always `0`).
+    pub position: Wgs84,
+    /// I062/100 — system-stereographic X/Y, in metres.
+    pub cartesian: (f64, f64),
+    /// I062/185 — eastward velocity, m/s.
+    pub v_east: f64,
+    /// I062/185 — northward velocity, m/s.
+    pub v_north: f64,
+    /// I062/040 — track number.
+    pub track_number: u16,
+    /// I062/080 CNF — `true` unless the track is still tentative.
+    pub confirmed: bool,
+    /// I062/080 CST — `true` while the track is coasting.
+    pub coasting: bool,
+    /// I062/290 PSR age, seconds.
+    pub update_age: f64,
+    /// I062/500 APC, 1σ position uncertainty in metres.
+    pub position_uncertainty: f64,
+    /// I062/060, if the track carries an SSR identity.
+    pub mode_3a: Option<u16>,
+    /// I062/380 Target Address, if the track carries a Mode S address.
+    pub icao_address: Option<u32>,
+}
+
+/// Errors that can occur while decoding a CAT062 data block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeError {
+    /// The input ended before a complete block/record/item could be read.
+    Truncated,
+    /// The first octet was not [`CATEGORY`] (62).
+    WrongCategory(u8),
+    /// The `LEN` field did not match the actual input length.
+    LengthMismatch { declared: usize, actual: usize },
+    /// The FSPEC marked an FRN present that this decoder doesn't know.
+    UnknownItem(u8),
+    /// A record's FSPEC was missing an item this decoder requires.
+    MissingItem(u8),
+}
+
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DecodeError::Truncated => write!(f, "input ended before a complete item"),
+            DecodeError::WrongCategory(cat) => write!(f, "expected CAT 62, got CAT {cat}"),
+            DecodeError::LengthMismatch { declared, actual } => write!(
+                f,
+                "LEN field says {declared} bytes, but input is {actual} bytes"
+            ),
+            DecodeError::UnknownItem(frn) => write!(f, "FSPEC marks unknown FRN {frn} present"),
+            DecodeError::MissingItem(frn) => write!(f, "record is missing required FRN {frn}"),
+        }
+    }
+}
+
+impl std::error::Error for DecodeError {}
+
+/// Decode a CAT062 data block (`[CAT][LEN][record…]`) into one
+/// [`DecodedRecord`] per record — the inverse of
+/// [`Cat062Encoder::encode`].
+pub fn decode_data_block(bytes: &[u8]) -> Result<Vec<DecodedRecord>, DecodeError> {
+    if bytes.len() < 3 {
+        return Err(DecodeError::Truncated);
+    }
+    if bytes[0] != CATEGORY {
+        return Err(DecodeError::WrongCategory(bytes[0]));
+    }
+    let declared = u16::from_be_bytes([bytes[1], bytes[2]]) as usize;
+    if declared != bytes.len() {
+        return Err(DecodeError::LengthMismatch {
+            declared,
+            actual: bytes.len(),
+        });
+    }
+
+    let mut cursor = Cursor::new(&bytes[3..]);
+    let mut records = Vec::new();
+    while cursor.remaining() > 0 {
+        records.push(decode_record(&mut cursor)?);
+    }
+    Ok(records)
+}
+
+/// One record: FSPEC, then the present items in ascending-FRN (UAP) order —
+/// the inverse of [`Cat062Encoder::record`].
+fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
+    let frns = cursor.take_fspec()?;
+
+    let mut source = None;
+    let mut time = None;
+    let mut position = None;
+    let mut cartesian = None;
+    let mut velocity = None;
+    let mut track_number = None;
+    let mut status = None;
+    let mut update_age = None;
+    let mut position_uncertainty = None;
+    let mut mode_3a = None;
+    let mut icao_address = None;
+
+    for frn in frns {
+        match frn {
+            uap::DATA_SOURCE_IDENTIFIER => source = Some(decode_data_source(cursor.take(2)?)),
+            uap::TIME_OF_TRACK_INFORMATION => time = Some(decode_time_of_track(cursor.take(3)?)),
+            uap::POSITION_WGS84 => position = Some(decode_position(cursor.take(8)?)),
+            uap::POSITION_CARTESIAN => cartesian = Some(decode_position_cartesian(cursor.take(6)?)),
+            uap::VELOCITY_CARTESIAN => velocity = Some(decode_velocity(cursor.take(4)?)),
+            uap::MODE_3A_CODE => mode_3a = Some(decode_mode_3a(cursor.take(2)?)),
+            uap::AIRCRAFT_DERIVED_DATA => {
+                icao_address = Some(decode_target_address(cursor.take(4)?))
+            }
+            uap::TRACK_NUMBER => track_number = Some(decode_track_number(cursor.take(2)?)),
+            uap::TRACK_STATUS => status = Some(decode_track_status(cursor.take_track_status()?)),
+            uap::UPDATE_AGES => update_age = Some(decode_update_ages(cursor.take(2)?)),
+            uap::ESTIMATED_ACCURACIES => {
+                position_uncertainty = Some(decode_accuracies(cursor.take(5)?))
+            }
+            other => return Err(DecodeError::UnknownItem(other)),
+        }
+    }
+
+    let (confirmed, coasting) = status.ok_or(DecodeError::MissingItem(uap::TRACK_STATUS))?;
+    let (v_east, v_north) = velocity.ok_or(DecodeError::MissingItem(uap::VELOCITY_CARTESIAN))?;
+
+    Ok(DecodedRecord {
+        source: source.ok_or(DecodeError::MissingItem(uap::DATA_SOURCE_IDENTIFIER))?,
+        time: time.ok_or(DecodeError::MissingItem(uap::TIME_OF_TRACK_INFORMATION))?,
+        position: position.ok_or(DecodeError::MissingItem(uap::POSITION_WGS84))?,
+        cartesian: cartesian.ok_or(DecodeError::MissingItem(uap::POSITION_CARTESIAN))?,
+        v_east,
+        v_north,
+        track_number: track_number.ok_or(DecodeError::MissingItem(uap::TRACK_NUMBER))?,
+        confirmed,
+        coasting,
+        update_age: update_age.ok_or(DecodeError::MissingItem(uap::UPDATE_AGES))?,
+        position_uncertainty: position_uncertainty
+            .ok_or(DecodeError::MissingItem(uap::ESTIMATED_ACCURACIES))?,
+        mode_3a,
+        icao_address,
+    })
+}
+
+/// I062/010 — the inverse of [`encode_data_source`].
+fn decode_data_source(bytes: &[u8]) -> DataSourceId {
+    DataSourceId::new(bytes[0], bytes[1])
+}
+
+/// I062/070 — the inverse of [`encode_time_of_track`]. The result is a
+/// time-of-day in `[0, 86_400)` seconds; the original day is not recoverable
+/// (CAT062 doesn't carry it).
+fn decode_time_of_track(bytes: &[u8]) -> Timestamp {
+    let ticks = u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]);
+    Timestamp(ticks as f64 * TIME_LSB_SECONDS)
+}
+
+/// I062/105 — the inverse of [`encode_position`]. Height is not part of
+/// I062/105, so it comes back as `0`.
+fn decode_position(bytes: &[u8]) -> Wgs84 {
+    let lat = decode_wgs84_angle(&bytes[0..4]);
+    let lon = decode_wgs84_angle(&bytes[4..8]);
+    Wgs84::from_degrees(lat, lon, 0.0)
+}
+
+/// One WGS-84 angle (degrees) — the inverse of [`encode_wgs84_angle`].
+fn decode_wgs84_angle(bytes: &[u8]) -> f64 {
+    let ticks = i32::from_be_bytes(bytes.try_into().unwrap());
+    ticks as f64 * POSITION_LSB_DEGREES
+}
+
+/// I062/100 — the inverse of [`encode_position_cartesian`]. Returns the
+/// system-stereographic `(x, y)` in metres; converting back to a geodetic
+/// position needs the system reference point's projection.
+fn decode_position_cartesian(bytes: &[u8]) -> (f64, f64) {
+    (
+        decode_cartesian_component(&bytes[0..3]),
+        decode_cartesian_component(&bytes[3..6]),
+    )
+}
+
+/// One system-stereographic component — the inverse of
+/// [`encode_cartesian_component`]: a 24-bit two's-complement count of
+/// 0.5-metre steps, sign-extended to `i32`.
+fn decode_cartesian_component(bytes: &[u8]) -> f64 {
+    let mut ticks = i32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]);
+    if ticks & 0x0080_0000 != 0 {
+        ticks -= 0x0100_0000;
+    }
+    ticks as f64 * POSITION_CARTESIAN_LSB_METRES
+}
+
+/// I062/185 — the inverse of [`encode_velocity`].
+fn decode_velocity(bytes: &[u8]) -> (f64, f64) {
+    (
+        decode_velocity_component(&bytes[0..2]),
+        decode_velocity_component(&bytes[2..4]),
+    )
+}
+
+/// One velocity component — the inverse of [`encode_velocity_component`].
+fn decode_velocity_component(bytes: &[u8]) -> f64 {
+    let ticks = i16::from_be_bytes(bytes.try_into().unwrap());
+    ticks as f64 * VELOCITY_LSB_MPS
+}
+
+/// I062/060 — the inverse of [`encode_mode_3a`].
+fn decode_mode_3a(bytes: &[u8]) -> u16 {
+    u16::from_be_bytes(bytes.try_into().unwrap()) & MODE_3A_CODE_MASK
+}
+
+/// I062/380 — the inverse of [`encode_target_address`]. The leading
+/// subfield octet (always [`ADR_TARGET_ADDRESS_PRESENT`] for our encoder) is
+/// dropped.
+fn decode_target_address(bytes: &[u8]) -> u32 {
+    u32::from_be_bytes([0, bytes[1], bytes[2], bytes[3]])
+}
+
+/// I062/040 — the inverse of [`encode_track_number`].
+fn decode_track_number(bytes: &[u8]) -> u16 {
+    u16::from_be_bytes(bytes.try_into().unwrap())
+}
+
+/// I062/080 — the inverse of [`encode_track_status`]: CNF from octet 1, CST
+/// from octet 4 if the item was extended that far.
+fn decode_track_status(bytes: &[u8]) -> (bool, bool) {
+    let confirmed = bytes[0] & STATUS_CNF_TENTATIVE == 0;
+    let coasting = bytes.len() >= 4 && bytes[3] & STATUS_CST_COASTING != 0;
+    (confirmed, coasting)
+}
+
+/// I062/290 — the inverse of [`encode_update_ages`]: our encoder always
+/// carries exactly the PSR-age subfield, so the second octet is the age.
+fn decode_update_ages(bytes: &[u8]) -> f64 {
+    bytes[1] as f64 * AGE_LSB_SECONDS
+}
+
+/// I062/500 — the inverse of [`encode_accuracies`]: our encoder always
+/// carries the APC subfield with identical X and Y, so either suffices.
+fn decode_accuracies(bytes: &[u8]) -> f64 {
+    let sigma = u16::from_be_bytes([bytes[1], bytes[2]]);
+    sigma as f64 * ACCURACY_LSB_METRES
+}
+
+/// A read cursor over a record's bytes, used by [`decode_record`] to consume
+/// items in FSPEC order while reporting truncated input as
+/// [`DecodeError::Truncated`].
+struct Cursor<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, pos: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.bytes.len() - self.pos
+    }
+
+    /// Take the next `n` bytes, advancing the cursor.
+    fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
+        if self.remaining() < n {
+            return Err(DecodeError::Truncated);
+        }
+        let slice = &self.bytes[self.pos..self.pos + n];
+        self.pos += n;
+        Ok(slice)
+    }
+
+    /// Parse the FSPEC at the cursor, returning the present FRNs and
+    /// advancing past its octets.
+    fn take_fspec(&mut self) -> Result<BTreeSet<u8>, DecodeError> {
+        let (frns, consumed) = fspec::parse(&self.bytes[self.pos..]);
+        if consumed == 0 {
+            return Err(DecodeError::Truncated);
+        }
+        self.pos += consumed;
+        Ok(frns)
+    }
+
+    /// Take I062/080's FX-chained octets: the first octet, plus any further
+    /// octets while the FX bit (`0x01`) is set.
+    fn take_track_status(&mut self) -> Result<&'a [u8], DecodeError> {
+        let start = self.pos;
+        loop {
+            let octet = self.take(1)?[0];
+            if octet & FX == 0 {
+                break;
+            }
+        }
+        Ok(&self.bytes[start..self.pos])
+    }
 }
 
 #[cfg(test)]
@@ -672,5 +984,118 @@ mod tests {
         let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
         let block = encoder.encode(Timestamp(0.0), &[]);
         assert_eq!(block, vec![0x3E, 0x00, 0x03]);
+    }
+
+    /// `decode_data_block` is the inverse of `encode`: every item the encoder
+    /// wrote comes back with its original (LSB-quantised) value. The reference
+    /// track has no identity, is confirmed and not coasting.
+    /// REQ: FR-IO-003
+    #[test]
+    fn decode_inverts_encode_for_a_plain_track() {
+        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point());
+        let block = encoder.encode(Timestamp(12.0), &[track(1)]);
+
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+
+        assert_eq!(record.source, DataSourceId::new(0x19, 0x02));
+        assert_eq!(record.time, Timestamp(12.0));
+        assert!((record.position.lat_deg() - 45.0).abs() < 1e-9);
+        assert!((record.position.lon_deg() - 11.25).abs() < 1e-9);
+        assert_eq!(record.cartesian, (0.0, 0.0));
+        assert_eq!(record.v_east, 100.0);
+        assert_eq!(record.v_north, -50.0);
+        assert_eq!(record.track_number, 1);
+        assert!(record.confirmed);
+        assert!(!record.coasting);
+        assert_eq!(record.update_age, 2.0);
+        assert_eq!(record.position_uncertainty, 100.0);
+        assert_eq!(record.mode_3a, None);
+        assert_eq!(record.icao_address, None);
+    }
+
+    /// A track with an SSR identity decodes I062/060 and I062/380 back into
+    /// `mode_3a`/`icao_address`. REQ: FR-IO-003, FR-TRK-009
+    #[test]
+    fn decode_recovers_identity_when_present() {
+        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point());
+        let mut t = track(1);
+        t.mode_3a = Some(0o2613);
+        t.icao_address = Some(0x3C_65_AC);
+        let block = encoder.encode(Timestamp(12.0), &[t]);
+
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records[0].mode_3a, Some(0o2613));
+        assert_eq!(records[0].icao_address, Some(0x3C_65_AC));
+    }
+
+    /// A tentative, coasting track extends I062/080 to four octets via FX;
+    /// `decode_track_status` follows the chain and recovers both flags.
+    /// REQ: FR-IO-003, FR-TRK-008
+    #[test]
+    fn decode_recovers_status_for_tentative_coasting_track() {
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let mut t = track(1);
+        t.confirmed = false;
+        t.coasting = true;
+        let block = encoder.encode(Timestamp(0.0), &[t]);
+
+        let records = decode_data_block(&block).unwrap();
+        assert!(!records[0].confirmed);
+        assert!(records[0].coasting);
+    }
+
+    /// A block with two tracks decodes into two records, in order.
+    /// REQ: FR-IO-003
+    #[test]
+    fn decode_handles_multiple_records() {
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let block = encoder.encode(Timestamp(0.0), &[track(1), track(2)]);
+
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].track_number, 1);
+        assert_eq!(records[1].track_number, 2);
+    }
+
+    /// An empty data block decodes to an empty list of records.
+    /// REQ: FR-IO-003
+    #[test]
+    fn decode_handles_empty_block() {
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let block = encoder.encode(Timestamp(0.0), &[]);
+
+        assert_eq!(decode_data_block(&block).unwrap(), vec![]);
+    }
+
+    /// Decoding rejects input that isn't a CAT062 block, whose LEN doesn't
+    /// match, or that ends mid-item. REQ: FR-IO-003
+    #[test]
+    fn decode_rejects_malformed_input() {
+        assert_eq!(decode_data_block(&[]), Err(DecodeError::Truncated));
+        assert_eq!(
+            decode_data_block(&[0x00, 0x00]),
+            Err(DecodeError::Truncated)
+        );
+        assert_eq!(
+            decode_data_block(&[0x01, 0x00, 0x03]),
+            Err(DecodeError::WrongCategory(0x01))
+        );
+        assert_eq!(
+            decode_data_block(&[0x3E, 0x00, 0x05]),
+            Err(DecodeError::LengthMismatch {
+                declared: 5,
+                actual: 3
+            })
+        );
+
+        // A valid header but a record cut short mid-FSPEC payload.
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let mut block = encoder.encode(Timestamp(0.0), &[track(1)]);
+        let truncated_len = (block.len() - 1) as u16;
+        block.truncate(block.len() - 1);
+        block[1..3].copy_from_slice(&truncated_len.to_be_bytes());
+        assert_eq!(decode_data_block(&block), Err(DecodeError::Truncated));
     }
 }
