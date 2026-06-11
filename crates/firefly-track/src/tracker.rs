@@ -242,7 +242,14 @@ impl Tracker {
         for p in plots {
             if let Some(model) = self.config.sensors.get(&p.sensor) {
                 let local = convert_plot(&p.measurement, &model.error);
-                let (z, r) = tracking_frame.horizontal_from(&model.frame, local.z, local.r);
+                // `convert_plot` keeps only the ground-projected east/north; the
+                // target's height above the sensor's tangent plane is
+                // range·sin(elevation) — exactly the `up` it dropped. Passing it
+                // lets `horizontal_from` lift the *full 3-D* point into the
+                // tracking frame, so a second radar maps the same airborne target
+                // to the same horizontal point instead of a height-offset ghost.
+                let height = p.measurement.range * p.measurement.elevation.sin();
+                let (z, r) = tracking_frame.horizontal_from(&model.frame, local.z, height, local.r);
                 by_sensor
                     .entry(p.sensor)
                     .or_default()

@@ -372,6 +372,22 @@ unabhängig von jedem einzelnen Sensorstandort. Jeder Plot wird vor der
 Verarbeitung in diesen Rahmen umgerechnet. Es ist zugleich der Bezugspunkt der
 System-Stereografischen CAT062-Ausgabe (ADR 0006).
 
+**Höhen-Projektionsfehler (height-projection bias)**
+Ein Tücken-Detail der Multi-Radar-Fusion. Ein 2D-Tracker rechnet auf einer
+*Bodenebene*. Projiziert man ein **hoch fliegendes** Ziel auf den Boden, hängt
+das Ergebnis davon ab, *entlang welcher Vertikalen* man projiziert — und die
+lokale „Senkrechte" zeigt an zwei zig Kilometer entfernten Radarstandorten in
+leicht **verschiedene** Richtungen (die Erde ist gekrümmt). Projiziert jedes
+Radar entlang *seiner eigenen* Vertikalen, landet dasselbe 10-km-Ziel um einige
+zehn bis ~100 m **versetzt** — genug, dass die Messung des zweiten Radars aus
+dem engen Tor eines schon eingerasteten Tracks fällt und ein **Geister-Track**
+entsteht. Die Lösung: nicht im Sensorrahmen auf den Boden projizieren, sondern
+den **vollständigen 3D-Punkt** (inkl. Höhe) in den gemeinsamen Tracking-Frame
+heben und **erst dort** auf den Boden projizieren — dann ist das Ergebnis für
+beide Radare identisch (`LocalFrame::horizontal_from` mit Höhe, FR-GEO-003).
+Reale ATC-Systeme korrigieren genau das über höhenabhängige
+„System-Error"-Korrekturen.
+
 **Sensor-Provenienz (`contributing_sensors`)**
 Welche(r) Sensor(en) im **letzten Scan** zu einem Track beigetragen haben — d. h.
 ihn getroffen (geupdated oder neu gegründet) haben. Bei der Mess-Fusion (ADR 0010)

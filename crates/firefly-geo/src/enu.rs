@@ -167,14 +167,31 @@ impl LocalFrame {
         Matrix2::new(e_e, n_e, e_n, n_n)
     }
 
-    /// Transform a *horizontal* measurement — position `z` and its 2×2
-    /// covariance `r` — from `source`'s ENU frame into this frame.
+    /// Transform a horizontal radar measurement from `source`'s ENU frame into
+    /// this frame: ground-projected position `z = [east, north]`, the target's
+    /// `height` above the source frame's tangent plane, and the 2×2 covariance
+    /// `r`. Returns the ground-projected `[east, north]` position and the rotated
+    /// covariance, both expressed in this frame.
     ///
-    /// The position is taken on `source`'s ground plane (up = 0); the returned
-    /// position is the horizontal `[east, north]` part in this frame, obtained
-    /// through the exact geodetic round trip (so the origin offset between the
-    /// two sites is honoured, not just the rotation). The covariance is rotated
-    /// by [`LocalFrame::horizontal_rotation_from`]: `R' = T · R · Tᵀ`.
+    /// **Why the height matters (multi-sensor fusion).** A radar plot converted
+    /// by the tracker (`convert_plot`) gives the target's *ground-projected*
+    /// east/north plus its height `h = range·sin(elevation)` above the sensor's
+    /// tangent plane. Together `[z.x, z.y, h]` is the target's full 3-D position
+    /// in the source frame. We round-trip that **3-D** point through
+    /// ECEF/geodetic into this frame and only *then* drop its vertical part. That
+    /// is the crucial detail: the 3-D point is the same physical location no
+    /// matter which sensor measured it, so two overlapping radars map an airborne
+    /// target to the *same* horizontal point here. Projecting to the ground in
+    /// the *source* frame first (up = 0 there) would instead project along each
+    /// sensor's own local vertical — directions that differ by the angle between
+    /// the two sites, displacing a 10 km-high target by tens of metres between
+    /// radars and spawning a duplicate ("ghost") track. Real ATC systems remove
+    /// exactly this with height-dependent projection corrections.
+    ///
+    /// The covariance is rotated by [`LocalFrame::horizontal_rotation_from`]:
+    /// `R' = T · R · Tᵀ`. For a ground target (`height = 0`) this reduces to the
+    /// previous ground-plane transform; for `source == self` it is the identity
+    /// for any height.
     ///
     /// This is the core building block of central measurement fusion (ADR 0010):
     /// every sensor's converted plot is lifted into one common tracking frame.
@@ -182,9 +199,15 @@ impl LocalFrame {
         &self,
         source: &LocalFrame,
         z: Vector2<f64>,
+        height: f64,
         r: Matrix2<f64>,
     ) -> (Vector2<f64>, Matrix2<f64>) {
-        let geodetic = source.enu_to_geodetic(&Enu::new(z.x, z.y, 0.0));
+        // Reconstruct the full 3-D point in the source frame, round-trip it
+        // through geodetic into this frame, then drop the (now this-frame)
+        // vertical part. Using the true height makes the horizontal result
+        // sensor-independent — the fix for the multi-sensor height-projection
+        // bias described above.
+        let geodetic = source.enu_to_geodetic(&Enu::new(z.x, z.y, height));
         let here = self.geodetic_to_enu(&geodetic);
         let t = self.horizontal_rotation_from(source);
         (Vector2::new(here.east, here.north), t * r * t.transpose())
