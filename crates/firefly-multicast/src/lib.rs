@@ -17,6 +17,8 @@
 //! - [`sender_socket`] — bind a UDP socket suitable for sending multicast.
 //! - [`run`] — pace a list of scans into wall-clock time and send one CAT062
 //!   block per scan to a destination.
+//! - [`receiver`] — the consumer side: join the multicast group and decode the
+//!   datagrams back into [`firefly_asterix::DecodedRecord`]s (Häppchen D).
 //!
 //! Sending to a multicast group is, at the socket level, just sending to a
 //! particular destination address; [`run`] is therefore destination-agnostic
@@ -31,6 +33,7 @@
 
 pub mod config;
 pub mod pacing;
+pub mod receiver;
 
 use std::net::{Ipv4Addr, SocketAddr};
 

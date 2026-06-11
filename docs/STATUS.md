@@ -6,16 +6,18 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **Häppchen D.2 (I062/100-Rückprojektion)** —
-  `firefly-asterix` bekommt `unproject_cartesian_position(cartesian, height,
-  &projection)`, die Umkehrung der I062/100-Projektion über
-  `StereographicProjection::unproject` (FR-GEO-004). Zwei Tests: `(0,0)`
-  unprojiziert auf den Systemreferenzpunkt; und — der eigentliche
-  Gegenbeweis — die aus I062/100 zurückprojizierte Position stimmt mit der
-  unabhängig kodierten I062/105-Position auf unter 1 m überein. 156 Tests
-  grün (+2). FR-IO-004 aktualisiert.
-  (Davor: D.1 — CAT062-Decoder (FSPEC + Items); C.3 — UDP-Multicast-Versand,
-  ADR 0006 vollständig umgesetzt.)
+- **Letzter Commit:** **Häppchen D.3 (Multicast-Empfänger)** —
+  `firefly-multicast` bekommt das Modul `receiver`: `receiver_socket(group,
+  port)` bindet und tritt der Multicast-Gruppe bei (`join_multicast_v4`);
+  `recv_records`/`run` empfangen Datagramme und dekodieren sie per
+  `decode_data_block` zurück in `DecodedRecord`s. Integrationstest schickt
+  zwei Scans über einen echten UDP-Socket (Loopback, wie C.3) und prüft, dass
+  der Empfänger Kinematik, Status, Identität und die I062/100-Rückprojektion
+  byte-genau wiederherstellt; ein zweiter Test prüft den echten
+  Multicast-Gruppenbeitritt. **ADR 0006 ist damit Ende-zu-Ende bewiesen:
+  Sender → Draht → Empfänger → Decoder.** 158 Tests grün (+2). FR-NET-002
+  aktualisiert.
+  (Davor: D.2 — I062/100-Rückprojektion; D.1 — CAT062-Decoder.)
 - **PR:** keiner offen.
 
 ---
@@ -129,7 +131,11 @@
   I062/100 (X/Y in Metern) über `StereographicProjection::unproject` zurück
   nach WGS84; stimmt mit der unabhängig kodierten I062/105-Position auf
   unter 1 m überein.
-- Qualität: **156 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+- **Häppchen D.3 erledigt:** `firefly-multicast::receiver` — `receiver_socket`
+  tritt der Multicast-Gruppe bei, `recv_records`/`run` empfangen und
+  dekodieren CAT062-Datagramme. Ende-zu-Ende-Test: Sender → Socket →
+  Empfänger → Decoder liefert die ursprünglichen Track-Daten zurück.
+- Qualität: **158 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -217,10 +223,16 @@ I062/100 (X/Y in Metern) über `StereographicProjection::unproject`
 (FR-GEO-004) zurück nach WGS84; stimmt mit der unabhängig kodierten
 I062/105-Position auf unter 1 m überein.
 
-➡️ **Als Nächstes:** **D.3** — echter Multicast-Empfänger (Socket tritt der
-Gruppe bei, empfängt, dekodiert, loggt; Loopback-Integrationstest analog C.3).
-Andere offene Kandidaten: **Sensor-Registrierung / Bias-Korrektur** (S5,
-ADR-0010-Abgrenzung), **M5** (IMM/JPDA für Manöver & dichten Verkehr).
+✅ **Häppchen D.3 erledigt:** `firefly-multicast::receiver` —
+`receiver_socket` bindet und tritt der Multicast-Gruppe bei, `recv_records`/
+`run` empfangen und dekodieren CAT062-Datagramme. Ende-zu-Ende-Test:
+Sender → Socket → Empfänger → Decoder liefert Kinematik, Status, Identität
+und I062/100-Position originalgetreu zurück. **Häppchen D ist damit
+abgeschlossen.**
+
+➡️ **Als Nächstes:** Mit dem Projektverantwortlichen klären, womit es
+weitergeht — Kandidaten: **Sensor-Registrierung / Bias-Korrektur** (S5,
+ADR-0010-Abgrenzung) oder **M5** (IMM/JPDA für Manöver & dichten Verkehr).
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)
 
@@ -253,8 +265,8 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
   FSPEC + alle Items außer I062/100-Rückprojektion — *S3 · Sonnet · Effort mittel*
 - [x] **D.2** I062/100 → WGS84 zurückprojizieren (`StereographicProjection::unproject`,
   FR-GEO-004), Vergleich mit I062/105 auf unter 1 m — *S2 · Sonnet · Effort niedrig–mittel*
-- [ ] **D.3** Echter Multicast-Empfänger (Socket tritt Gruppe bei, empfängt,
-  dekodiert, loggt; Loopback-Integrationstest analog C.3) — *S3–S4 · Sonnet/Opus 4.8 · Effort mittel–hoch*
+- [x] **D.3** Echter Multicast-Empfänger (Socket tritt Gruppe bei, empfängt,
+  dekodiert; Loopback-Integrationstest analog C.3) — *S3 · Sonnet · Effort mittel*
 
 ## 4. M3-Plan in Häppchen (mit Komplexität / Modell)
 
@@ -306,15 +318,16 @@ sind und die Anforderung im Register rückverfolgbar steht.
   Vereinfachung; mit 4.A.4 trägt der `SystemTrack` jetzt `contributing_sensors`
   (welche Sensoren im letzten Scan beigetragen haben). Die CAT062-Kodierung
   dieser Mehr-Sensor-Information ist Teil von 4.2.
-- **ASD-Integration (ADR 0006) vollständig umgesetzt (Häppchen C.1–C.3):**
-  Transport = **UDP-Multicast** (`firefly-multicast`, FR-NET-002),
+- **ASD-Integration (ADR 0006) vollständig umgesetzt (Häppchen C.1–C.3 und
+  D.1–D.3):** Transport = **UDP-Multicast** (`firefly-multicast`, FR-NET-002),
   Koordinatenbezug = **System-Stereografisch** (`StereographicProjection`
   FR-GEO-004 → CAT062 I062/100, FR-IO-003) **zusätzlich** zu I062/105. Der
   Tracker-Kern bleibt WGS84-neutral (`SystemTrack`); Projektion und Transport
-  sind reine Adapter-Aufgaben. Die **Empfänger-/Recorder-Seite** ist als
-  Häppchen D in Arbeit (D.1 — Decoder, D.2 — I062/100-Rückprojektion —
-  erledigt; D.3 offen). Weiterhin
-  offen: konfigurierbarer System-Referenzpunkt jenseits des Demo-Ursprungs.
+  sind reine Adapter-Aufgaben. Die **Empfänger-/Recorder-Seite** (Häppchen D)
+  ist mit Decoder (D.1), I062/100-Rückprojektion (D.2) und echtem
+  Multicast-Empfänger (D.3) abgeschlossen — ADR 0006 ist Ende-zu-Ende bewiesen
+  (Sender → Draht → Empfänger → Decoder). Weiterhin offen: konfigurierbarer
+  System-Referenzpunkt jenseits des Demo-Ursprungs.
 - **Message-Bus-Technologie** (z. B. NATS/Kafka) — erst relevant ab M3, dann ADR.
 - **Coverage-Werkzeug** (z. B. `cargo llvm-cov`) — einführen, sobald V&V-Nachweise
   greifbar werden.
