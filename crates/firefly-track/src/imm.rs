@@ -332,6 +332,92 @@ impl Imm {
         self.combined_estimate()
     }
 
+    /// **PDA-weighted update** (Häppchen M5.7): instead of a single
+    /// measurement, fold in several gated candidates at once, weighted by
+    /// their PDA association probabilities `betas`
+    /// ([`crate::pda::association_probabilities`] for one track, or the joint
+    /// version for several).
+    ///
+    /// `betas[0]` is the "no detection" weight `β_0`; `betas[1 + j]` is the
+    /// weight of `measurements[j]`. Each weight names a complete *branch* of
+    /// the IMM cycle:
+    /// - branch 0 ("no detection"): the bank stays exactly as
+    ///   [`predict`](Self::predict) left it — Markov-predicted probabilities,
+    ///   predicted filter states.
+    /// - branch `1 + j` ("associate with `measurements[j]`"): the ordinary
+    ///   [`update`](Self::update) on a clone of the bank, with its own
+    ///   re-weighted model probabilities.
+    ///
+    /// The new bank is the `β`-weighted blend of these branches: per-model
+    /// states blend with the usual spread-of-the-means term (as in
+    /// [`combined_estimate`](Self::combined_estimate)), and model
+    /// probabilities blend by simple weighted averaging, renormalised.
+    ///
+    /// Call this only after [`predict`](Self::predict). With `betas = [1.0]`
+    /// (no measurements) it is a no-op; with `betas = [0, 1]` and one
+    /// measurement it reduces exactly to [`update`](Self::update).
+    ///
+    /// REQ: FR-TRK-017
+    pub fn update_pda(
+        &mut self,
+        measurements: &[CartesianMeasurement],
+        betas: &[f64],
+    ) -> LinearKalman {
+        assert_eq!(
+            betas.len(),
+            measurements.len() + 1,
+            "betas must have one entry per measurement plus one for 'no detection'"
+        );
+        let r = self.len();
+
+        // Branch 0: no detection — the bank stays exactly as predicted.
+        let mut branch_filters: Vec<Vec<LinearKalman>> = Vec::with_capacity(measurements.len() + 1);
+        let mut branch_probs: Vec<Vec<f64>> = Vec::with_capacity(measurements.len() + 1);
+        branch_filters.push(self.filters.clone());
+        branch_probs.push(self.probabilities.clone());
+
+        // Branches 1..: associate with measurement j — a full IMM update on a clone.
+        for m in measurements {
+            let mut clone = self.clone();
+            clone.update(m);
+            branch_filters.push(clone.filters);
+            branch_probs.push(clone.probabilities);
+        }
+
+        // Blend per-model states across branches (spread-of-the-means).
+        let mut new_filters = Vec::with_capacity(r);
+        for j in 0..r {
+            let mut x = Vector4::zeros();
+            for (&beta, bf) in betas.iter().zip(&branch_filters) {
+                x += beta * bf[j].x;
+            }
+            let mut p = Matrix4::zeros();
+            for (&beta, bf) in betas.iter().zip(&branch_filters) {
+                let d = bf[j].x - x;
+                p += beta * (bf[j].p + d * d.transpose());
+            }
+            new_filters.push(LinearKalman { x, p });
+        }
+
+        // Blend model probabilities across branches and renormalise.
+        let mut new_probs = vec![0.0; r];
+        for (&beta, bp) in betas.iter().zip(&branch_probs) {
+            for (new_p, &p) in new_probs.iter_mut().zip(bp) {
+                *new_p += beta * p;
+            }
+        }
+        let total: f64 = new_probs.iter().sum();
+        if total > MIN_MODEL_PROBABILITY {
+            for p in &mut new_probs {
+                *p /= total;
+            }
+        }
+
+        self.filters = new_filters;
+        self.probabilities = new_probs;
+        self.combined_estimate()
+    }
+
     /// Run one full IMM cycle ([`predict`](Self::predict) then, on a hit,
     /// [`update`](Self::update)) and return the combined estimate. Convenience
     /// for using the IMM as a standalone filter; the tracker calls the two
@@ -572,6 +658,77 @@ mod tests {
             p[1] > p[0],
             "CT should dominate on a turning track: μ = {p:?}"
         );
+    }
+
+    /// `betas = [1.0]` (no measurements, certainly "no detection") leaves the
+    /// bank exactly as `predict` left it — coasting.
+    /// REQ: FR-TRK-017
+    #[test]
+    fn pda_update_with_no_measurements_is_a_noop() {
+        let start = LinearKalman {
+            x: Vector4::new(0.0, 0.0, 100.0, 0.0),
+            p: Matrix4::identity() * 100.0,
+        };
+        let mut imm = cv_ct_imm(0.05, start);
+        imm.predict(4.0, &ProcessNoise::new(0.5));
+        let before_probs = imm.probabilities().to_vec();
+        let before_filters = imm.filters().to_vec();
+
+        imm.update_pda(&[], &[1.0]);
+
+        assert_eq!(imm.probabilities(), before_probs.as_slice());
+        for (after, before) in imm.filters().iter().zip(&before_filters) {
+            assert!((after.x - before.x).norm() < 1e-12);
+            assert!((after.p - before.p).norm() < 1e-12);
+        }
+    }
+
+    /// `betas = [0, 1]` (certainly the one measurement) matches a plain
+    /// `update`.
+    /// REQ: FR-TRK-017
+    #[test]
+    fn pda_update_with_certain_single_measurement_matches_plain_update() {
+        let start = LinearKalman {
+            x: Vector4::new(0.0, 0.0, 100.0, 0.0),
+            p: Matrix4::identity() * 100.0,
+        };
+        let mut pda_imm = cv_ct_imm(0.05, start);
+        pda_imm.predict(4.0, &ProcessNoise::new(0.5));
+        let mut plain_imm = pda_imm.clone();
+
+        let m = measurement(400.0, 10.0);
+        pda_imm.update_pda(&[m], &[0.0, 1.0]);
+        plain_imm.update(&m);
+
+        assert!((pda_imm.combined_estimate().x - plain_imm.combined_estimate().x).norm() < 1e-9);
+        for (a, b) in pda_imm
+            .probabilities()
+            .iter()
+            .zip(plain_imm.probabilities())
+        {
+            assert!((a - b).abs() < 1e-12);
+        }
+    }
+
+    /// `update_pda` always leaves the model probabilities a proper
+    /// distribution, whatever the betas.
+    /// REQ: FR-TRK-017
+    #[test]
+    fn pda_update_keeps_probabilities_normalised() {
+        let start = LinearKalman {
+            x: Vector4::new(0.0, 0.0, 100.0, 0.0),
+            p: Matrix4::identity() * 100.0,
+        };
+        let mut imm = cv_ct_imm(0.05, start);
+        imm.predict(4.0, &ProcessNoise::new(0.5));
+
+        let m1 = measurement(400.0, 0.0);
+        let m2 = measurement(380.0, 30.0);
+        imm.update_pda(&[m1, m2], &[0.2, 0.5, 0.3]);
+
+        let sum: f64 = imm.probabilities().iter().sum();
+        assert!((sum - 1.0).abs() < 1e-12);
+        assert!(imm.probabilities().iter().all(|&p| p >= 0.0));
     }
 
     /// Coasting (no measurement) relaxes the probabilities toward the

@@ -202,6 +202,57 @@ impl LinearKalman {
         self.p = ikh * self.p * ikh.transpose() + k * m.r * k.transpose();
     }
 
+    /// Fold in **several** candidate measurements at once, weighted by their
+    /// PDA association probabilities `betas` (Häppchen M5.5,
+    /// [`crate::pda::association_probabilities`]).
+    ///
+    /// `betas[0]` is the "no detection" weight `β_0`; `betas[1 + j]` is the
+    /// weight of `measurements[j]`. The two must have matching lengths
+    /// (`betas.len() == measurements.len() + 1`) and `betas` must sum to 1.
+    ///
+    /// The idea mirrors the IMM's combination step (M5.2): each candidate —
+    /// "no detection" (the prediction itself) or "associate with measurement
+    /// `j`" (the ordinary [`update`](Self::update) with that measurement) —
+    /// is its own little hypothesis with its own `(x, P)`. The result is the
+    /// `β`-weighted mean of these hypotheses, plus a **spread-of-the-means**
+    /// term: hypotheses that disagree about where the target is make the
+    /// blended estimate honestly *more* uncertain, not less. When there is
+    /// only one hypothesis (e.g. an empty `measurements`, so `betas = [1.0]`),
+    /// this reduces to leaving the state untouched, as expected.
+    ///
+    /// REQ: FR-TRK-016
+    pub fn update_pda(&mut self, measurements: &[CartesianMeasurement], betas: &[f64]) {
+        assert_eq!(
+            betas.len(),
+            measurements.len() + 1,
+            "betas must have one entry per measurement plus one for 'no detection'"
+        );
+
+        // Hypothesis 0: no detection — the state stays at the prediction.
+        let mut candidates: Vec<(Vector4<f64>, Matrix4<f64>)> =
+            Vec::with_capacity(measurements.len() + 1);
+        candidates.push((self.x, self.p));
+        for m in measurements {
+            let mut updated = *self;
+            updated.update(m);
+            candidates.push((updated.x, updated.p));
+        }
+
+        let mut x = Vector4::zeros();
+        for (&beta, &(xi, _)) in betas.iter().zip(&candidates) {
+            x += beta * xi;
+        }
+
+        let mut p = Matrix4::zeros();
+        for (&beta, &(xi, pi)) in betas.iter().zip(&candidates) {
+            let d = xi - x;
+            p += beta * (pi + d * d.transpose());
+        }
+
+        self.x = x;
+        self.p = p;
+    }
+
     /// Estimated position `[east, north]`, metres.
     pub fn position(&self) -> Vector2<f64> {
         Vector2::new(self.x[0], self.x[1])
@@ -349,6 +400,86 @@ mod tests {
             }
         }
         // Positive definite diagonal and determinant.
+        assert!((0..4).all(|i| p[(i, i)] > 0.0));
+        assert!(p.determinant() > 0.0);
+    }
+
+    /// `betas = [1.0]` (no measurements, certainly "no detection") leaves the
+    /// state untouched — coasting.
+    /// REQ: FR-TRK-016
+    #[test]
+    fn pda_update_with_no_measurements_is_a_noop() {
+        let mut kf = LinearKalman {
+            x: Vector4::new(1.0, 2.0, 3.0, 4.0),
+            p: Matrix4::identity() * 100.0,
+        };
+        let before = kf;
+        kf.update_pda(&[], &[1.0]);
+        assert_eq!(kf.x, before.x);
+        assert_eq!(kf.p, before.p);
+    }
+
+    /// `betas = [0, 1]` (certainly the one measurement) matches the plain
+    /// `update`.
+    /// REQ: FR-TRK-016
+    #[test]
+    fn pda_update_with_certain_single_measurement_matches_plain_update() {
+        let mut pda_kf =
+            LinearKalman::from_first_measurement(&measurement(0.0, 0.0, 2500.0), 300.0);
+        pda_kf.predict(4.0, &ProcessNoise::new(1.0));
+        let mut plain_kf = pda_kf;
+
+        let m = measurement(10.0, -5.0, 2500.0);
+        pda_kf.update_pda(&[m], &[0.0, 1.0]);
+        plain_kf.update(&m);
+
+        assert!((pda_kf.x - plain_kf.x).norm() < 1e-9);
+        assert!((pda_kf.p - plain_kf.p).norm() < 1e-9);
+    }
+
+    /// Two measurements pulling the estimate in different directions, each
+    /// with weight 0.5: the result sits between them, and — because the
+    /// hypotheses disagree — ends up *more* uncertain than either single
+    /// candidate update alone (spread-of-the-means).
+    /// REQ: FR-TRK-016
+    #[test]
+    fn pda_update_blends_disagreeing_measurements_and_inflates_uncertainty() {
+        let mut kf = LinearKalman::from_first_measurement(&measurement(0.0, 0.0, 2500.0), 300.0);
+        kf.predict(4.0, &ProcessNoise::new(1.0));
+
+        let left = measurement(-50.0, 0.0, 2500.0);
+        let right = measurement(50.0, 0.0, 2500.0);
+
+        let mut single = kf;
+        single.update(&left);
+
+        kf.update_pda(&[left, right], &[0.0, 0.5, 0.5]);
+
+        // The blended east position sits between the two measurements.
+        assert!(kf.position()[0].abs() < 1e-6, "x = {}", kf.position()[0]);
+        // Disagreement inflates the position uncertainty beyond either
+        // single-measurement update.
+        assert!(kf.position_covariance()[(0, 0)] > single.position_covariance()[(0, 0)]);
+    }
+
+    /// `betas` summing to 1 keeps the resulting covariance symmetric and
+    /// positive definite.
+    /// REQ: FR-TRK-016
+    #[test]
+    fn pda_update_keeps_covariance_valid() {
+        let mut kf = LinearKalman::from_first_measurement(&measurement(0.0, 0.0, 2500.0), 300.0);
+        kf.predict(4.0, &ProcessNoise::new(1.0));
+
+        let m1 = measurement(10.0, 0.0, 2500.0);
+        let m2 = measurement(-5.0, 8.0, 2500.0);
+        kf.update_pda(&[m1, m2], &[0.2, 0.5, 0.3]);
+
+        let p = kf.p;
+        for i in 0..4 {
+            for j in 0..4 {
+                assert!((p[(i, j)] - p[(j, i)]).abs() < 1e-6, "P must be symmetric");
+            }
+        }
         assert!((0..4).all(|i| p[(i, i)] > 0.0));
         assert!(p.determinant() > 0.0);
     }

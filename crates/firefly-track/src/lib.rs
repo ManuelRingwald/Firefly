@@ -17,19 +17,23 @@
 mod association;
 mod gating;
 mod imm;
+mod jpda;
 mod kalman;
 mod measurement;
 mod metrics;
 mod motion;
+mod pda;
 mod track;
 mod tracker;
 
 pub use association::{associate, Association};
 pub use gating::Gate;
 pub use imm::{Imm, ImmConfig};
+pub use jpda::joint_association_probabilities;
 pub use kalman::{LinearKalman, ProcessNoise};
 pub use measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};
 pub use metrics::{Rmse, TrackContinuity};
 pub use motion::MotionModel;
+pub use pda::{association_probabilities, ClutterModel};
 pub use track::{Track, TrackStatus};
 pub use tracker::{SensorModel, Tracker, TrackerConfig};
