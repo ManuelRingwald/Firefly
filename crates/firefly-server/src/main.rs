@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use firefly_asterix::Cat062Encoder;
+use firefly_multicast::MulticastConfig;
 use firefly_server::{router, scene, AppState, ServerConfig};
 use tokio::net::TcpListener;
 
@@ -18,6 +20,8 @@ async fn main() {
         frames = frames.len(),
         "starting Firefly server"
     );
+
+    spawn_cat062_multicast(config.speed);
 
     let state = AppState {
         frames: Arc::new(frames),
@@ -44,6 +48,40 @@ async fn main() {
         tracing::error!(%error, "server error");
     }
     tracing::info!("shutdown complete");
+}
+
+/// Spawn the CAT062 UDP-multicast feed alongside the web server, if enabled
+/// (`FIREFLY_CAT062_ENABLED=true`). It replays the same demo scan stream the
+/// web map shows — encoded as CAT062 and sent to the configured multicast group
+/// — paced into wall-clock at the same `speed` (ADR 0006). Disabled by default,
+/// so a plain `cargo run` never emits surprise network traffic.
+fn spawn_cat062_multicast(speed: f64) {
+    let config = MulticastConfig::from_env();
+    if !config.enabled {
+        tracing::info!(
+            "CAT062 multicast feed disabled (set FIREFLY_CAT062_ENABLED=true to enable)"
+        );
+        return;
+    }
+
+    let destination = config.destination();
+    let encoder = Cat062Encoder::new(config.data_source(), config.reference_point);
+    let scans = scene::demo_scans();
+    tracing::info!(%destination, scans = scans.len(), "CAT062 multicast feed enabled");
+
+    tokio::spawn(async move {
+        let socket = match firefly_multicast::sender_socket().await {
+            Ok(socket) => socket,
+            Err(error) => {
+                tracing::error!(%error, "failed to open CAT062 multicast socket");
+                return;
+            }
+        };
+        match firefly_multicast::run(&socket, destination, &encoder, &scans, speed).await {
+            Ok(sent) => tracing::info!(sent, "CAT062 multicast feed complete"),
+            Err(error) => tracing::error!(%error, "CAT062 multicast feed stopped"),
+        }
+    });
 }
 
 /// Initialise structured logging/tracing. Verbosity follows `RUST_LOG`

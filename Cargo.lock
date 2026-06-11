@@ -200,6 +200,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-multicast"
+version = "0.1.0"
+dependencies = [
+ "firefly-asterix",
+ "firefly-core",
+ "firefly-geo",
+ "tokio",
+]
+
+[[package]]
 name = "firefly-player"
 version = "0.1.0"
 dependencies = [
@@ -215,9 +225,11 @@ name = "firefly-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "firefly-asterix",
  "firefly-core",
  "firefly-geo",
  "firefly-io",
+ "firefly-multicast",
  "firefly-player",
  "firefly-sim",
  "firefly-track",

@@ -6,15 +6,17 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **Häppchen C.2 (ADR-0006-Nachtrag)** — `firefly-asterix`
-  kodiert jetzt zusätzlich **I062/100** (System-Stereografische Position,
-  X/Y je 24-Bit Zweierkomplement, LSB 0,5 m): `Cat062Encoder::new` nimmt einen
-  `system_reference_point: Wgs84` entgegen und projiziert jede Track-Position
-  damit über `StereographicProjection` (C.1, FR-GEO-004). I062/100 sitzt als
-  neues FRN 6 zwischen I062/105 und I062/185 (FSPEC-Bit 0x04 in Oktett 1).
-  135 Tests grün (+2). Glossar-Eintrag „I062/100" ergänzt, FR-IO-003
+- **Letzter Commit:** **Häppchen C.3 (ADR-0006-Nachtrag)** — neue Crate
+  **`firefly-multicast`**: versendet je Scan einen CAT062-Datenblock per
+  **UDP-Multicast** (FR-NET-002). `MulticastConfig` (12-Factor,
+  `FIREFLY_CAT062_*`, per Default aus), `sender_socket()` + `run()` (taktet
+  nach Datenzeit wie der WebSocket-Pump, eigenes `pacing`). `Player::scans()`
+  liefert jetzt die rohen `SystemTrack`s pro Scan (geteilte, deterministische
+  Basis beider Adapter, M3.X.4); `frames()` ist eine dünne JSON-Projektion
+  darüber. Im `firefly-server`-`main` als optionaler Hintergrund-Task verdrahtet
+  (`scene::demo_scans`). 146 Tests grün (+11). FR-NET-002 + Anforderungs-Register
   aktualisiert.
-  (Davor: C.1 — `StereographicProjection` in `firefly-geo`, FR-GEO-004.)
+  (Davor: C.2 — I062/100 im CAT062-Encoder; C.1 — `StereographicProjection`.)
 - **PR:** keiner offen.
 
 ---
@@ -114,7 +116,13 @@
   I062/100 (System-Stereografische Position, X/Y, FRN 6) zusätzlich zu
   I062/105 — Projektion über `StereographicProjection`, Referenzpunkt als
   Konstruktorparameter von `Cat062Encoder::new`.
-- Qualität: **135 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+- **Häppchen C.3 (ADR-0006-Nachtrag) erledigt:** neue Crate `firefly-multicast`
+  versendet CAT062-Blöcke per UDP-Multicast (FR-NET-002), nach Datenzeit
+  getaktet; 12-Factor-Config (`FIREFLY_CAT062_*`), per Default aus.
+  `Player::scans()` als geteilte deterministische Basis beider Adapter; im
+  Server-`main` als optionaler Task verdrahtet. **ADR 0006 (Transport &
+  Koordinatenbezug) ist damit vollständig umgesetzt.**
+- Qualität: **146 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -185,13 +193,19 @@ Referenzpunkt frei wählbar (für CAT062 später: `tracking_frame`-Ursprung).
 projiziert jede Track-Position über `StereographicProjection` und kodiert
 X/Y zusätzlich zu I062/105 (FRN 6, FSPEC-Bit 0x04 in Oktett 1).
 
-➡️ **Als Nächstes:** **Häppchen C.3** — UDP-Multicast-Versand-Adapter (CAT062
-data block per UDP an eine Multicast-Adresse, ED-109A-Stil, ADR 0006). Dabei
-klären: wo lebt der Adapter (`firefly-server` vs. neue Crate), 12-Factor-Config
-für Adresse/Port, woher kommt der `system_reference_point` (Konfiguration vs.
-`tracking_frame`-Ursprung). Alternativ weiter mit
-**Sensor-Registrierung/Bias-Korrektur** (S5) oder **M5** (IMM/JPDA) — mit dem
-Projektverantwortlichen klären.
+✅ **Häppchen C.3 (ADR-0006-Nachtrag) erledigt:** neue Crate `firefly-multicast`
+— `MulticastConfig` (12-Factor, `FIREFLY_CAT062_*`, Default aus),
+`sender_socket()` + `run()` versenden je Scan einen CAT062-Block per
+UDP-Multicast, nach Datenzeit getaktet (FR-NET-002). `Player::scans()` als
+geteilte deterministische Basis; im Server-`main` als optionaler Task
+verdrahtet. **Damit ist ADR 0006 (ASD-Integration, Transport &
+Koordinatenbezug) vollständig umgesetzt.**
+
+➡️ **Als Nächstes:** Mit dem Projektverantwortlichen klären, womit es
+weitergeht — Kandidaten: **Sensor-Registrierung / Bias-Korrektur** (S5,
+ADR-0010-Abgrenzung), **M5** (IMM/JPDA für Manöver & dichten Verkehr), oder
+eine **Empfänger-/Recorder-Seite** für den CAT062-Multicast (Mithören + Dekodieren,
+zum sichtbaren Beweis des Versands).
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)
 
@@ -215,7 +229,8 @@ Erst Erklärung → Rückfragen/Go → dann kleine, testbare Umsetzung.
   (`StereographicProjection`, FR-GEO-004) — *S4 · Opus 4.8 · Effort hoch*
 - [x] **C.2** I062/100-Encoder (`firefly-asterix`, X/Y 24-Bit Zweierkomplement,
   LSB 0,5 m, zusätzlich zu I062/105) — *S2–S3 · Sonnet · Effort niedrig–mittel*
-- [ ] **C.3** UDP-Multicast-Versand-Adapter — *S3 · Sonnet/Opus · Effort mittel*
+- [x] **C.3** UDP-Multicast-Versand-Adapter (`firefly-multicast`, FR-NET-002;
+  `Player::scans()` als geteilte Basis; im Server-`main` verdrahtet) — *S4 · Opus 4.8 · Effort hoch*
 
 ## 4. M3-Plan in Häppchen (mit Komplexität / Modell)
 
@@ -267,16 +282,15 @@ sind und die Anforderung im Register rückverfolgbar steht.
   Vereinfachung; mit 4.A.4 trägt der `SystemTrack` jetzt `contributing_sensors`
   (welche Sensoren im letzten Scan beigetragen haben). Die CAT062-Kodierung
   dieser Mehr-Sensor-Information ist Teil von 4.2.
-- **ASD-Integration (ADR 0006), Transport & Koordinatenbezug entschieden:**
-  Transport = **UDP-Multicast**, Koordinatenbezug = **System-Stereografisch**
-  (CAT062 I062/100 statt I062/105). Noch **nicht umgesetzt** — offene
-  Folge-Häppchen: (1) Projektion WGS84 → System-Stereografisch +
-  I062/100-Encoder in `firefly-asterix`, (2) UDP-Multicast-Versand-Adapter.
-  Voraussichtlich im Umfeld von M4 (hängt mit Multi-Sensor-Provenienz
-  zusammen). Design-Hinweis bleibt: Der `Tracker` führt die geodätische
-  Frame-Referenz des Sensors mit, damit Tracks neutral als **WGS84**
-  (`SystemTrack`) ausgegeben werden — die Stereo-Projektion ist reine
-  Adapter-Aufgabe.
+- **ASD-Integration (ADR 0006) vollständig umgesetzt (Häppchen C.1–C.3):**
+  Transport = **UDP-Multicast** (`firefly-multicast`, FR-NET-002),
+  Koordinatenbezug = **System-Stereografisch** (`StereographicProjection`
+  FR-GEO-004 → CAT062 I062/100, FR-IO-003) **zusätzlich** zu I062/105. Der
+  Tracker-Kern bleibt WGS84-neutral (`SystemTrack`); Projektion und Transport
+  sind reine Adapter-Aufgaben. Offen/optional als Folgearbeit: eine
+  **Empfänger-/Recorder-Seite** (Multicast mithören + CAT062 dekodieren) als
+  sichtbarer Gegenbeweis, sowie konfigurierbarer System-Referenzpunkt jenseits
+  des Demo-Ursprungs.
 - **Message-Bus-Technologie** (z. B. NATS/Kafka) — erst relevant ab M3, dann ADR.
 - **Coverage-Werkzeug** (z. B. `cargo llvm-cov`) — einführen, sobald V&V-Nachweise
   greifbar werden.

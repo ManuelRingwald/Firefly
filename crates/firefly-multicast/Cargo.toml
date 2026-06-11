@@ -1,0 +1,17 @@
+[package]
+name = "firefly-multicast"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "UDP-multicast transport adapter: paces the tracker's CAT062 data blocks onto a multicast group, the way ASD/EFS consumers expect them (ADR 0006)."
+
+[dependencies]
+firefly-core = { workspace = true }
+firefly-geo = { workspace = true }
+firefly-asterix = { workspace = true }
+tokio = { version = "1", features = ["net", "time", "rt"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }

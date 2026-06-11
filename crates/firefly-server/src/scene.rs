@@ -4,16 +4,25 @@
 //! demonstration scenario — including the deliberate "delay" trigger that shows
 //! timing robustness — lands in Häppchen 3.5.
 
-use firefly_core::{Sensor, SensorId, TargetId};
+use firefly_core::{Sensor, SensorId, SystemTrack, TargetId, Timestamp};
 use firefly_geo::{Enu, LocalFrame, Wgs84};
 use firefly_io::Frame;
 use firefly_player::Player;
 use firefly_sim::{Leg, Radar, RadarParams, Scenario, State, Target};
 use firefly_track::{ProcessNoise, SensorErrorModel, TrackerConfig};
 
-/// Build the demo frame stream: two cruising aircraft seen by one radar.
-pub fn demo_frames() -> Vec<Frame> {
-    let origin = Wgs84::from_degrees(48.0, 11.0, 0.0);
+/// The geodetic origin of the demo scene — also the system reference point the
+/// CAT062 multicast feed measures I062/100 from.
+pub const DEMO_ORIGIN: (f64, f64) = (48.0, 11.0);
+
+/// Build the demo [`Player`]: two aircraft (one cruising, one turning) seen by
+/// one radar, with the tracker tuning that keeps each on a single stable id.
+///
+/// Both output adapters build on this same deterministic player — the web map
+/// via [`demo_frames`] and the CAT062 multicast feed via [`demo_scans`] — so
+/// they show byte-for-byte the same air picture (ADR 0006).
+fn demo_player() -> Player {
+    let origin = Wgs84::from_degrees(DEMO_ORIGIN.0, DEMO_ORIGIN.1, 0.0);
     let radar = Radar::new(Sensor::new(SensorId(1), origin), RadarParams::default());
 
     let scenario = Scenario::new(origin)
@@ -38,7 +47,18 @@ pub fn demo_frames() -> Vec<Frame> {
         SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0),
     );
     tracker.process_noise = ProcessNoise::new(60.0);
-    Player::new(&scenario, tracker).frames()
+    Player::new(&scenario, tracker)
+}
+
+/// Build the demo frame stream (JSON adapter, for the web map).
+pub fn demo_frames() -> Vec<Frame> {
+    demo_player().frames()
+}
+
+/// Build the demo scan stream (raw `SystemTrack`s per scan, for the CAT062
+/// multicast adapter). Same deterministic player as [`demo_frames`].
+pub fn demo_scans() -> Vec<(Timestamp, Vec<SystemTrack>)> {
+    demo_player().scans()
 }
 
 /// An aircraft entering from the south-west, cruising due east.

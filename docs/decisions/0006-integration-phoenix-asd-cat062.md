@@ -94,3 +94,37 @@ hätte eine unnötige Kopplung zwischen den Adaptern eingeführt und zudem
 verlustbehaftet aus `FrameTrack`s abgeleiteter Geschwindigkeit (Betrag/Kurs)
 die für I062/185 nötigen kartesischen Komponenten zurückrechnen müssen.
 Details siehe `docs/milestones/M3X-cat062-encoder.md`.
+
+## Nachtrag (Häppchen C.1–C.3): Transport & Koordinatenbezug umgesetzt
+
+Die im vorigen Nachtrag als Zielbild festgehaltenen Punkte sind jetzt gebaut —
+in drei kleinen, je für sich getesteten Häppchen:
+
+- **C.1 — Projektion (`firefly-geo`, FR-GEO-004).** `StereographicProjection`
+  bildet WGS84 konform (winkeltreu) auf die System-Stereografische Ebene ab und
+  zurück, in der EUROCONTROL/ARTAS-Bauart: konforme Breite über eine Gaußsche
+  Hilfskugel, dann sphärische schiefachsige stereografische Projektion
+  (Snyder-Formeln). Referenzpunkt frei wählbar (für die Ausgabe: der
+  System-Referenzpunkt).
+- **C.2 — I062/100-Encoder (`firefly-asterix`, FR-IO-003).**
+  `Cat062Encoder::new(source, system_reference_point)` projiziert jede
+  Track-Position und kodiert X/Y als I062/100 (je 24-Bit Zweierkomplement,
+  LSB 0,5 m) — **zusätzlich** zu I062/105 (WGS84), nicht stattdessen. Der
+  Tracker-Kern bleibt damit unverändert WGS84-neutral.
+- **C.3 — UDP-Multicast-Versand (`firefly-multicast`, FR-NET-002).** Eine eigene
+  Crate versendet je Scan einen CAT062-Datenblock an eine Multicast-Gruppe,
+  nach Datenzeit getaktet (eigener Ausgabe-Rand, wie der WebSocket-Pump).
+  12-Factor-Konfiguration (`FIREFLY_CAT062_*`), per Default **aus**. Im
+  `firefly-server`-`main` als optionaler Hintergrund-Task verdrahtet.
+
+**Geteilte, unabhängige Adapter.** Beide Ausgabewege (Web/JSON und
+CAT062/Multicast) bauen auf demselben rohen `SystemTrack`-Strom auf
+(`Player::scans()`); `Player::frames()` ist nur die JSON-Projektion darüber.
+Das hält die in M3.X.4 getroffene Entscheidung „Adapter bleiben unabhängig" auch
+für den Transport ein: keiner der beiden Adapter hängt vom anderen ab.
+
+**Ehrliche Grenze.** Der Versand ist gebaut und getestet (Bytes gehen über einen
+echten Socket); eine **Empfänger-/Recorder-Seite** (Multicast mithören + CAT062
+dekodieren) ist bewusst noch offen und wäre der nächste sichtbare Gegenbeweis.
+Ebenso ist der System-Referenzpunkt heute der Demo-Ursprung; ein frei
+konfigurierbarer Frame jenseits der Demo bleibt Folgearbeit.

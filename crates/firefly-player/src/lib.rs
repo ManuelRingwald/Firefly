@@ -20,7 +20,7 @@
 //! NFR-REPRO-001): same input, same `Vec<Frame>`, byte for byte. There is no
 //! wall-clock dependency anywhere in this crate.
 
-use firefly_core::{Plot, SensorId};
+use firefly_core::{Plot, SensorId, SystemTrack, Timestamp};
 use firefly_io::Frame;
 use firefly_sim::Scenario;
 use firefly_track::{Tracker, TrackerConfig};
@@ -54,14 +54,20 @@ impl Player {
         }
     }
 
-    /// Run the whole scenario, returning one [`Frame`] per scan time.
+    /// Run the whole scenario, returning the raw [`SystemTrack`]s per scan time.
     ///
     /// Plots that share a scan time are batched into a single
     /// [`Tracker::process_scan`] call, exactly as a live feed would deliver
-    /// them; the resulting tracks are then projected to a [`Frame`]. Scan
-    /// times with no plots at all (every target out of range or undetected)
-    /// produce no frame — there is nothing new to report.
-    pub fn frames(mut self) -> Vec<Frame> {
+    /// them; the resulting tracks are returned **unconverted** — neutral
+    /// `SystemTrack`s, not yet shaped for any wire format. Scan times with no
+    /// plots at all (every target out of range or undetected) produce no entry.
+    ///
+    /// This is the shared, deterministic core that every output adapter builds
+    /// on: the JSON [`frames`](Player::frames) for the web map and the CAT062
+    /// encoder for the multicast feed each translate **these same**
+    /// `SystemTrack`s independently, neither depending on the other (ADR 0006,
+    /// Nachtrag M3.X.4 — adapters stay independent).
+    pub fn scans(mut self) -> Vec<(Timestamp, Vec<SystemTrack>)> {
         let mut out = Vec::new();
         let mut i = 0;
         while i < self.plots.len() {
@@ -71,10 +77,21 @@ impl Player {
                 i += 1;
             }
             self.tracker.process_scan(time, &self.plots[start..i]);
-            let tracks = self.tracker.system_tracks();
-            out.push(Frame::new(time, self.sensor, &tracks));
+            out.push((time, self.tracker.system_tracks()));
         }
         out
+    }
+
+    /// Run the whole scenario, returning one [`Frame`] per scan time.
+    ///
+    /// A thin JSON-adapter projection over [`scans`](Player::scans): each scan's
+    /// `SystemTrack`s are bundled into a [`Frame`] (web-friendly wire shape).
+    pub fn frames(self) -> Vec<Frame> {
+        let sensor = self.sensor;
+        self.scans()
+            .into_iter()
+            .map(|(time, tracks)| Frame::new(time, sensor, &tracks))
+            .collect()
     }
 }
 
@@ -164,6 +181,21 @@ mod tests {
         let a = Player::new(&scenario(), config()).frames();
         let b = Player::new(&scenario(), config()).frames();
         assert_eq!(a, b);
+    }
+
+    /// `scans` and `frames` describe the same scan times in the same order:
+    /// `frames` is just the JSON projection of the raw `scans`. The CAT062
+    /// adapter consumes the raw `scans`. REQ: FR-IO-002, FR-IO-003
+    #[test]
+    fn scans_and_frames_share_the_same_scan_times() {
+        let scans = Player::new(&scenario(), config()).scans();
+        let frames = Player::new(&scenario(), config()).frames();
+
+        assert_eq!(scans.len(), frames.len());
+        for ((scan_time, tracks), frame) in scans.iter().zip(&frames) {
+            assert_eq!(*scan_time, frame.time, "same scan time");
+            assert_eq!(tracks.len(), frame.tracks.len(), "same track count");
+        }
     }
 
     /// A scenario without a radar produces no plots and thus no frames.
