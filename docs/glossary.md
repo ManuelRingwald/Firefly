@@ -272,6 +272,27 @@ unabhängig von jedem einzelnen Sensorstandort. Jeder Plot wird vor der
 Verarbeitung in diesen Rahmen umgerechnet. Es ist zugleich der Bezugspunkt der
 System-Stereografischen CAT062-Ausgabe (ADR 0006).
 
+**Sensor-Provenienz (`contributing_sensors`)**
+Welche(r) Sensor(en) im **letzten Scan** zu einem Track beigetragen haben — d. h.
+ihn getroffen (geupdated oder neu gegründet) haben. Bei der Mess-Fusion (ADR 0010)
+sieht ein fusionierter Track oft mehrere Sensoren gleichzeitig; die Provenienz
+macht sichtbar, *wer gerade hinschaut*. Anders als die SSR-Identität (Mode 3/A,
+ICAO-Adresse) ist sie **nicht sticky**: jeder Scan setzt die Liste neu — beim
+Coasten (kein Sensor hat getroffen) ist sie leer.
+
+**I062/060 (Mode 3/A Code)**
+CAT062-Datenfeld für den **Mode-3/A-Code** ("Squawk", ein 4-stelliger
+Oktalcode, den der Lotse dem Flugzeug zuweist). Zwei Oktette: die unteren 12
+Bit tragen den Code, die oberen Bits sind Validierungs-Flags (V/G/CH), die wir
+auf 0 lassen — der Tracker meldet nur einen *bereits bestätigten* Code.
+
+**I062/380 (Aircraft Derived Data) / Target Address (ADR-Subfeld)**
+CAT062-Compound-Item für Daten, die aus dem Mode-S-/ADS-B-Signal selbst
+abgeleitet sind. Wir kodieren bisher nur das **ADR-Subfeld** ("Target
+Address"): die weltweit eindeutige 24-Bit-**ICAO-Adresse** des Flugzeugs — der
+Schlüssel, der bei der Multi-Radar-Fusion *dasselbe* Flugzeug über
+verschiedene Sensoren hinweg identifiziert.
+
 **Track-Kontinuität**
 Maß dafür, ob *ein* Ziel *eine* durchgehende Track-Spur behält. Zwei Teilzahlen:
 **Coverage** (Anteil der Scans, in denen das Ziel überhaupt einen bestätigten

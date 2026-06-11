@@ -4,17 +4,16 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-10
+- **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** Häppchen **4.2** — CAT062-Identitätsfelder kodiert
-  (`firefly-asterix`): bei vorhandener SSR-Identität trägt der Record jetzt
-  **I062/060** (Mode 3/A, 12-Bit-Oktalcode in den unteren Bits) und
-  **I062/380/ADR** (Mode-S-24-Bit-Adresse als Target-Address-Subfeld); beide
-  Items entfallen bei reinen Primär-Tracks und tauchen automatisch im FSPEC auf
-  (FRN 9 bzw. 11). LSB-/Subfeld-Werte gegen SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10
-  verifiziert. Neue Tests `cat062::mode_3a_*`, `cat062::target_address_*`,
-  `cat062::identity_items_appear_only_when_present`. **129 Tests grün.**
-  (Davor 4.A.4: Sensor-Provenienz `contributing_sensors` im `SystemTrack`.)
+- **Letzter Commit:** **M4-Abschluss-Doku** — neue Meilenstein-Erklärung
+  `docs/milestones/M4-multi-radar-fusion.md` (Häppchen 4.0–4.2, 4.A.1–4.A.4:
+  zentrale Mess-Fusion, Frame-Transformation, Multi-Sensor-Tracker, E2E-Test,
+  Sensor-Provenienz, CAT062-Identitätsfelder); Glossar um `Sensor-Provenienz`,
+  `I062/060` und `I062/380/Target Address` ergänzt; Doku-Wegweiser
+  (`docs/README.md`) verlinkt jetzt M3, M3.X und M4. **M4 ist damit
+  abgeschlossen.** 129 Tests grün (unverändert).
+  (Davor 4.2: CAT062-Identitätsfelder I062/060 + I062/380/ADR kodiert.)
 - **PR:** keiner offen.
 
 ---
@@ -85,7 +84,7 @@
   Koordinatenfrage geklärt — **UDP-Multicast** + **System-Stereografisch**
   (CAT062 I062/100). Noch nicht umgesetzt; als Zielbild in ADR 0006
   festgehalten.
-- **M4 läuft:** Häppchen **4.1 + 4.0 erledigt.**
+- **M4 ist abgeschlossen** (`docs/milestones/M4-multi-radar-fusion.md`):
   **4.1**: `Track` (firefly-track) merkt sich die SSR-Identität (Mode-3/A,
   ICAO-Adresse) aus zugeordneten Plots (`Track::update_identity`, sticky), und
   `SystemTrack` (firefly-core) führt sie als `mode_3a: Option<u16>` /
@@ -94,8 +93,18 @@
   (Option A): ein Tracker, gemeinsamer Tracking-Frame, Plot-Umrechnung in
   diesen Frame (Position + Kovarianz), Pro-Sensor-Rauschmodell. Begründung:
   Präzision (Rohmessungen) bei gleicher Cloud-Tauglichkeit; Synergie mit dem
-  System-Referenzpunkt der CAT062-Ausgabe (ADR 0006). Noch offen:
-  Umsetzung in 4.A.1–4.A.4 und CAT062-Kodierung der Identität (4.2).
+  System-Referenzpunkt der CAT062-Ausgabe (ADR 0006).
+  **4.A.1**: `firefly-geo` bekommt die Frame-zu-Frame-Transformation für
+  Position **und** Kovarianz (FR-GEO-003).
+  **4.A.2**: `firefly-track` auf Multi-Sensor umgestellt — gemeinsamer
+  `tracking_frame`, `BTreeMap<SensorId, SensorModel>`, sequenzielle
+  Sensor-Verarbeitung löst das Geister-Problem (FR-TRK-010).
+  **4.A.3**: Ende-zu-Ende-Test (zwei Radare, ein Flugzeug → ein Track,
+  `firefly-player/tests/multi_radar.rs`).
+  **4.A.4**: `SystemTrack.contributing_sensors` — welche Sensoren im letzten
+  Scan beigetragen haben (nicht sticky, leer beim Coasten).
+  **4.2**: CAT062-Identitätsfelder I062/060 (Mode 3/A) und I062/380/ADR
+  (Mode-S-Adresse) — nur bei vorhandener Identität, automatisch im FSPEC.
 - Qualität: **129 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
@@ -152,14 +161,17 @@ Koordinatenfrage geklärt — **UDP-Multicast** + **System-Stereografisch**
 I062/100-Encoder, Multicast-Versand) sind als Zielbild in ADR 0006
 festgehalten und werden voraussichtlich im Umfeld von M4 eingeplant.
 
-✅ **M4 Häppchen 4.0 + 4.1 + 4.A.1–4.A.4 + 4.2 erledigt:** SSR-Identität
+✅ **M4 ist abgeschlossen** (Häppchen 4.0 + 4.1 + 4.A.1–4.A.4 + 4.2,
+Meilenstein-Doku `docs/milestones/M4-multi-radar-fusion.md`): SSR-Identität
 durchgereicht (FR-TRK-009); Architektur entschieden — **zentrale Mess-Fusion**
 (ADR 0010); Frame-Transform, Multi-Sensor-Tracker, E2E-Fusionstest,
 Sensor-Provenienz und CAT062-Identitätskodierung alle umgesetzt.
 
-➡️ **Als Nächstes:** **Sensor-Registrierung / Bias-Korrektur** (S5) — oder
-M4-Abschluss-Doku (Meilenstein-Erklärung `docs/milestones/`). Entscheidung mit
-dem Projektverantwortlichen, womit M4 weitergeht.
+➡️ **Als Nächstes:** Mit dem Projektverantwortlichen klären, womit es
+weitergeht — Kandidaten: **Sensor-Registrierung / Bias-Korrektur** (S5,
+ADR-0010-Abgrenzung), die offenen **ADR-0006-Transport-Häppchen**
+(System-Stereografische Projektion + I062/100, UDP-Multicast-Versand), oder
+**M5** (IMM/JPDA für Manöver & dichten Verkehr).
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)
 
