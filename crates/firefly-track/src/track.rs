@@ -16,6 +16,7 @@ use firefly_core::{ModeAC, SensorId, TrackId};
 use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
 
+use crate::imm::Imm;
 use crate::kalman::LinearKalman;
 
 /// Lifecycle status of a track.
@@ -32,7 +33,10 @@ pub enum TrackStatus {
 pub struct Track {
     id: TrackId,
     status: TrackStatus,
-    pub(crate) filter: LinearKalman,
+    /// The track's **IMM** bank (constant velocity + coordinated turns,
+    /// Häppchen M5.4). Its [`combined_estimate`](Imm::combined_estimate) is the
+    /// single state the rest of the tracker reasons with.
+    pub(crate) imm: Imm,
     /// Data time of the last predict/update, seconds.
     pub(crate) last_time: f64,
     /// Data time of the last *real* measurement (hit), seconds. Drives the
@@ -58,12 +62,12 @@ pub struct Track {
 }
 
 impl Track {
-    /// Create a fresh tentative track from an initialised filter.
-    pub(crate) fn new(id: TrackId, filter: LinearKalman, time: f64) -> Self {
+    /// Create a fresh tentative track from an initialised IMM bank.
+    pub(crate) fn new(id: TrackId, imm: Imm, time: f64) -> Self {
         Self {
             id,
             status: TrackStatus::Tentative,
-            filter,
+            imm,
             last_time: time,
             last_hit_time: time, // the founding plot is a hit
             recent: Vec::new(),
@@ -101,14 +105,20 @@ impl Track {
         self.last_time - self.last_hit_time
     }
 
+    /// The IMM's combined estimate — the single Kalman state the tracker reads
+    /// position, velocity and uncertainty from.
+    pub(crate) fn estimate(&self) -> LinearKalman {
+        self.imm.combined_estimate()
+    }
+
     /// Estimated position `[east, north]`, metres.
     pub fn position(&self) -> Vector2<f64> {
-        self.filter.position()
+        self.estimate().position()
     }
 
     /// Estimated velocity `[v_east, v_north]`, m/s.
     pub fn velocity(&self) -> Vector2<f64> {
-        self.filter.velocity()
+        self.estimate().velocity()
     }
 
     /// Record one association outcome, keeping only the last `window` of them.
@@ -186,6 +196,7 @@ impl Track {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imm::ImmConfig;
     use crate::kalman::LinearKalman;
     use crate::measurement::{convert_plot, SensorErrorModel};
     use firefly_geo::Polar;
@@ -194,7 +205,8 @@ mod tests {
         let model = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
         let measurement = convert_plot(&Polar::new(50_000.0, 0.0, 0.0), &model);
         let filter = LinearKalman::from_first_measurement(&measurement, 200.0);
-        Track::new(TrackId(1), filter, 0.0)
+        let imm = ImmConfig::cv_and_turns(0.052).seed(filter);
+        Track::new(TrackId(1), imm, 0.0)
     }
 
     /// A fresh track has no known identity yet.

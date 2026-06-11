@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::association::associate;
 use crate::gating::Gate;
+use crate::imm::ImmConfig;
 use crate::kalman::{LinearKalman, ProcessNoise};
 use crate::measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};
 use crate::track::{Track, TrackStatus};
@@ -53,6 +54,9 @@ pub struct TrackerConfig {
     pub sensors: BTreeMap<SensorId, SensorModel>,
     /// Process noise (the manoeuvre budget) for prediction.
     pub process_noise: ProcessNoise,
+    /// The IMM bank recipe stamped onto every new track (motion models, Markov
+    /// switching, prior model probabilities) — Häppchen M5.4.
+    pub imm: ImmConfig,
     /// The validation gate.
     pub gate: Gate,
     /// Confirmation needs `confirm_m` hits within the last `confirm_n` scans.
@@ -76,6 +80,8 @@ impl TrackerConfig {
             tracking_frame,
             sensors: BTreeMap::new(),
             process_noise: ProcessNoise::new(0.5),
+            // A civil rate-one turn is ~3°/s ≈ 0.052 rad/s.
+            imm: ImmConfig::cv_and_turns(0.052),
             gate: Gate::from_probability(0.99),
             confirm_m: 3,
             confirm_n: 5,
@@ -161,7 +167,7 @@ impl Tracker {
                     confirmed: track.is_confirmed(),
                     coasting: track.is_coasting(),
                     update_age: track.update_age(),
-                    position_uncertainty: track.filter.position_uncertainty(),
+                    position_uncertainty: track.estimate().position_uncertainty(),
                     mode_3a: track.mode_3a(),
                     icao_address: track.icao_address(),
                     contributing_sensors: track.contributing_sensors().iter().copied().collect(),
@@ -198,14 +204,16 @@ impl Tracker {
         let delete_tentative = self.config.delete_misses_tentative;
         let delete_confirmed = self.config.delete_misses_confirmed;
         let tracking_frame = self.config.tracking_frame;
+        let imm_config = self.config.imm.clone();
         let t = time.as_secs();
 
-        // 1. Predict every existing track forward to the scan time, and clear
-        //    last scan's sensor provenance (it is rebuilt below).
+        // 1. Predict every existing track's IMM forward to the scan time (mixing
+        //    + per-model prediction), and clear last scan's sensor provenance
+        //    (it is rebuilt below).
         for track in &mut self.tracks {
             let dt = t - track.last_time;
             if dt > 0.0 {
-                track.filter.predict(dt, &process_noise);
+                track.imm.predict(dt, &process_noise);
                 track.last_time = t;
             }
             track.reset_contributing_sensors();
@@ -234,12 +242,14 @@ impl Tracker {
         let mut hit_ids: BTreeSet<TrackId> = BTreeSet::new();
         for (&sensor, items) in &by_sensor {
             let measurements: Vec<CartesianMeasurement> = items.iter().map(|(_, m)| *m).collect();
-            let filters: Vec<LinearKalman> = self.tracks.iter().map(|tr| tr.filter).collect();
+            // Gate and associate against each track's IMM combined estimate.
+            let filters: Vec<LinearKalman> = self.tracks.iter().map(|tr| tr.estimate()).collect();
             let assoc = associate(&filters, &measurements, &gate);
 
-            // Update associated tracks (a hit) against the current estimate.
+            // Update associated tracks (a hit): fold the plot into the IMM,
+            // which re-weights its motion models by how well each predicted it.
             for &(ti, mi) in &assoc.pairs {
-                self.tracks[ti].filter.update(&measurements[mi]);
+                self.tracks[ti].imm.update(&measurements[mi]);
                 self.tracks[ti].last_hit_time = t;
                 self.tracks[ti].update_identity(&items[mi].0.mode_ac);
                 self.tracks[ti].record_hit_from(sensor);
@@ -250,9 +260,10 @@ impl Tracker {
             for &mi in &assoc.unassigned_measurements {
                 let filter =
                     LinearKalman::from_first_measurement(&measurements[mi], initial_velocity_std);
+                let imm = imm_config.seed(filter);
                 let id = TrackId(self.next_id);
                 self.next_id += 1;
-                let mut track = Track::new(id, filter, t);
+                let mut track = Track::new(id, imm, t);
                 track.update_identity(&items[mi].0.mode_ac);
                 track.record_hit_from(sensor);
                 self.tracks.push(track);
@@ -649,6 +660,55 @@ mod tests {
         assert!(
             sts[0].contributing_sensors.is_empty(),
             "coasting track has no contributing sensor this scan"
+        );
+    }
+
+    /// End-to-end IMM payoff (Häppchen M5.4): a target flying a steady
+    /// coordinated turn drives its track's **coordinated-turn** model
+    /// probability above the constant-velocity one — the tracker "notices" the
+    /// manoeuvre purely from the measurement likelihoods, with no separate
+    /// manoeuvre detector. The target stays a single confirmed track throughout.
+    /// REQ: FR-TRK-011, FR-TRK-012, FR-TRK-013
+    #[test]
+    fn imm_favours_the_turn_model_on_a_turning_target() {
+        use crate::motion::MotionModel;
+        use nalgebra::Vector4;
+
+        let mut tracker = Tracker::new(config());
+        let rate = 0.052_f64; // rad/s, a left (anticlockwise) rate-one turn
+                              // Truth starts 40 km north of the sensor, heading east at 200 m/s.
+        let x0 = Vector4::new(0.0, 40_000.0, 200.0, 0.0);
+        let dt = 2.0;
+
+        for k in 0..30 {
+            let t = k as f64 * dt;
+            // Truth at this scan from the coordinated-turn transition.
+            let truth = MotionModel::CoordinatedTurn { rate }.transition(t) * x0;
+            let polar = firefly_geo::Enu::new(truth[0], truth[1], 0.0).to_polar();
+            tracker.process_scan(
+                Timestamp(t),
+                &[Plot::primary(SensorId(1), Timestamp(t), polar)],
+            );
+        }
+
+        assert_eq!(tracker.confirmed_count(), 1, "one stable confirmed track");
+        let track = &tracker.tracks()[0];
+        let mu = track.imm.probabilities();
+        let models = track.imm.models();
+
+        // Find the probability of the left-turn model (rate ≈ +0.052) and of CV.
+        let mut mu_cv = 0.0;
+        let mut mu_left_turn = 0.0;
+        for (m, &p) in models.iter().zip(mu) {
+            match m {
+                MotionModel::ConstantVelocity => mu_cv = p,
+                MotionModel::CoordinatedTurn { rate: r } if *r > 0.0 => mu_left_turn = p,
+                _ => {}
+            }
+        }
+        assert!(
+            mu_left_turn > mu_cv,
+            "the matching turn model should dominate: μ = {mu:?}, models = {models:?}"
         );
     }
 

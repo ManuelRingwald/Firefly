@@ -31,6 +31,7 @@
 //! the inputs — no wall clock, no hidden state.
 
 use nalgebra::{Matrix4, Vector4};
+use serde::{Deserialize, Serialize};
 
 use crate::kalman::{LinearKalman, ProcessNoise};
 use crate::measurement::CartesianMeasurement;
@@ -48,7 +49,7 @@ const MIN_MODEL_PROBABILITY: f64 = 1e-12;
 /// Invariants (checked by [`Imm::new`]): the four vectors share the same length
 /// `r` (the number of models), `probabilities` sums to 1, and each row of
 /// `transition` sums to 1 (it is *row-stochastic*).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Imm {
     /// The motion model each filter in the bank assumes.
     models: Vec<MotionModel>,
@@ -59,6 +60,62 @@ pub struct Imm {
     /// Row-stochastic Markov transition matrix: `transition[i][j]` is the
     /// probability of switching from model `i` to model `j`.
     transition: Vec<Vec<f64>>,
+}
+
+/// The recipe for building a track's IMM bank: which motion models, how they
+/// switch (the Markov matrix), and the prior model probabilities a newborn
+/// track starts with. One of these lives in the [`TrackerConfig`](crate::TrackerConfig)
+/// and is stamped onto every new track.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImmConfig {
+    /// The motion models in the bank.
+    pub models: Vec<MotionModel>,
+    /// Row-stochastic Markov transition matrix (`r × r`).
+    pub transition: Vec<Vec<f64>>,
+    /// Prior model probabilities for a freshly born track (sum to 1).
+    pub initial_probabilities: Vec<f64>,
+}
+
+impl ImmConfig {
+    /// The default civil-aviation bank: constant velocity plus a symmetric pair
+    /// of coordinated turns at `±turn_rate` (rad/s) — covering straight flight,
+    /// a left turn and a right turn. The transition matrix is **sticky** (each
+    /// model persists with probability 0.9, with the remaining 0.1 split evenly
+    /// across the others), and a newborn track starts mostly in CV (aircraft
+    /// cruise straight far more than they turn).
+    ///
+    /// A typical civil "rate-one" turn is 3°/s ≈ 0.052 rad/s.
+    pub fn cv_and_turns(turn_rate: f64) -> Self {
+        let models = vec![
+            MotionModel::ConstantVelocity,
+            MotionModel::CoordinatedTurn { rate: turn_rate },
+            MotionModel::CoordinatedTurn { rate: -turn_rate },
+        ];
+        let transition = vec![
+            vec![0.95, 0.025, 0.025],
+            vec![0.05, 0.90, 0.05],
+            vec![0.05, 0.05, 0.90],
+        ];
+        let initial_probabilities = vec![0.9, 0.05, 0.05];
+        Self {
+            models,
+            transition,
+            initial_probabilities,
+        }
+    }
+
+    /// Build the IMM bank for a track whose every model starts from the same
+    /// freshly initialised filter `seed` (e.g. from
+    /// [`LinearKalman::from_first_measurement`]).
+    pub fn seed(&self, seed: LinearKalman) -> Imm {
+        let n = self.models.len();
+        Imm::new(
+            self.models.clone(),
+            vec![seed; n],
+            self.initial_probabilities.clone(),
+            self.transition.clone(),
+        )
+    }
 }
 
 impl Imm {
@@ -221,19 +278,64 @@ impl Imm {
         LinearKalman { x, p }
     }
 
-    /// Run one full IMM cycle and return the combined estimate.
+    /// **Predict** stage of the IMM cycle (mixing + per-model prediction).
     ///
-    /// The four stages (Blom & Bar-Shalom):
-    /// 1. **Mix** — each model's filter is re-initialised from
-    ///    [`mixed_initial_conditions`](Self::mixed_initial_conditions).
-    /// 2. **Predict (+ update)** — each model predicts forward by `dt` under its
-    ///    own motion model; if a `measurement` is present (a hit) it is folded
-    ///    in and the model's **likelihood** recorded. With no measurement (a
-    ///    coast) the cycle predicts only.
-    /// 3. **Model-probability update** — on a hit, `μ_j ∝ c_j · Λ_j` (the model
-    ///    that best predicted the plot gains probability); on a coast the
-    ///    probabilities relax to the Markov-predicted `c_j`.
-    /// 4. **Combination** — the returned [`combined_estimate`](Self::combined_estimate).
+    /// Mixes the bank (stages 1) and rolls each model forward by `dt` under its
+    /// own motion model (stage 2, prediction only). The model probabilities
+    /// become the Markov-predicted `c_j` — already correct if this scan turns
+    /// out to be a coast; if a measurement follows, [`update`](Self::update)
+    /// re-weights from here. Returns the predicted combined estimate, which the
+    /// tracker uses for gating and association.
+    ///
+    /// Splitting predict from update mirrors [`LinearKalman`] and lets the
+    /// tracker predict every track, *then* associate, *then* update — its
+    /// existing per-scan flow (Häppchen M5.4).
+    ///
+    /// REQ: FR-TRK-013
+    pub fn predict(&mut self, dt: f64, process: &ProcessNoise) -> LinearKalman {
+        let predicted = self.predicted_model_probabilities();
+        let mixed = self.mixed_initial_conditions();
+        for (j, mut f) in mixed.into_iter().enumerate() {
+            f.predict_with(&self.models[j], dt, process);
+            self.filters[j] = f;
+        }
+        self.probabilities = predicted;
+        self.combined_estimate()
+    }
+
+    /// **Update** stage of the IMM cycle: fold a measurement into each model,
+    /// score its likelihood and re-weight the model probabilities
+    /// `μ_j ∝ c_j · Λ_j` (the `c_j` being the post-[`predict`](Self::predict)
+    /// probabilities). Returns the updated combined estimate.
+    ///
+    /// Call this only after [`predict`](Self::predict). A scan with no
+    /// associated plot (a coast) simply skips it: the probabilities already
+    /// hold the Markov-predicted values.
+    ///
+    /// REQ: FR-TRK-013
+    pub fn update(&mut self, measurement: &CartesianMeasurement) -> LinearKalman {
+        let r = self.len();
+        let mut likelihoods = vec![1.0; r];
+        for (j, f) in self.filters.iter_mut().enumerate() {
+            likelihoods[j] = f.measurement_likelihood(measurement);
+            f.update(measurement);
+        }
+        let unnormalised: Vec<f64> = (0..r)
+            .map(|j| self.probabilities[j] * likelihoods[j])
+            .collect();
+        let total: f64 = unnormalised.iter().sum();
+        if total > MIN_MODEL_PROBABILITY {
+            self.probabilities = unnormalised.iter().map(|&u| u / total).collect();
+        }
+        // else: every model found the plot vanishingly unlikely; keep the
+        // Markov-predicted probabilities rather than producing NaNs.
+        self.combined_estimate()
+    }
+
+    /// Run one full IMM cycle ([`predict`](Self::predict) then, on a hit,
+    /// [`update`](Self::update)) and return the combined estimate. Convenience
+    /// for using the IMM as a standalone filter; the tracker calls the two
+    /// stages separately.
     ///
     /// REQ: FR-TRK-013
     pub fn step(
@@ -242,39 +344,11 @@ impl Imm {
         process: &ProcessNoise,
         measurement: Option<&CartesianMeasurement>,
     ) -> LinearKalman {
-        let r = self.len();
-        let predicted = self.predicted_model_probabilities();
-        let mixed = self.mixed_initial_conditions();
-
-        let mut likelihoods = vec![1.0; r];
-        for j in 0..r {
-            let mut f = mixed[j];
-            f.predict_with(&self.models[j], dt, process);
-            if let Some(m) = measurement {
-                likelihoods[j] = f.measurement_likelihood(m);
-                f.update(m);
-            }
-            self.filters[j] = f;
+        self.predict(dt, process);
+        match measurement {
+            Some(m) => self.update(m),
+            None => self.combined_estimate(),
         }
-
-        if measurement.is_some() {
-            // Re-weight by likelihood: μ_j ∝ c_j · Λ_j.
-            let unnormalised: Vec<f64> = (0..r).map(|j| predicted[j] * likelihoods[j]).collect();
-            let total: f64 = unnormalised.iter().sum();
-            if total > MIN_MODEL_PROBABILITY {
-                self.probabilities = unnormalised.iter().map(|&u| u / total).collect();
-            } else {
-                // Every model found the plot vanishingly unlikely; fall back to
-                // the Markov prediction rather than producing NaNs.
-                self.probabilities = predicted;
-            }
-        } else {
-            // Coasting: no evidence to re-weight with, so the probabilities are
-            // simply the Markov-predicted ones.
-            self.probabilities = predicted;
-        }
-
-        self.combined_estimate()
     }
 }
 

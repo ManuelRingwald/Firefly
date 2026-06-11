@@ -26,7 +26,7 @@ mod tracker;
 
 pub use association::{associate, Association};
 pub use gating::Gate;
-pub use imm::Imm;
+pub use imm::{Imm, ImmConfig};
 pub use kalman::{LinearKalman, ProcessNoise};
 pub use measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};
 pub use metrics::{Rmse, TrackContinuity};

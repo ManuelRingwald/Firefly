@@ -6,17 +6,18 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **Häppchen M5.3 (vollständiger IMM-Zyklus)** —
-  `firefly-track::imm` bekommt `Imm::step(dt, Q, Option<&measurement>)`: jedes
-  Modell filtert aus seiner gemischten Anfangsbedingung und liefert bei einem
-  Treffer eine Gauß-**Likelihood** (`LinearKalman::measurement_likelihood`,
-  Normierer `2π·√|S|`); das Modellwahrscheinlichkeits-Update gewichtet
-  `μ_j ∝ c_j·Λ_j` (beim Coasten Relaxation zur Markov-Prädiktion), die
-  **kombinierte Schätzung** (`combined_estimate`) ist die `μ`-gewichtete
-  Mischung. Konvergenz-Tests: auf gerader Bahn gewinnt CV, in der Kurve das
-  passende CT-Modell. 172 Tests grün (+5). FR-TRK-013 neu, Glossar (Likelihood)
-  ergänzt. (Davor: M5.2 — IMM-Mischung; M5.1 — Coordinated-Turn-Modell; D.3 —
-  Multicast-Empfänger.)
+- **Letzter Commit:** **Häppchen M5.4 (IMM im Tracker)** — jeder `Track` trägt
+  jetzt statt eines einzelnen `LinearKalman` eine **IMM-Bank** (`Imm`,
+  konfiguriert über `ImmConfig` in `TrackerConfig`; Standard `cv_and_turns`:
+  CV + Coordinated-Turn ±0,052 rad/s, klebrige Markov-Matrix). Pro-Scan-Ablauf
+  unverändert: Prädiktion → `Imm::predict`, Gating/Assoziation über
+  `Track::estimate` (kombinierte Schätzung), Update → `Imm::update`. Neue Tracks
+  via `ImmConfig::seed`. Geradeausflug-Verhalten erhalten (RMSE-/Identitäts-Tests
+  grün, nach leichter Sticky-Tuning der Bank); E2E-Test: kurvendes Ziel → das
+  passende CT-Modell dominiert. **Der IMM ist damit Ende-zu-Ende im Tracker
+  wirksam.** 173 Tests grün (+1). FR-TRK-014 neu, Meilenstein-Doku
+  `docs/milestones/M5-imm.md`. (Davor: M5.3 — IMM-Zyklus; M5.2 — Mischung;
+  M5.1 — CT-Modell.)
 - **PR:** keiner offen.
 
 ---
@@ -134,14 +135,16 @@
   tritt der Multicast-Gruppe bei, `recv_records`/`run` empfangen und
   dekodieren CAT062-Datagramme. Ende-zu-Ende-Test: Sender → Socket →
   Empfänger → Decoder liefert die ursprünglichen Track-Daten zurück.
-- **M5 läuft:** Häppchen **M5.1 – M5.3 erledigt** — `firefly-track::motion` mit
-  `MotionModel` (CV + Coordinated-Turn); `LinearKalman::predict_with` (FR-TRK-011).
-  `firefly-track::imm` mit der Struktur `Imm`: Filter-Bank + Markov-
-  Übergangsmatrix, IMM-Mischung (FR-TRK-012) und der **vollständige IMM-Zyklus**
-  `Imm::step` mit Likelihood-Gewichtung und kombinierter Schätzung (FR-TRK-013).
-  Der IMM steht damit als eigenständiger Filter; offen ist nur noch das Einhängen
-  in den `Tracker` (M5.4).
-- Qualität: **172 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
+- **M5 läuft:** Häppchen **M5.1 – M5.4 erledigt (IMM komplett)** —
+  `firefly-track::motion` mit `MotionModel` (CV + Coordinated-Turn);
+  `LinearKalman::predict_with` (FR-TRK-011). `firefly-track::imm` mit `Imm`:
+  Filter-Bank + Markov-Übergangsmatrix, IMM-Mischung (FR-TRK-012) und der
+  vollständige IMM-Zyklus mit Likelihood-Gewichtung (FR-TRK-013). **Im Tracker
+  wirksam (FR-TRK-014):** jeder Track trägt eine IMM-Bank, Prädiktion/Update über
+  `Imm::predict`/`Imm::update`, Gating über die kombinierte Schätzung. Offen in
+  M5: nur noch **JPDA** (dichter Verkehr). Meilenstein-Doku
+  `docs/milestones/M5-imm.md`.
+- Qualität: **173 Tests grün**, Clippy sauber, `cargo fmt` ok. Sichtprüfung des
   Frontends im Browser ist ein manueller Schritt.
 - **Dokumentation** aufgebaut: Glossar, M1-/M2-Erklärungen, ADRs 0001–0009,
   Anforderungs-Register mit Rückverfolgbarkeit.
@@ -258,18 +261,25 @@ Anfangsbedingung, Gauß-Likelihood je Modell
 `combined_estimate`. Konvergenz nachgewiesen: CV gewinnt auf der Geraden, CT in
 der Kurve (FR-TRK-013).
 
-➡️ **Als Nächstes (M5):** **M5.4** — den IMM in den `Tracker` einhängen
-(ersetzt den einzelnen `LinearKalman` je Track; Gating/Assoziation laufen über
-die kombinierte Schätzung). Danach JPDA für dichten Verkehr. *(Erklärungen für
-M5 auf Wunsch des Projektverantwortlichen übersprungen — direkte Umsetzung in
-kleinen, getesteten Häppchen.)*
+✅ **Häppchen M5.4 erledigt:** IMM im Tracker. Jeder `Track` trägt eine
+IMM-Bank statt eines einzelnen `LinearKalman`; `ImmConfig` in `TrackerConfig`,
+Prädiktion/Update über `Imm::predict`/`Imm::update`, Gating über
+`Track::estimate`. Geradeausflug-Verhalten erhalten; kurvendes Ziel → passendes
+CT-Modell dominiert (FR-TRK-014). **IMM-Teil von M5 abgeschlossen.**
+
+➡️ **Als Nächstes:** **JPDA** (Joint Probabilistic Data Association) für dichten
+Verkehr mit überlappenden Toren — die probabilistische Ergänzung zur heutigen
+„harten" 1:1-Zuordnung (GNN). Vor Beginn mit dem Projektverantwortlichen
+abstimmen (eigenes Häppchen-Schema). *(Erklärungen für M5 auf Wunsch des
+Projektverantwortlichen übersprungen — direkte Umsetzung in kleinen, getesteten
+Häppchen.)*
 
 ### M5-Plan in Häppchen (IMM zuerst)
 
 - [x] **M5.1** Zweites Bewegungsmodell: Coordinated-Turn-Übergangsmatrix neben CV, gemeinsamer 4-D-Zustand (FR-TRK-011) — *S4 · Opus 4.8 · Effort hoch*
 - [x] **M5.2** IMM-Grundgerüst: Bank + Markov-Mischung der Modellzustände (FR-TRK-012) — *S5 · Opus 4.8 · Effort max*
 - [x] **M5.3** Modellbedingtes Filtern + Modellwahrscheinlichkeits-Update (Likelihood je Modell) + kombinierte Schätzung (FR-TRK-013) — *S5 · Opus 4.8 · Effort max*
-- [ ] **M5.4** IMM in den `Tracker` einhängen (ersetzt den einzelnen `LinearKalman` je Track) — *S4 · Opus 4.8 · Effort hoch*
+- [x] **M5.4** IMM in den `Tracker` einhängen (ersetzt den einzelnen `LinearKalman` je Track, FR-TRK-014) — *S4 · Opus 4.8 · Effort hoch*
 - [ ] *(später)* JPDA für dichten Verkehr / überlappende Gates — *S5 · Fable 5 / Opus 4.8 · Effort max*
 
 ### M4-Plan in Häppchen (Option A, ADR 0010)

@@ -22,6 +22,7 @@
 //! parameters; no wall clock, no hidden state.
 
 use nalgebra::Matrix4;
+use serde::{Deserialize, Serialize};
 
 /// Below this turn rate (rad/s) a "turn" is indistinguishable from straight
 /// flight, and the coordinated-turn formulas divide by a vanishing `ω`. We
@@ -30,7 +31,7 @@ const STRAIGHT_FLIGHT_RATE: f64 = 1e-6;
 
 /// How a target is assumed to move between scans — the source of the Kalman
 /// predict step's state-transition matrix `F(dt)`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum MotionModel {
     /// Straight, level flight at constant velocity (the M2 model).
     ConstantVelocity,
