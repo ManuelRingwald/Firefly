@@ -106,6 +106,27 @@ impl LinearKalman {
         (y.transpose() * s_inv * y)[(0, 0)]
     }
 
+    /// The Gaussian **likelihood** of a measurement given the current
+    /// (predicted) state: `N(y; 0, S)` with `y`, `S` the innovation and its
+    /// covariance. A plot that lands where the filter expected it (small
+    /// innovation) scores high; a surprising one scores low.
+    ///
+    /// The IMM (Häppchen M5.3) uses this to weight each motion model by how
+    /// well it predicted the plot — the model that fits the manoeuvre earns the
+    /// higher likelihood and so the higher model probability. The measurement
+    /// has `m = 2` components, so the normaliser is `2π·√|S|`.
+    ///
+    /// REQ: FR-TRK-013
+    pub fn measurement_likelihood(&self, m: &CartesianMeasurement) -> f64 {
+        let (y, s) = self.innovation(m);
+        let s_inv = s
+            .try_inverse()
+            .expect("innovation covariance must be invertible (R is positive definite)");
+        let exponent = -0.5 * (y.transpose() * s_inv * y)[(0, 0)];
+        let normaliser = std::f64::consts::TAU * s.determinant().sqrt();
+        exponent.exp() / normaliser
+    }
+
     /// Initialise a fresh filter from the first measurement: position from the
     /// plot, velocity unknown (zero, with a large `initial_velocity_std`).
     ///

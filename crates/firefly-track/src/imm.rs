@@ -32,7 +32,8 @@
 
 use nalgebra::{Matrix4, Vector4};
 
-use crate::kalman::LinearKalman;
+use crate::kalman::{LinearKalman, ProcessNoise};
+use crate::measurement::CartesianMeasurement;
 use crate::motion::MotionModel;
 
 /// Below this probability a model is treated as effectively dead and its
@@ -197,6 +198,84 @@ impl Imm {
             })
             .collect()
     }
+
+    /// The **combined estimate** `(x, P)` the IMM reports to the outside world:
+    /// the probability-weighted blend of the per-model filters,
+    /// - `x = Σ_j μ_j · x_j`
+    /// - `P = Σ_j μ_j · [P_j + (x_j − x)(x_j − x)ᵀ]`
+    ///
+    /// As with mixing, the covariance carries a spread-of-the-means term, so a
+    /// bank that disagrees about the state reports an honestly larger
+    /// uncertainty. This is what the tracker hands on as the track's position
+    /// and velocity (Häppchen M5.4).
+    pub fn combined_estimate(&self) -> LinearKalman {
+        let mut x = Vector4::zeros();
+        for (&mu, f) in self.probabilities.iter().zip(&self.filters) {
+            x += mu * f.x;
+        }
+        let mut p = Matrix4::zeros();
+        for (&mu, f) in self.probabilities.iter().zip(&self.filters) {
+            let d = f.x - x;
+            p += mu * (f.p + d * d.transpose());
+        }
+        LinearKalman { x, p }
+    }
+
+    /// Run one full IMM cycle and return the combined estimate.
+    ///
+    /// The four stages (Blom & Bar-Shalom):
+    /// 1. **Mix** — each model's filter is re-initialised from
+    ///    [`mixed_initial_conditions`](Self::mixed_initial_conditions).
+    /// 2. **Predict (+ update)** — each model predicts forward by `dt` under its
+    ///    own motion model; if a `measurement` is present (a hit) it is folded
+    ///    in and the model's **likelihood** recorded. With no measurement (a
+    ///    coast) the cycle predicts only.
+    /// 3. **Model-probability update** — on a hit, `μ_j ∝ c_j · Λ_j` (the model
+    ///    that best predicted the plot gains probability); on a coast the
+    ///    probabilities relax to the Markov-predicted `c_j`.
+    /// 4. **Combination** — the returned [`combined_estimate`](Self::combined_estimate).
+    ///
+    /// REQ: FR-TRK-013
+    pub fn step(
+        &mut self,
+        dt: f64,
+        process: &ProcessNoise,
+        measurement: Option<&CartesianMeasurement>,
+    ) -> LinearKalman {
+        let r = self.len();
+        let predicted = self.predicted_model_probabilities();
+        let mixed = self.mixed_initial_conditions();
+
+        let mut likelihoods = vec![1.0; r];
+        for j in 0..r {
+            let mut f = mixed[j];
+            f.predict_with(&self.models[j], dt, process);
+            if let Some(m) = measurement {
+                likelihoods[j] = f.measurement_likelihood(m);
+                f.update(m);
+            }
+            self.filters[j] = f;
+        }
+
+        if measurement.is_some() {
+            // Re-weight by likelihood: μ_j ∝ c_j · Λ_j.
+            let unnormalised: Vec<f64> = (0..r).map(|j| predicted[j] * likelihoods[j]).collect();
+            let total: f64 = unnormalised.iter().sum();
+            if total > MIN_MODEL_PROBABILITY {
+                self.probabilities = unnormalised.iter().map(|&u| u / total).collect();
+            } else {
+                // Every model found the plot vanishingly unlikely; fall back to
+                // the Markov prediction rather than producing NaNs.
+                self.probabilities = predicted;
+            }
+        } else {
+            // Coasting: no evidence to re-weight with, so the probabilities are
+            // simply the Markov-predicted ones.
+            self.probabilities = predicted;
+        }
+
+        self.combined_estimate()
+    }
 }
 
 #[cfg(test)]
@@ -302,5 +381,141 @@ mod tests {
             // No disagreement → no spread term → covariance unchanged.
             assert!((m.p[(0, 0)] - 200.0).abs() < 1e-9);
         }
+    }
+
+    use crate::measurement::CartesianMeasurement;
+    use nalgebra::{Matrix2, Vector2};
+
+    /// A position measurement at `(east, north)` with isotropic 1σ = 10 m.
+    fn measurement(east: f64, north: f64) -> CartesianMeasurement {
+        CartesianMeasurement {
+            z: Vector2::new(east, north),
+            r: Matrix2::new(100.0, 0.0, 0.0, 100.0),
+        }
+    }
+
+    /// A two-model IMM (CV + a CT at `rate`) started from one shared estimate,
+    /// equal priors and a sticky transition matrix.
+    fn cv_ct_imm(rate: f64, start: LinearKalman) -> Imm {
+        Imm::new(
+            vec![
+                MotionModel::ConstantVelocity,
+                MotionModel::CoordinatedTurn { rate },
+            ],
+            vec![start, start],
+            vec![0.5, 0.5],
+            vec![vec![0.95, 0.05], vec![0.05, 0.95]],
+        )
+    }
+
+    /// The combined estimate is the probability-weighted blend of the models.
+    /// REQ: FR-TRK-013
+    #[test]
+    fn combined_estimate_is_the_weighted_blend() {
+        let imm = Imm::new(
+            vec![
+                MotionModel::ConstantVelocity,
+                MotionModel::CoordinatedTurn { rate: 0.05 },
+            ],
+            vec![filter(0.0, 0.0, 100.0), filter(100.0, 0.0, 100.0)],
+            vec![0.25, 0.75],
+            vec![vec![0.9, 0.1], vec![0.1, 0.9]],
+        );
+        let est = imm.combined_estimate();
+        // x = 0.25·0 + 0.75·100 = 75.
+        assert!((est.x[0] - 75.0).abs() < 1e-12);
+    }
+
+    /// A `step` keeps the model probabilities a proper distribution.
+    /// REQ: FR-TRK-013
+    #[test]
+    fn step_keeps_probabilities_normalised() {
+        let start = LinearKalman {
+            x: Vector4::new(0.0, 0.0, 100.0, 0.0),
+            p: Matrix4::identity() * 100.0,
+        };
+        let mut imm = cv_ct_imm(0.05, start);
+        imm.step(4.0, &ProcessNoise::new(0.5), Some(&measurement(400.0, 0.0)));
+        let sum: f64 = imm.probabilities().iter().sum();
+        assert!((sum - 1.0).abs() < 1e-12);
+        assert!(imm.probabilities().iter().all(|&p| p >= 0.0));
+    }
+
+    /// Feeding measurements drawn from a **straight** track makes the
+    /// constant-velocity model win: its probability climbs above the turn
+    /// model's.
+    /// REQ: FR-TRK-013
+    #[test]
+    fn constant_velocity_model_wins_on_a_straight_track() {
+        let speed = 100.0; // m/s due east
+        let dt = 4.0;
+        let start = LinearKalman {
+            x: Vector4::new(0.0, 0.0, speed, 0.0),
+            p: Matrix4::identity() * 100.0,
+        };
+        let mut imm = cv_ct_imm(0.05, start);
+
+        // Truth marches straight east; feed the exact positions.
+        for k in 1..=8 {
+            let east = speed * dt * k as f64;
+            imm.step(dt, &ProcessNoise::new(0.5), Some(&measurement(east, 0.0)));
+        }
+        let p = imm.probabilities();
+        assert!(
+            p[0] > p[1],
+            "CV should dominate on a straight track: μ = {p:?}"
+        );
+        assert!(p[0] > 0.8, "CV should be clearly favoured: μ = {p:?}");
+    }
+
+    /// Feeding measurements drawn from a **coordinated turn** at rate `ω` makes
+    /// the matching CT model win over the constant-velocity model.
+    /// REQ: FR-TRK-013
+    #[test]
+    fn coordinated_turn_model_wins_on_a_turning_track() {
+        let speed = 100.0;
+        let rate = 0.05; // rad/s, the truth's turn rate
+        let dt = 2.0;
+        let start = LinearKalman {
+            x: Vector4::new(0.0, 0.0, speed, 0.0),
+            p: Matrix4::identity() * 100.0,
+        };
+        let mut imm = cv_ct_imm(rate, start);
+
+        // Truth carves a circle of radius v/ω centred due north of the start.
+        // Position after turning angle θ = ω·t (starting east-bound at origin):
+        //   east  = (v/ω) sin θ
+        //   north = (v/ω)(1 − cos θ)
+        let radius = speed / rate;
+        for k in 1..=8 {
+            let theta = rate * dt * k as f64;
+            let east = radius * theta.sin();
+            let north = radius * (1.0 - theta.cos());
+            imm.step(dt, &ProcessNoise::new(0.5), Some(&measurement(east, north)));
+        }
+        let p = imm.probabilities();
+        assert!(
+            p[1] > p[0],
+            "CT should dominate on a turning track: μ = {p:?}"
+        );
+    }
+
+    /// Coasting (no measurement) relaxes the probabilities toward the
+    /// Markov-predicted ones rather than re-weighting by evidence.
+    /// REQ: FR-TRK-013
+    #[test]
+    fn coasting_relaxes_toward_markov_prediction() {
+        let start = LinearKalman {
+            x: Vector4::new(0.0, 0.0, 100.0, 0.0),
+            p: Matrix4::identity() * 100.0,
+        };
+        let mut imm = cv_ct_imm(0.05, start);
+        // Priors (0.5, 0.5) with this transition predict c = (0.5, 0.5); a coast
+        // leaves them there.
+        let est = imm.step(4.0, &ProcessNoise::new(0.5), None);
+        assert!((imm.probabilities()[0] - 0.5).abs() < 1e-12);
+        assert!((imm.probabilities()[1] - 0.5).abs() < 1e-12);
+        // And it still returns a usable combined estimate.
+        assert!(est.x[0] > 0.0, "the coasted estimate moved east");
     }
 }

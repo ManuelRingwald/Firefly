@@ -258,6 +258,16 @@ Jede Zeile summiert sich zu 1 (*zeilenstochastisch*). Eine hohe Diagonale heißt
 gelegentliches Umschalten — die zentrale Stellschraube, wie flink der IMM auf
 ein Manöver reagiert.
 
+**Likelihood (eines Modells)**
+Wie gut ein Modell den gerade eingetroffenen Plot *vorhergesagt* hat — die
+Gauß-Dichte `N(y; 0, S)` der Innovation `y` unter der Innovations-Kovarianz `S`.
+Ein Plot, der dort landet, wo das Modell ihn erwartet hat (kleine Innovation),
+bekommt eine hohe Likelihood; eine Überraschung eine niedrige. Im IMM ist die
+Likelihood das **Beweisstück**: das Modell mit der höheren Likelihood gewinnt
+Modellwahrscheinlichkeit `μ` hinzu (`μ_j ∝ c_j·Λ_j`). So „erkennt" der IMM, ob
+das Ziel gerade geradeaus fliegt oder kurvt — ganz ohne separaten
+Manöver-Detektor.
+
 **Zuordnungsproblem (*assignment problem*)**
 Die Aufgabe, Zeilen (Tracks) und Spalten (Plots) einer Kostentabelle so paarweise
 zuzuordnen, dass die Gesamtkosten minimal werden — jede Zeile/Spalte höchstens
