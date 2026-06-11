@@ -108,19 +108,24 @@ es im Tracker-Kern behoben** war:
    Fusions-Referenz** und ein **getrenntes, weiteres Initiierungs-Sperr-Tor**
    (FR-TRK-020). Die Szene läuft damit wieder mit dem **Standard-Tor `0,99`**.
 
-Eine Tuning-Entscheidung bleibt vorerst bestehen und ist als offener Punkt in
-`docs/STATUS.md` vermerkt:
+3. **Asynchrone Radar-Scans (behoben, ADR 0012).** Ein realistisches Setup
+   lässt die drei Radare zeitversetzt scannen (`scan_offset = 0 / 1.3 / 2.6 s`
+   bei `scan_period = 4.0`). Mit dem alten, scan-zählenden Lebenszyklus führte
+   das zu massiver Track-Instabilität (28–90 statt 8 IDs): er buchte
+   Treffer/Fehltreffer **pro `process_scan`-Aufruf**, aber mit Versatz trägt
+   jeder Aufruf nur **einen** Sensor — ein Flugzeug, das nur Radar B sieht,
+   kassierte beim Offset-Scan von Radar A einen falschen „Miss". **Der
+   adaptive Lebenszyklus** (FR-TRK-021) zählt Bestätigung/Löschung stattdessen
+   in `coast_reference = max(revisit_interval, cadence)` Sekunden — dem
+   Maximum aus dem per-Track-EWMA der Treffer-Zeitlücken (`revisit_interval`)
+   und der vom Tracker geschätzten Feed-Taktung (`cadence`). Ein kurzer
+   Versatz zwischen zwei Radaren wird so nicht mehr als verpasste Wiederkehr
+   gewertet.
 
-3. **Synchrone Radar-Scans.** Ein realistisches Setup hätte die drei Radare
-   zeitversetzt scannen lassen (`scan_offset`). In dieser dichten Szene führte
-   das zu massiver Track-Instabilität (50–90 statt 8 IDs); Ursache: der
-   Lebenszyklus bucht Treffer/Fehltreffer **pro `process_scan`-Aufruf**, aber
-   mit Versatz trägt jeder Aufruf nur **einen** Sensor (siehe „Offene Punkte").
-   M6.1 nutzt daher synchrone Scans (`scan_period = 4.0`, kein `scan_offset`);
-   der zeitbasierte Lebenszyklus dafür ist der nächste Schritt.
-
-Mit dem Höhenfix, dem Geister-Fix und synchronen Scans läuft die Szene über die
-vollen 240 s mit exakt acht Track-IDs und nie mehr als acht Tracks pro Frame.
+Mit dem Höhenfix, dem Geister-Fix und dem adaptiven Lebenszyklus läuft die
+Szene — jetzt mit den realistischen, versetzten Radar-Scanzeiten
+(`scan_offset = 0 / 1.3 / 2.6 s`) — über die vollen 240 s mit exakt acht
+Track-IDs und nie mehr als acht Tracks pro Frame.
 
 ---
 

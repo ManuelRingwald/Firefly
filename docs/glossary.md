@@ -163,6 +163,27 @@ wird. Verhindert, dass Falschalarme sofort als „echte" Flugzeuge erscheinen.
 Die Bestätigungsregel: Ein tentativer Track wird bestätigt, sobald er in den
 letzten **N** Scans mindestens **M** Treffer hatte (z. B. 3 aus 5).
 
+**Revisit-Intervall**
+Die Zeit zwischen zwei *Treffern* (echten Messungen) desselben Tracks. Bei
+einem einzelnen Radar ≈ dessen Scan-Periode (z. B. 4 s); sehen mehrere Radare
+dasselbe Ziel, ist es kürzer. Der adaptive Lebenszyklus (ADR 0012) schätzt das
+Revisit-Intervall pro Track per EWMA und zählt Bestätigungs-/Löschfenster in
+*Vielfachen* davon, statt in festen Scan-Aufrufen.
+
+**EWMA (*Exponentially Weighted Moving Average*)**
+Ein „gleitender Mittelwert mit Gedächtnis": der neue Wert geht mit einem festen
+Gewicht (z. B. 0,5) ein, der bisherige Mittelwert mit dem Rest. Reagiert
+schneller auf Änderungen als ein einfacher Durchschnitt über alle bisherigen
+Werte, glättet aber einzelne Ausreißer (z. B. einen verpassten Treffer).
+
+**Feed-Kadenz**
+Die vom Tracker beobachtete Grund-Taktung des gesamten Plot-Stroms — das
+Maximum aus der Lücke seit dem letzten Scan-Aufruf und der größten bekannten
+Scan-Periode eines einzelnen Sensors. Verhindert, dass die kurze Lücke
+*zwischen* zwei versetzt scannenden Radaren (ADR 0012) als „überfällige
+Wiederkehr" eines Tracks missverstanden wird, der nur von einem der beiden
+gesehen wird.
+
 **Gating**
 Bevor man fragt „Welcher Plot gehört zu welchem Track?", grenzt man den
 Suchbereich ein: Nur Plots in einem plausiblen Fenster um die Vorhersage kommen

@@ -19,6 +19,15 @@ use serde::{Deserialize, Serialize};
 use crate::imm::Imm;
 use crate::kalman::LinearKalman;
 
+/// EWMA weight for the per-track revisit-interval estimate: how strongly the
+/// latest inter-hit gap pulls the running estimate. `0.5` adapts within a couple
+/// of revisits while smoothing single missed detections.
+const REVISIT_EWMA: f64 = 0.5;
+
+/// Upper bound on remembered hit times — the confirmation window never needs
+/// more than a handful, so a small cap keeps the per-track state bounded.
+const MAX_RECENT_HITS: usize = 16;
+
 /// Lifecycle status of a track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TrackStatus {
@@ -42,11 +51,17 @@ pub struct Track {
     /// Data time of the last *real* measurement (hit), seconds. Drives the
     /// update age — how long the track has been running on prediction alone.
     pub(crate) last_hit_time: f64,
-    /// Recent association outcomes (true = hit), capped to the confirmation
-    /// window; most recent at the back.
-    recent: Vec<bool>,
-    /// Consecutive misses since the last hit.
-    consecutive_misses: u32,
+    /// Data times of recent hits (most recent at the back), bounded. The
+    /// confirmation rule counts how many fall inside an adaptive time window
+    /// (ADR 0012) — asynchronous sensors deliver hits at irregular instants, so
+    /// a *time* window is robust where a fixed scan-count window is not.
+    recent_hits: Vec<f64>,
+    /// Estimated **revisit interval** (seconds): an EWMA of the data-time gaps
+    /// between this track's hits. With several asynchronous radars a track is
+    /// hit far more often than any single radar revisits, so this adapts the
+    /// lifecycle to *this* track's actual update cadence (ADR 0012). `0` until
+    /// the first inter-hit gap is seen.
+    revisit_interval: f64,
     /// Most recently reported Mode 3/A code ("squawk"), if any SSR-equipped
     /// plot has ever associated with this track. Sticky: a plot without an
     /// SSR reply (e.g. a primary-only detection) does not clear it.
@@ -70,8 +85,8 @@ impl Track {
             imm,
             last_time: time,
             last_hit_time: time, // the founding plot is a hit
-            recent: Vec::new(),
-            consecutive_misses: 0,
+            recent_hits: vec![time],
+            revisit_interval: 0.0,
             mode_3a: None,
             icao_address: None,
             contributing_sensors: BTreeSet::new(),
@@ -94,9 +109,9 @@ impl Track {
     }
 
     /// Whether the track is currently *coasting* — running on prediction alone
-    /// because its last association outcome was a miss (no fresh measurement).
+    /// because the most recent scan brought no fresh measurement for it.
     pub fn is_coasting(&self) -> bool {
-        self.consecutive_misses > 0
+        self.last_hit_time < self.last_time
     }
 
     /// Update age: data-time elapsed since the last real measurement, seconds.
@@ -121,28 +136,44 @@ impl Track {
         self.estimate().velocity()
     }
 
-    /// Record one association outcome, keeping only the last `window` of them.
-    pub(crate) fn observe(&mut self, hit: bool, window: usize) {
-        self.recent.push(hit);
-        if self.recent.len() > window {
-            let excess = self.recent.len() - window;
-            self.recent.drain(0..excess);
+    /// Record a hit at data time `time`: refresh the revisit-interval estimate
+    /// from the gap since the last hit and remember the hit time. Idempotent
+    /// within one scan — a second sensor hitting the same track at the same
+    /// `time` neither double-counts nor distorts the cadence estimate.
+    pub(crate) fn mark_hit(&mut self, time: f64) {
+        if time <= self.last_hit_time {
+            return;
         }
-        if hit {
-            self.consecutive_misses = 0;
+        let gap = time - self.last_hit_time;
+        // EWMA of inter-hit gaps; seed it with the first gap we ever see.
+        self.revisit_interval = if self.revisit_interval <= 0.0 {
+            gap
         } else {
-            self.consecutive_misses += 1;
+            REVISIT_EWMA * gap + (1.0 - REVISIT_EWMA) * self.revisit_interval
+        };
+        self.last_hit_time = time;
+        self.recent_hits.push(time);
+        if self.recent_hits.len() > MAX_RECENT_HITS {
+            let excess = self.recent_hits.len() - MAX_RECENT_HITS;
+            self.recent_hits.drain(0..excess);
         }
     }
 
-    /// Number of hits within the current window.
-    pub(crate) fn hits_in_window(&self) -> usize {
-        self.recent.iter().filter(|&&hit| hit).count()
+    /// The cadence the adaptive lifecycle windows are scaled by:
+    /// `max(revisit interval, feed cadence)`. The `max` keeps a track alive for
+    /// the larger of "several of *its own* revisits" and "several of the feed's
+    /// scan intervals", so neither a many-sensor feed (a young track whose
+    /// revisit estimate is still short) nor a slow replay deletes it early. The
+    /// `cadence` is supplied by the tracker (the slowest radar's scan period, or
+    /// the gap between scans when that is larger — ADR 0012).
+    pub(crate) fn coast_reference(&self, cadence: f64) -> f64 {
+        self.revisit_interval.max(cadence)
     }
 
-    /// Consecutive misses since the last hit.
-    pub(crate) fn consecutive_misses(&self) -> u32 {
-        self.consecutive_misses
+    /// How many recent hits fall within the last `window` seconds (up to `now`).
+    pub(crate) fn hits_within(&self, window: f64, now: f64) -> usize {
+        let cutoff = now - window;
+        self.recent_hits.iter().filter(|&&h| h >= cutoff).count()
     }
 
     /// Promote to confirmed.

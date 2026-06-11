@@ -6,33 +6,29 @@
 
 - **Zuletzt aktualisiert:** 2026-06-11
 - **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **M6.1-Nachtrag — Höhen-Projektionsfehler behoben +
-  Frankfurt realistischer.** `LocalFrame::horizontal_from` nimmt jetzt die
-  Zielhöhe und hebt den vollständigen 3D-Punkt in den Tracking-Frame (Projektion
-  erst dort) → sensor-unabhängig, kein Geister-Track beim späten Eintritt eines
-  hoch fliegenden Ziels in ein zweites Radar (FR-GEO-003, Regressionstest
-  `airborne_target_maps_to_one_point_from_two_sensors`; Tracker rekonstruiert
-  die Höhe am Naht-Punkt aus dem Polar-Plot). Frankfurt damit wieder mit
-  realistischen, überlappenden Reichweiten (Center 120 km, West/Nordost je
-  100 km) und `arrival_north` als echtem Handover auf 8 km Höhe — stabil bei
-  acht Tracks. (Davor: **M6.1 — Frankfurt-Showcase-Szene.**) Neue Funktionen
-  `frankfurt_player`/`frankfurt_frames`/`frankfurt_scans` in
-  `crates/firefly-server/src/scene.rs`: drei Radare (Center/West/Nordost) mit
-  überlappender Reichweite und acht Flugzeuge — JPDA-Nahpaar (zwei
-  West-Anflüge ~150 m parallel), IMM-Manöver (kurvender Abflug), SSR- und
-  primary-only-Überflug, Warteschleife, Multi-Radar-Nordanflug. Über die
-  vollen 240 s genau acht Track-IDs, nie mehr als acht Tracks/Frame
-  (`frankfurt_scene_is_non_trivial`,
-  `frankfurt_scene_keeps_one_identity_per_aircraft`). Szenenauswahl per
-  12-Factor: neues `Scene`-Enum (`Demo`/`Frankfurt`) und
-  `FIREFLY_SCENE=frankfurt` in `firefly-server::config`, verdrahtet in
-  `main.rs` für WebSocket *und* CAT062-Multicast. Tuning-Trade-offs (Radar-
-  Reichweiten/Positionierung gegen Höhen-Projektionsfehler, synchrone Scans
-  statt `scan_offset`, Gate auf 0,999 geweitet) ehrlich dokumentiert in
-  `docs/milestones/M6-showcase.md`; zwei neue Folge-Themen unter „Offene
-  Punkte" (Höhen-Projektionsfehler in `horizontal_from`, Instabilität bei
-  asynchronen Radar-Scans). **Als Nächstes:** M6.2 (OSM-Hintergrundkarte),
-  M6.3 (Roh-Plot-Ebene), M6.4 (Container-Setup) — jeweils mit eigenem Go.
+- **Letzter Commit:** **M6.1-Nachträge — Multi-Radar-Geister behoben (ADR 0011)
+  + adaptiver Track-Lebenszyklus für asynchrone Radare (ADR 0012).**
+  Die zwei verbliebenen Geister-Spuren der Frankfurt-Szene waren
+  Fusions-Artefakte (kein IMM-Manöver): (a) sequenzielle Tor-Verengung —
+  Sensor A faltet seinen Plot ein, das Tor wird enger, Sensor Bs Plot (selbes
+  Flugzeug) fällt heraus → Duplikat-Track; (b) ein 3σ-Ausreißer-Plot gebärt
+  sofort einen eigenen Track. **Behoben** durch eine zu Scan-Beginn
+  eingefrorene, gemeinsame Fusions-Referenz (alle Sensoren gaten/assoziieren
+  gegen die Prädiktion, nicht den schon aktualisierten Live-Track) plus ein
+  getrenntes, weiteres Initiierungs-Sperr-Tor `init_gate` (Default `0,9999`,
+  FR-TRK-020). Frankfurt läuft wieder mit Standard-Tor `0,99` und acht Tracks.
+  Danach der **adaptive Lebenszyklus** (FR-TRK-021): Bestätigung/Löschung
+  zählen nicht mehr Scan-*Aufrufe*, sondern `coast_reference = max(revisit_interval,
+  cadence)` Sekunden — `revisit_interval` ist ein EWMA der Treffer-Zeitlücken
+  je Track, `cadence` die vom Tracker geschätzte Feed-Taktung. Damit läuft die
+  Frankfurt-Szene jetzt dauerhaft mit **versetzten Radar-Scanzeiten**
+  (`scan_offset = 0 / 1.3 / 2.6 s`) bei weiterhin **acht** stabilen Track-IDs
+  statt der zuvor beobachteten 28–90. Ein Bootstrap-Sonderfall (`cadence = ∞`,
+  solange keine Sensor-Periode bekannt ist) verhindert, dass ein im ersten
+  Augenblick geborener Track gelöscht wird, bevor sein eigener Sensor erneut
+  scannt. NFR-CLOUD-004 bleibt grün (`timing::*`). Details: ADR 0011, ADR 0012.
+  **Als Nächstes:** M6.2 (OSM-Hintergrundkarte), M6.3 (Roh-Plot-Ebene), M6.4
+  (Container-Setup) — jeweils mit eigenem Go.
 - **PR:** keiner offen.
 
 ---
@@ -489,15 +485,20 @@ sind und die Anforderung im Register rückverfolgbar steht.
   Test `tracker::outlier_plot_does_not_spawn_a_ghost`. Frankfurt läuft damit
   wieder mit dem Standard-Tor `0,99` und acht Tracks.
 - **Instabilität bei asynchronen Radar-Scans (`scan_offset`, M6.1-Befund —
-  Ursache analysiert, Fix als Nächstes):** In der dichten 8-Flugzeug/3-Radar-Szene
-  führte ein Scan-Versatz zu massiver Track-ID-Instabilität (50–90 statt 8 IDs).
-  **Ursache:** Der Lebenszyklus bucht Treffer/Fehltreffer **pro
+  BEHOBEN, ADR 0012):** In der dichten 8-Flugzeug/3-Radar-Szene führte ein
+  Scan-Versatz zu massiver Track-ID-Instabilität (50–90 statt 8 IDs).
+  **Ursache:** Der Lebenszyklus buchte Treffer/Fehltreffer **pro
   `process_scan`-Aufruf**; `Player::scans` gruppiert Plots nach exakt gleicher
-  Zeit, also trägt mit Versatz jeder Aufruf nur **einen** Sensor — ein Flugzeug,
-  das gerade nur Radar B sieht, kassiert beim Offset-Scan von Radar A einen
-  falschen „Miss" → Löschung → Respawn. **Geplanter Fix (gewählt):** ein
-  **zeitbasierter Lebenszyklus** (Löschung bei `t − last_hit_time > Timeout`,
-  Bestätigung über ein Zeitfenster) — *S4, Opus 4.8/Fable 5*.
+  Zeit, also trug mit Versatz jeder Aufruf nur **einen** Sensor bei — ein
+  Flugzeug, das gerade nur Radar B sieht, kassierte beim Offset-Scan von Radar A
+  einen falschen „Miss" → Löschung → Respawn. **Behoben:** der **adaptive
+  Lebenszyklus** (FR-TRK-021) zählt Bestätigung/Löschung in
+  `coast_reference = max(revisit_interval, cadence)` Sekunden statt in
+  Scan-Aufrufen — `revisit_interval` (EWMA der Treffer-Zeitlücken je Track) und
+  `cadence` (geschätzte Feed-Taktung) wachsen auf die wahre Sensor-Periode, ein
+  einzelner kurzer Versatz zwischen zwei Radaren zählt nicht als verpasste
+  Wiederkehr. Frankfurt läuft jetzt dauerhaft mit `scan_offset = 0/1.3/2.6 s`
+  und genau acht Track-IDs (`scene::frankfurt_scene_keeps_one_identity_per_aircraft`).
 
 ## 6. So steige ich wieder ein (Kurzbefehle)
 

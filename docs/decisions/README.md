@@ -25,3 +25,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0009 — Frontend-Architektur M3 (Async-Server, WebSocket, JSON, MapLibre)](0009-frontend-architektur-m3.md)
 - [0010 — Multi-Radar-Fusions-Architektur M4 (zentrale Mess-Fusion)](0010-multi-radar-fusion-architektur-m4.md)
 - [0011 — Gemeinsame Scan-Referenz & getrenntes Initiierungs-Tor gegen Geister-Tracks](0011-scan-fusion-referenz-und-initiierungs-tor.md)
+- [0012 — Adaptiver Track-Lebenszyklus (Revisit-Intervall × Feed-Kadenz)](0012-adaptiver-track-lebenszyklus.md)

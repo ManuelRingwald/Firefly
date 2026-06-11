@@ -119,6 +119,7 @@ fn frankfurt_player() -> Player {
         Sensor::new(SensorId(1), site_center),
         RadarParams {
             max_range: 120_000.0,
+            scan_offset: 0.0,
             ..RadarParams::default()
         },
     );
@@ -126,6 +127,7 @@ fn frankfurt_player() -> Player {
         Sensor::new(SensorId(2), site_west),
         RadarParams {
             max_range: 100_000.0,
+            scan_offset: 1.3,
             ..RadarParams::default()
         },
     );
@@ -133,6 +135,7 @@ fn frankfurt_player() -> Player {
         Sensor::new(SensorId(3), site_northeast),
         RadarParams {
             max_range: 100_000.0,
+            scan_offset: 2.6,
             ..RadarParams::default()
         },
     );

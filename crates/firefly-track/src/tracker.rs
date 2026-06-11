@@ -4,19 +4,22 @@
 //! transition. The order matters:
 //!
 //! 1. **Predict** every existing track to the scan time.
-//! 2. **Convert** each plot to a Cartesian measurement (Häppchen 2.1).
-//! 3. **Associate** predicted tracks with measurements (gating + GNN, 2.3/2.4).
-//! 4. **Update** associated tracks (a *hit*); **coast** the rest (a *miss*).
-//! 5. **Confirm** tentative tracks that reach M-of-N hits.
-//! 6. **Delete** tracks that have missed too often.
-//! 7. **Initiate** a new tentative track from each unassociated plot.
+//! 2. **Convert** each plot to a Cartesian measurement (Häppchen 2.1) and
+//!    refresh the feed-cadence estimate (ADR 0012).
+//! 3. **Associate** predicted tracks with measurements (JPDA, Häppchen
+//!    M5.5–M5.9): **update** associated tracks (a *hit*) and **initiate** a
+//!    new tentative track from each unassociated plot.
+//! 4. **Confirm** tentative tracks that reach M-of-N hits within an adaptive
+//!    time window (ADR 0012).
+//! 5. **Delete** tracks that have coasted past their missed-revisit budget
+//!    (ADR 0012).
 //!
 //! Determinism (ADR 0003): [`Tracker::process_scan`] is a pure function of the
 //! current state, the scan time and the plots — no wall clock, no I/O — so the
 //! whole run is replayable and the state is recoverable. The state
 //! ([`Track`] list) is plain, serialisable data (NFR-CLOUD-001/002/003).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use firefly_core::{Plot, SensorId, SystemTrack, Timestamp, TrackId};
 use firefly_geo::{Enu, LocalFrame};
@@ -137,6 +140,16 @@ pub struct Tracker {
     config: TrackerConfig,
     tracks: Vec<Track>,
     next_id: u32,
+    /// Data time of the previous scan, for the inter-scan gap (ADR 0012).
+    prev_scan_time: Option<f64>,
+    /// Last data time each sensor delivered plots, to estimate its scan period.
+    sensor_last_scan: BTreeMap<SensorId, f64>,
+    /// Most recently observed scan period (seconds) per sensor. The slowest of
+    /// these — or the inter-scan gap, whichever is larger — is the feed
+    /// *cadence* that scales the adaptive lifecycle windows, so an asynchronous
+    /// feed (small gaps between sensors, but each sensor revisiting every few
+    /// seconds) keeps tracks alive across a single sensor's revisit.
+    sensor_period: BTreeMap<SensorId, f64>,
 }
 
 impl Tracker {
@@ -145,6 +158,9 @@ impl Tracker {
             config,
             tracks: Vec::new(),
             next_id: 1,
+            prev_scan_time: None,
+            sensor_last_scan: BTreeMap::new(),
+            sensor_period: BTreeMap::new(),
         }
     }
 
@@ -271,6 +287,39 @@ impl Tracker {
             }
         }
 
+        // 2b. Refresh the feed-cadence estimate that the adaptive lifecycle
+        //     (ADR 0012) scales its coast/confirm windows by: the larger of the
+        //     slowest sensor's scan period and the gap since the previous scan.
+        //     Capture the inter-scan gap first, then fold in this scan's
+        //     per-sensor periods, so a single async radar revisiting every few
+        //     seconds (not the much shorter gap between *different* sensors)
+        //     governs how long a track may coast.
+        let inter_scan = self.prev_scan_time.map_or(0.0, |p| t - p);
+        for &sensor in by_sensor.keys() {
+            if let Some(&last) = self.sensor_last_scan.get(&sensor) {
+                let period = t - last;
+                if period > 0.0 {
+                    self.sensor_period.insert(sensor, period);
+                }
+            }
+            self.sensor_last_scan.insert(sensor, t);
+        }
+        // Bootstrap: a scan that brings plots before *any* sensor has completed
+        // a second scan gives no basis for a cadence estimate — `inter_scan`
+        // may just be the (much shorter) gap between two *different*
+        // asynchronous sensors' first scans, not a missed revisit. Treat the
+        // cadence as unbounded in that case, so a track born in this window
+        // isn't deleted before its founding sensor even gets a chance to
+        // revisit it. A scan with no plots at all (pure coasting) is not part
+        // of this bootstrap window — it falls back to the inter-scan gap, as
+        // before.
+        let cadence = if !by_sensor.is_empty() && self.sensor_period.is_empty() {
+            f64::INFINITY
+        } else {
+            inter_scan.max(self.sensor_period.values().copied().fold(0.0, f64::max))
+        };
+        self.prev_scan_time = Some(t);
+
         // 3. Associate & update each sensor in turn with JPDA (Häppchen
         //    M5.5–M5.9): every track folds in *all* its gated plots at once via
         //    `Imm::update_pda`, weighted by joint association probabilities `β`
@@ -288,7 +337,11 @@ impl Tracker {
         //    spawn a duplicate ("ghost"). Freezing the reference removes that
         //    sequential tightening. State fusion stays sequential, which for
         //    independent measurements yields the same joint posterior.
-        let mut hit_ids: BTreeSet<TrackId> = BTreeSet::new();
+        //
+        //    Hits are recorded on the track immediately (`mark_hit`), which also
+        //    refreshes its revisit-interval estimate; the lifecycle (steps 4–5)
+        //    then reads those times. There is no per-scan miss booking — a miss
+        //    is simply the absence of a hit, measured by the update age.
         // `reference[k]` is the gating/association estimate for `self.tracks[k]`:
         // the scan-start prediction for tracks that existed then (frozen for the
         // whole scan), or the fresh estimate of a track initiated *during* this
@@ -325,12 +378,11 @@ impl Tracker {
                 self.tracks[ti]
                     .imm
                     .update_pda(&gated_measurements, &gated_betas);
-                self.tracks[ti].last_hit_time = t;
+                self.tracks[ti].mark_hit(t);
                 self.tracks[ti].record_hit_from(sensor);
                 if let Some((mi, _)) = best {
                     self.tracks[ti].update_identity(&items[mi].0.mode_ac);
                 }
-                hit_ids.insert(self.tracks[ti].id());
             }
 
             // Initiate a new tentative track from each plot that fell in *no*
@@ -362,36 +414,52 @@ impl Tracker {
                 track.record_hit_from(sensor);
                 newborn.push(track.estimate());
                 self.tracks.push(track);
-                hit_ids.insert(id);
             }
             reference.extend(newborn);
         }
 
-        // 4. Book one hit/miss per track for this scan, then run the lifecycle.
+        // 4. Confirm tentative tracks that have collected `confirm_m` hits within
+        //    the last `confirm_n` revisit intervals (ADR 0012). The window is a
+        //    *time* span scaled by each track's own cadence, so confirmation is
+        //    robust whether one radar revisits every few seconds or several
+        //    asynchronous radars deliver hits far more often.
         for track in &mut self.tracks {
-            track.observe(hit_ids.contains(&track.id()), confirm_n);
-        }
-
-        // 5. Confirm tentative tracks that have reached M-of-N.
-        for track in &mut self.tracks {
-            if track.status() == TrackStatus::Tentative && track.hits_in_window() >= confirm_m {
-                track.confirm();
+            if track.status() == TrackStatus::Tentative {
+                let window = confirm_n as f64 * track.coast_reference(cadence);
+                if track.hits_within(window, t) >= confirm_m {
+                    track.confirm();
+                }
             }
         }
 
-        // 6. Delete tracks that have missed too often.
+        // 5. Delete tracks that have coasted past their allowed number of missed
+        //    revisits (ADR 0012): `update_age > budget · max(revisit, scan dt)`.
+        //    Measuring the budget in *revisit intervals* (not raw seconds) keeps
+        //    deletion governed by how many updates were missed, independent of
+        //    the feed's absolute pace (NFR-CLOUD-004), while tolerating the
+        //    interleaved misses an asynchronous multi-radar feed produces.
         self.tracks
-            .retain(|track| !should_delete(track, delete_tentative, delete_confirmed));
+            .retain(|track| !should_delete(track, delete_tentative, delete_confirmed, cadence));
     }
 }
 
-/// Whether a track has missed often enough to be deleted, given its status.
-fn should_delete(track: &Track, delete_tentative: u32, delete_confirmed: u32) -> bool {
-    let limit = match track.status() {
-        TrackStatus::Tentative => delete_tentative,
-        TrackStatus::Confirmed => delete_confirmed,
-    };
-    track.consecutive_misses() >= limit
+/// Whether a track has coasted past its missed-revisit budget, given its status.
+///
+/// The budget counts *missed revisit intervals*; the interval is the track's
+/// adaptive [`coast_reference`](Track::coast_reference). A freshly hit track
+/// (`update_age == 0`) is never deleted, even before any cadence is known.
+fn should_delete(
+    track: &Track,
+    budget_tentative: u32,
+    budget_confirmed: u32,
+    cadence: f64,
+) -> bool {
+    let budget = match track.status() {
+        TrackStatus::Tentative => budget_tentative,
+        TrackStatus::Confirmed => budget_confirmed,
+    } as f64;
+    let age = track.update_age();
+    age > 0.0 && age >= budget * track.coast_reference(cadence)
 }
 
 #[cfg(test)]
