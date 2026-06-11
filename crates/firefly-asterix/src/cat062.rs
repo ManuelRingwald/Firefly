@@ -553,6 +553,20 @@ fn decode_cartesian_component(bytes: &[u8]) -> f64 {
     ticks as f64 * POSITION_CARTESIAN_LSB_METRES
 }
 
+/// Recover the geodetic position that I062/100's `cartesian` (X, Y in
+/// metres) encodes — the inverse of the projection
+/// [`encode_position_cartesian`] applies. `height` is carried through
+/// unchanged (the projection is purely horizontal); I062/100 itself carries
+/// no height, so callers typically pass `0.0` or the height decoded from
+/// I062/105.
+pub fn unproject_cartesian_position(
+    cartesian: (f64, f64),
+    height: f64,
+    projection: &StereographicProjection,
+) -> Wgs84 {
+    projection.unproject(cartesian.0, cartesian.1, height)
+}
+
 /// I062/185 — the inverse of [`encode_velocity`].
 fn decode_velocity(bytes: &[u8]) -> (f64, f64) {
     (
@@ -1067,6 +1081,42 @@ mod tests {
         let block = encoder.encode(Timestamp(0.0), &[]);
 
         assert_eq!(decode_data_block(&block).unwrap(), vec![]);
+    }
+
+    /// I062/100's `(0, 0)` — the plane origin — unprojects back to the system
+    /// reference point itself. REQ: FR-IO-004, FR-GEO-004
+    #[test]
+    fn cartesian_origin_unprojects_to_reference_point() {
+        let reference = system_reference_point();
+        let projection = StereographicProjection::new(reference);
+
+        let recovered = unproject_cartesian_position((0.0, 0.0), 0.0, &projection);
+        assert!((recovered.lat_deg() - reference.lat_deg()).abs() < 1e-9);
+        assert!((recovered.lon_deg() - reference.lon_deg()).abs() < 1e-9);
+    }
+
+    /// I062/100 and I062/105 are two independent encodings of the same
+    /// position; decoding both and unprojecting I062/100 recovers a position
+    /// that agrees with I062/105 to within both items' LSBs (sub-metre).
+    /// REQ: FR-IO-004, FR-GEO-004
+    #[test]
+    fn position_cartesian_unprojects_close_to_position_wgs84() {
+        let reference = system_reference_point();
+        let projection = StereographicProjection::new(reference);
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), reference);
+
+        let block = encoder.encode(Timestamp(0.0), &[track_at(1, 45.01, 11.26, 0.0, 0.0)]);
+        let record = &decode_data_block(&block).unwrap()[0];
+
+        let from_cartesian =
+            unproject_cartesian_position(record.cartesian, record.position.height, &projection);
+
+        // Compare in the projection plane (metres), where both items' LSBs
+        // (0.5 m for I062/100, ~0.6 m for I062/105 at this latitude) live.
+        let (x1, y1) = projection.project(record.position);
+        let (x2, y2) = projection.project(from_cartesian);
+        assert!((x1 - x2).abs() < 1.0, "x within 1 m: {x1} vs {x2}");
+        assert!((y1 - y2).abs() < 1.0, "y within 1 m: {y1} vs {y2}");
     }
 
     /// Decoding rejects input that isn't a CAT062 block, whose LEN doesn't

@@ -35,4 +35,7 @@
 mod cat062;
 mod fspec;
 
-pub use cat062::{decode_data_block, Cat062Encoder, DataSourceId, DecodeError, DecodedRecord};
+pub use cat062::{
+    decode_data_block, unproject_cartesian_position, Cat062Encoder, DataSourceId, DecodeError,
+    DecodedRecord,
+};
