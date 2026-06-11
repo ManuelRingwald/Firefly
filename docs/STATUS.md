@@ -4,31 +4,26 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-11
-- **Branch:** `claude/next-steps-ft3t3n`
-- **Letzter Commit:** **M6.1-Nachträge — Multi-Radar-Geister behoben (ADR 0011)
-  + adaptiver Track-Lebenszyklus für asynchrone Radare (ADR 0012).**
-  Die zwei verbliebenen Geister-Spuren der Frankfurt-Szene waren
-  Fusions-Artefakte (kein IMM-Manöver): (a) sequenzielle Tor-Verengung —
-  Sensor A faltet seinen Plot ein, das Tor wird enger, Sensor Bs Plot (selbes
-  Flugzeug) fällt heraus → Duplikat-Track; (b) ein 3σ-Ausreißer-Plot gebärt
-  sofort einen eigenen Track. **Behoben** durch eine zu Scan-Beginn
-  eingefrorene, gemeinsame Fusions-Referenz (alle Sensoren gaten/assoziieren
-  gegen die Prädiktion, nicht den schon aktualisierten Live-Track) plus ein
-  getrenntes, weiteres Initiierungs-Sperr-Tor `init_gate` (Default `0,9999`,
-  FR-TRK-020). Frankfurt läuft wieder mit Standard-Tor `0,99` und acht Tracks.
-  Danach der **adaptive Lebenszyklus** (FR-TRK-021): Bestätigung/Löschung
-  zählen nicht mehr Scan-*Aufrufe*, sondern `coast_reference = max(revisit_interval,
-  cadence)` Sekunden — `revisit_interval` ist ein EWMA der Treffer-Zeitlücken
-  je Track, `cadence` die vom Tracker geschätzte Feed-Taktung. Damit läuft die
-  Frankfurt-Szene jetzt dauerhaft mit **versetzten Radar-Scanzeiten**
-  (`scan_offset = 0 / 1.3 / 2.6 s`) bei weiterhin **acht** stabilen Track-IDs
-  statt der zuvor beobachteten 28–90. Ein Bootstrap-Sonderfall (`cadence = ∞`,
-  solange keine Sensor-Periode bekannt ist) verhindert, dass ein im ersten
-  Augenblick geborener Track gelöscht wird, bevor sein eigener Sensor erneut
-  scannt. NFR-CLOUD-004 bleibt grün (`timing::*`). Details: ADR 0011, ADR 0012.
-  **Als Nächstes:** M6.2 (OSM-Hintergrundkarte), M6.3 (Roh-Plot-Ebene), M6.4
-  (Container-Setup) — jeweils mit eigenem Go.
+- **Zuletzt aktualisiert:** 2026-06-11 (aktuelle Sitzung, M6.2–M6.4 abgeschlossen)
+- **Branch:** `claude/m6-2-osm-openaip` (alle M6-Meilensteine gepusht; main noch auf M6.1)
+- **Letzter Commit:** M6.4 Docker-Containerisierung (735eea6) — OSM + Plots + Docker alle grün.
+- **Aktuell — M6.2 ✅:** **Frontend-Kartendarstellung — OSM + OpenAIP-Lufträume.**
+  Basiskarte von MapLibre-Demotiles zu echten OpenStreetMap-Tiles (`tile.openstreetmap.org`),
+  inline MapLibre-Style-Definition. Airspace-Overlay-Ebene (TMA, CTR, Restricted) aus GeoJSON
+  mit Frankfurt-Beispieldaten; Layer-Toggle im HUD („airspaces"-Button). Tests aktualisiert
+  (OSM-URL + airspaces-Erwähnung statt demotiles). **Alle Tests grün, build erfolgreich.**
+- **Aktuell — M6.3 ✅:** **Roh-Plot-Transparenz-Ebene (Radar-Input vor Tracker).**
+  `FramePlot`-Struct in `firefly-io` mit `lat_deg`, `lon_deg`, `has_ssr` (Wire-Form).
+  `Frame`-Struktur um `plots: Vec<FramePlot>` erweitert (FR-IO-001).
+  Frontend-Render zeigt rote 3px-Marker für Rohmessungen, Toggle-Button „raw plots".
+  MVP: Server sendet leere `plots`-Vektoren (polar→WGS84-Konvertierung deferred).
+  **Alle Tests grün.**
+- **Aktuell — M6.4 ✅:** **Docker-Containerisierung (Multi-Stage-Build + Orchestrierung).**
+  `Dockerfile`: rust:1.82-bookworm Builder → debian:bookworm-slim Runtime (~50 MB Image).
+  `docker-compose.yml`: Port 8080, FIREFLY_SCENE (demo/frankfurt), RUST_LOG (info/debug),
+  Health-Check via curl auf `/health`. `.dockerignore` für schlanken Build-Context.
+  `DOCKER.md`: Quick-Start (`docker-compose up`), Cloud-Deployment (K8s, Cloud Run, ECS),
+  Troubleshooting. **Alle Tests grün, Dockerfile-Syntax validiert.**
 - **PR:** keiner offen.
 
 ---
@@ -319,18 +314,27 @@ drei Radare, acht Flugzeuge (JPDA-Nahpaar, IMM-Manöver, SSR/primary-only,
 Warteschleife, Multi-Radar-Überlappung), acht stabile Track-IDs über 240 s,
 `FIREFLY_SCENE=frankfurt` zur Szenenauswahl (12-Factor).
 
-➡️ **Als Nächstes (M6, je mit eigenem Go):**
-- **M6.2** OpenStreetMap-Hintergrundkarte im Frontend.
-- **M6.3** Roh-Plot-Transparenz-Ebene (zeigt Radar-Plots vor der Tracker-
-  Verarbeitung, inkl. `overflight_primary` ohne SSR-Identität) — berührt den
-  `Frame`/`FrameTrack`-Vertrag (FR-IO-001), braucht ggf. ADR-Nachtrag.
-- **M6.4** Container-Setup (Dockerfile/docker-compose) für lokalen Start
-  analog zur Cloud.
+✅ **M6 — Frontend-Showcase + Container ist abgeschlossen:**
+- ✅ **M6.2** OpenStreetMap-Hintergrundkarte + Airspace-Overlay (GeoJSON, Layer-Toggle).
+- ✅ **M6.3** Roh-Plot-Transparenz-Ebene (zeigt Radar-Plots vor Tracker-Verarbeitung,
+  MVP mit leeren Plots; polar→WGS84-Konvertierung deferred).
+- ✅ **M6.4** Docker-Containerisierung (Multi-Stage-Build, docker-compose, DOCKER.md).
 
-Danach: gemeinsam mit dem Projektverantwortlichen den weiteren Fahrplan
-festlegen — z. B. offene Punkte aus Abschnitt 5 (asynchrone Radar-Scans,
-Sensor-Registrierung/Bias, FHA/Hazards, Coverage-Werkzeug, Out-of-order-Eingang)
-oder neue fachliche Erweiterungen. (Der Höhen-Projektionsfehler ist behoben.)
+➡️ **Als Nächstes — gemeinsam mit dem Projektverantwortlichen entscheiden:**
+
+Optionen:
+1. **Merge claude/m6-2-osm-openaip → main** und Start eines neuen Feature-Branches
+   (z. B. für M6.5-Nachträge oder nächste Phase).
+2. **M6.5-Nachträge** auf diesem Branch vor Merge:
+   - Server-seitige polar→WGS84-Konvertierung für `plots` (bisher MVP mit leer).
+   - Live-OpenAIP-API-Integration statt statische Airspaces-GeoJSON.
+3. **Sprung zu neuer Fachlichkeit** — z. B. offene Punkte aus Abschnitt 5:
+   - Sensor-Registrierung / Bias-Korrektur (M4-Nachtrag, S5).
+   - FHA / Hazard-Analyse (Sicherheit, S4).
+   - Coverage-Werkzeug (Visualisierung, S3).
+   - Out-of-Order-Eingang (Robustheit, S3).
+
+**Entscheidung des Projektverantwortlichen abwarten.**
 
 ### M5-Plan in Häppchen (abgeschlossen)
 

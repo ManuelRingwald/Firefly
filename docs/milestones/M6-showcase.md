@@ -129,9 +129,21 @@ Track-IDs und nie mehr als acht Tracks pro Frame.
 
 ---
 
+## M6.2 — OpenStreetMap + Lufträume-Overlay (erledigt)
+
+Die Kartendarstellung nutzt jetzt **echte OpenStreetMap-Tiles** statt der
+MapLibre-Demo-Kacheln, mit inline MapLibre-Style (schneller, wartbarer). Neue
+**Airspace-Overlay-Ebene** für Lufträume (TMA, CTR, Restricted Areas) mit
+GeoJSON-Quelle (`/airspaces.geojson`); der Nutzer kann die Layer mit einem
+Button im HUD umschalten. Beispiel-Lufträume für Frankfurt sind in der
+statischen `airspaces.geojson` definiert. Die echte Integration mit der
+OpenAIP-API (für live Luftraumdaten) bleibt ein zukünftiger Schritt (M6.3 oder
+später).
+
+---
+
 ## Ausblick
 
-- **M6.2** — OpenStreetMap als Hintergrundkarte (statt der MapLibre-Demo-Kacheln).
 - **M6.3** — Roh-Plot-Transparenz-Ebene: zeigt im Frontend zusätzlich die
   Radar-Plots, *bevor* sie der Tracker zu Tracks verarbeitet — inkl. des
   primary-only-Überflugs (`overflight_primary`), der nie eine SSR-Identität
