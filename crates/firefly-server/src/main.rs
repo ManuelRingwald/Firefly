@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use firefly_asterix::Cat062Encoder;
 use firefly_multicast::MulticastConfig;
-use firefly_server::{router, scene, AppState, ServerConfig};
+use firefly_server::{router, scene, AppState, Scene, ServerConfig};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -13,15 +13,19 @@ async fn main() {
     init_tracing();
 
     let config = ServerConfig::from_env();
-    let frames = scene::demo_frames();
+    let frames = match config.scene {
+        Scene::Demo => scene::demo_frames(),
+        Scene::Frankfurt => scene::frankfurt_frames(),
+    };
     tracing::info!(
         port = config.port,
         speed = config.speed,
+        scene = ?config.scene,
         frames = frames.len(),
         "starting Firefly server"
     );
 
-    spawn_cat062_multicast(config.speed);
+    spawn_cat062_multicast(config.speed, config.scene);
 
     let state = AppState {
         frames: Arc::new(frames),
@@ -51,11 +55,11 @@ async fn main() {
 }
 
 /// Spawn the CAT062 UDP-multicast feed alongside the web server, if enabled
-/// (`FIREFLY_CAT062_ENABLED=true`). It replays the same demo scan stream the
-/// web map shows — encoded as CAT062 and sent to the configured multicast group
-/// — paced into wall-clock at the same `speed` (ADR 0006). Disabled by default,
+/// (`FIREFLY_CAT062_ENABLED=true`). It replays the same scan stream the web
+/// map shows — encoded as CAT062 and sent to the configured multicast group —
+/// paced into wall-clock at the same `speed` (ADR 0006). Disabled by default,
 /// so a plain `cargo run` never emits surprise network traffic.
-fn spawn_cat062_multicast(speed: f64) {
+fn spawn_cat062_multicast(speed: f64, scene: Scene) {
     let config = MulticastConfig::from_env();
     if !config.enabled {
         tracing::info!(
@@ -66,7 +70,10 @@ fn spawn_cat062_multicast(speed: f64) {
 
     let destination = config.destination();
     let encoder = Cat062Encoder::new(config.data_source(), config.reference_point);
-    let scans = scene::demo_scans();
+    let scans = match scene {
+        Scene::Demo => scene::demo_scans(),
+        Scene::Frankfurt => scene::frankfurt_scans(),
+    };
     tracing::info!(%destination, scans = scans.len(), "CAT062 multicast feed enabled");
 
     tokio::spawn(async move {

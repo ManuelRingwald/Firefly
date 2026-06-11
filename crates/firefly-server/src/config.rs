@@ -5,6 +5,17 @@
 //! NFR-OPS-001 one-command demo). Parsing is split from the environment lookup
 //! so it can be tested without touching the real process environment.
 
+/// Which built-in scene the server replays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Scene {
+    /// The small two-aircraft, one-radar demo (see [`crate::scene::demo_frames`]).
+    #[default]
+    Demo,
+    /// The Frankfurt showcase: three radars, eight aircraft (see
+    /// [`crate::scene::frankfurt_frames`]).
+    Frankfurt,
+}
+
 /// Startup configuration.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ServerConfig {
@@ -14,6 +25,10 @@ pub struct ServerConfig {
     /// default `1.0`. `2.0` plays twice as fast. Clamped to be finite and
     /// strictly positive so the pacing maths can never divide by zero.
     pub speed: f64,
+    /// Which scene to replay. `FIREFLY_SCENE`, `"demo"` (default) or
+    /// `"frankfurt"`. An unrecognised value falls back to the default rather
+    /// than stopping the demo from starting.
+    pub scene: Scene,
 }
 
 impl Default for ServerConfig {
@@ -21,6 +36,7 @@ impl Default for ServerConfig {
         Self {
             port: 8080,
             speed: 1.0,
+            scene: Scene::default(),
         }
     }
 }
@@ -44,7 +60,11 @@ impl ServerConfig {
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|s| s.is_finite() && *s > 0.0)
             .unwrap_or(default.speed);
-        Self { port, speed }
+        let scene = match get("FIREFLY_SCENE").as_deref() {
+            Some("frankfurt") => Scene::Frankfurt,
+            _ => default.scene,
+        };
+        Self { port, speed, scene }
     }
 }
 
@@ -69,6 +89,22 @@ mod tests {
         });
         assert_eq!(config.port, 9000);
         assert!((config.speed - 4.0).abs() < 1e-12);
+    }
+
+    /// `FIREFLY_SCENE=frankfurt` selects the Frankfurt showcase; anything else
+    /// (including an unset or unrecognised value) falls back to the demo.
+    #[test]
+    fn scene_selects_frankfurt_or_falls_back_to_demo() {
+        let frankfurt =
+            ServerConfig::from_lookup(|key| (key == "FIREFLY_SCENE").then(|| "frankfurt".into()));
+        assert_eq!(frankfurt.scene, Scene::Frankfurt);
+
+        let unset = ServerConfig::from_lookup(|_| None);
+        assert_eq!(unset.scene, Scene::Demo);
+
+        let garbage =
+            ServerConfig::from_lookup(|key| (key == "FIREFLY_SCENE").then(|| "atlantis".into()));
+        assert_eq!(garbage.scene, Scene::Demo);
     }
 
     /// Garbage and non-positive speeds fall back to the defaults rather than

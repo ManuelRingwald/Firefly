@@ -22,7 +22,7 @@ pub mod pacing;
 pub mod scene;
 
 pub use app::{router, AppState};
-pub use config::ServerConfig;
+pub use config::{Scene, ServerConfig};
 pub use firefly_io::Frame;
 
 use tokio::net::TcpListener;
