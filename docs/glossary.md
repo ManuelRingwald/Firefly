@@ -217,7 +217,16 @@ positiv definit) — wichtig für verlässliche, prüfbare Numerik.
 Die Annahme darüber, *wie* ein Ziel sich bewegt:
 - **CV** (*Constant Velocity*): gleichförmig geradeaus.
 - **CA** (*Constant Acceleration*): gleichmäßig beschleunigend.
-- **CT** (*Coordinated Turn*): saubere Kurve mit konstanter Drehrate.
+- **CT** (*Coordinated Turn*): saubere Kurve mit konstanter Drehrate `ω` (rad/s).
+  Im Tracker (`MotionModel::CoordinatedTurn`) dreht die Übergangsmatrix den
+  Geschwindigkeitsvektor pro Schritt um `ω·dt` und integriert den entstehenden
+  Kreisbogen in die Position; der Betrag der Geschwindigkeit (die „Speed")
+  bleibt dabei erhalten. Für `ω → 0` wird daraus exakt wieder CV — Geradeausflug
+  ist also nur der Sonderfall „Drehrate null". Ein CV-Filter allein „hinkt" in
+  Kurven hinterher (er sagt immer geradeaus voraus); ein CT-Modell, das die
+  Drehrate kennt, folgt dem Bogen. Beide Modelle teilen denselben 4-D-Zustand
+  `[Ost, Nord, v_Ost, v_Nord]`, damit derselbe Filter sie austauschbar nutzen —
+  und der **IMM** mehrere davon parallel mischen — kann.
 
 **IMM** (*Interacting Multiple Model*)
 Lässt mehrere Bewegungsmodelle parallel laufen und gewichtet sie laufend — gut

@@ -22,6 +22,7 @@ use nalgebra::{Matrix2, Matrix2x4, Matrix4, Vector2, Vector4};
 use serde::{Deserialize, Serialize};
 
 use crate::measurement::CartesianMeasurement;
+use crate::motion::MotionModel;
 
 /// Process-noise model: how much we let the target deviate from perfectly
 /// constant velocity (the "manoeuvre budget").
@@ -80,16 +81,6 @@ impl LinearKalman {
         )
     }
 
-    /// State-transition matrix `F` for a time step `dt` (constant velocity).
-    fn transition(dt: f64) -> Matrix4<f64> {
-        Matrix4::new(
-            1.0, 0.0, dt, 0.0, //
-            0.0, 1.0, 0.0, dt, //
-            0.0, 0.0, 1.0, 0.0, //
-            0.0, 0.0, 0.0, 1.0,
-        )
-    }
-
     /// The innovation `y = z − H·x` and its covariance `S = H·P·Hᵀ + R`.
     ///
     /// Shared by gating and the measurement update, so there is one source of
@@ -144,11 +135,24 @@ impl LinearKalman {
         Self { x, p }
     }
 
-    /// Predict the state forward by `dt` seconds.
+    /// Predict the state forward by `dt` seconds under the constant-velocity
+    /// motion model (the M2 default).
     ///
     /// REQ: FR-TRK-003
     pub fn predict(&mut self, dt: f64, process: &ProcessNoise) {
-        let f = Self::transition(dt);
+        self.predict_with(&MotionModel::ConstantVelocity, dt, process);
+    }
+
+    /// Predict the state forward by `dt` seconds under an explicit motion model.
+    ///
+    /// Same prediction equations as [`predict`](Self::predict) — `x ← F·x`,
+    /// `P ← F·P·Fᵀ + Q` — but the state-transition matrix `F` comes from
+    /// `model` (constant velocity, a coordinated turn, …). This is the hook the
+    /// IMM (Häppchen M5.2+) uses to run several motion hypotheses in parallel.
+    ///
+    /// REQ: FR-TRK-003, FR-TRK-011
+    pub fn predict_with(&mut self, model: &MotionModel, dt: f64, process: &ProcessNoise) {
+        let f = model.transition(dt);
         self.x = f * self.x;
         self.p = f * self.p * f.transpose() + process.covariance(dt);
     }
