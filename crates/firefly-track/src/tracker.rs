@@ -169,6 +169,12 @@ impl Tracker {
         &self.tracks
     }
 
+    /// The tracker's configuration, including per-sensor geometry
+    /// ([`SensorModel::frame`]) needed to geolocate raw plots (M6.3).
+    pub fn config(&self) -> &TrackerConfig {
+        &self.config
+    }
+
     /// Only the confirmed tracks — the air picture worth reporting.
     pub fn confirmed_tracks(&self) -> impl Iterator<Item = &Track> {
         self.tracks.iter().filter(|t| t.is_confirmed())

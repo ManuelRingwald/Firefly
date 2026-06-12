@@ -77,6 +77,12 @@
 <div id="delay-banner">Zustellung pausiert — Tracks bleiben stabil…</div>
 
 <script>
+  // A track is only shown as "coasting" once it has gone without a fresh
+  // measurement for longer than one scan cycle (default scan_period is 4 s;
+  // see ADR 0012). Below this, a missed single-radar scan in a multi-radar
+  // setup is normal and not worth flagging to the user.
+  const COAST_DISPLAY_THRESHOLD_S = 5.0;
+
   // ---- Map ----------------------------------------------------------------
   // Inline MapLibre style: OpenStreetMap tiles + airspace overlays.
   const mapStyle = {
@@ -320,18 +326,25 @@
     const tracks = [], unc = [], vel = [];
     for (const t of frame.tracks) {
       const lng = t.lon_deg, lat = t.lat_deg;
+      // With multiple radars on staggered scan cycles, a track is reported
+      // as "coasting" in any frame where *that particular* radar didn't see
+      // it — even though another radar refreshed it moments before. Showing
+      // that raw per-scan flag makes confirmed tracks flicker orange/blue at
+      // the scan rate. Instead, only show "coasting" once a track has gone
+      // without any fresh measurement for longer than one scan cycle.
+      const displayCoasting = t.update_age_s > COAST_DISPLAY_THRESHOLD_S;
       tracks.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [lng, lat] },
         properties: {
-          id: t.id, confirmed: t.confirmed, coasting: t.coasting,
+          id: t.id, confirmed: t.confirmed, coasting: displayCoasting,
           speed: Math.round(t.ground_speed_mps), age: t.update_age_s,
         },
       });
       unc.push({
         type: 'Feature',
         geometry: { type: 'LineString', coordinates: ring(lng, lat, Math.max(t.position_uncertainty_m, 1)) },
-        properties: { coasting: t.coasting },
+        properties: { coasting: displayCoasting },
       });
       vel.push({
         type: 'Feature',

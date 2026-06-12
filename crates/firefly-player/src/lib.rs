@@ -21,7 +21,7 @@
 //! wall-clock dependency anywhere in this crate.
 
 use firefly_core::{Plot, SensorId, SystemTrack, Timestamp};
-use firefly_io::Frame;
+use firefly_io::{Frame, FramePlot};
 use firefly_sim::Scenario;
 use firefly_track::{Tracker, TrackerConfig};
 
@@ -86,8 +86,10 @@ impl Player {
     ///
     /// A thin JSON-adapter projection over [`scans`](Player::scans): each scan's
     /// raw plots and `SystemTrack`s are bundled into a [`Frame`] (web-friendly
-    /// wire shape, M6.3). Plots are stored as empty wire-form for now; the
-    /// conversion from polar to WGS84 happens in the server adapter.
+    /// wire shape, M6.3). Each plot's polar measurement is lifted into WGS84
+    /// via its sensor's [`LocalFrame`](firefly_geo::LocalFrame) (FR-IO-001); a
+    /// plot whose sensor is not registered in the tracker's config is dropped
+    /// (it could not be geolocated and would not be tracked either).
     pub fn frames(mut self) -> Vec<Frame> {
         let sensor = self.sensor;
         let mut out = Vec::new();
@@ -98,8 +100,18 @@ impl Player {
             while i < self.plots.len() && self.plots[i].time == time {
                 i += 1;
             }
-            // For M6.3 MVP, store empty frame-plots; conversion happens in server.
-            let frame_plots = vec![];
+            let frame_plots: Vec<FramePlot> = self.plots[start..i]
+                .iter()
+                .filter_map(|p| {
+                    let sensor_model = self.tracker.config().sensors.get(&p.sensor)?;
+                    let position = sensor_model.frame.enu_to_geodetic(&p.measurement.to_enu());
+                    Some(FramePlot::from_plot(
+                        position.lat_deg(),
+                        position.lon_deg(),
+                        p.kind.has_secondary(),
+                    ))
+                })
+                .collect();
             self.tracker.process_scan(time, &self.plots[start..i]);
             out.push(Frame::new(
                 time,

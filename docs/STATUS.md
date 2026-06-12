@@ -4,26 +4,23 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-11 (aktuelle Sitzung, M6.2–M6.4 abgeschlossen)
-- **Branch:** `claude/m6-2-osm-openaip` (alle M6-Meilensteine gepusht; main noch auf M6.1)
-- **Letzter Commit:** M6.4 Docker-Containerisierung (735eea6) — OSM + Plots + Docker alle grün.
-- **Aktuell — M6.2 ✅:** **Frontend-Kartendarstellung — OSM + OpenAIP-Lufträume.**
-  Basiskarte von MapLibre-Demotiles zu echten OpenStreetMap-Tiles (`tile.openstreetmap.org`),
-  inline MapLibre-Style-Definition. Airspace-Overlay-Ebene (TMA, CTR, Restricted) aus GeoJSON
-  mit Frankfurt-Beispieldaten; Layer-Toggle im HUD („airspaces"-Button). Tests aktualisiert
-  (OSM-URL + airspaces-Erwähnung statt demotiles). **Alle Tests grün, build erfolgreich.**
-- **Aktuell — M6.3 ✅:** **Roh-Plot-Transparenz-Ebene (Radar-Input vor Tracker).**
-  `FramePlot`-Struct in `firefly-io` mit `lat_deg`, `lon_deg`, `has_ssr` (Wire-Form).
-  `Frame`-Struktur um `plots: Vec<FramePlot>` erweitert (FR-IO-001).
-  Frontend-Render zeigt rote 3px-Marker für Rohmessungen, Toggle-Button „raw plots".
-  MVP: Server sendet leere `plots`-Vektoren (polar→WGS84-Konvertierung deferred).
-  **Alle Tests grün.**
-- **Aktuell — M6.4 ✅:** **Docker-Containerisierung (Multi-Stage-Build + Orchestrierung).**
-  `Dockerfile`: rust:1.82-bookworm Builder → debian:bookworm-slim Runtime (~50 MB Image).
-  `docker-compose.yml`: Port 8080, FIREFLY_SCENE (demo/frankfurt), RUST_LOG (info/debug),
-  Health-Check via curl auf `/health`. `.dockerignore` für schlanken Build-Context.
-  `DOCKER.md`: Quick-Start (`docker-compose up`), Cloud-Deployment (K8s, Cloud Run, ECS),
-  Troubleshooting. **Alle Tests grün, Dockerfile-Syntax validiert.**
+- **Zuletzt aktualisiert:** 2026-06-12 (aktuelle Sitzung, M6.5-Nachträge auf `main`)
+- **Branch:** `main` (M6.1–M6.4 sind bereits auf `main`; diese Sitzung committet direkt dorthin,
+  siehe „Live-Debugging" unten).
+- **Aktuell — M6.5 ✅ (Nachträge, direkt auf `main`):**
+  - **Server-seitige Roh-Plot-Geolokation:** `Player::frames()` rechnet jeden Plot über
+    `Polar::to_enu()` + `LocalFrame::enu_to_geodetic()` (sensorbezogen, `TrackerConfig.sensors`)
+    nach WGS84 um; neue `Tracker::config()`-Zugriffsmethode, `FramePlot` jetzt aus `firefly-io`
+    re-exportiert. Das „raw plots"-Overlay zeigt jetzt echte Positionen statt einer leeren Liste.
+  - **Coasting-Anzeige entflackert:** Bei mehreren Radaren mit `scan_offset` (ADR 0012) wurde der
+    rohe Pro-Scan-`coasting`-Status sichtbar geflackert (Blau↔Orange), obwohl der Track insgesamt
+    aktuell war. Frontend zeigt „coasting" jetzt erst, wenn `update_age_s` über
+    `COAST_DISPLAY_THRESHOLD_S = 5.0` (eine Scan-Periode) liegt.
+  - Doku: `docs/milestones/M6-showcase.md` (M6.3-Abschnitt ergänzt, „Ausblick" bereinigt).
+  - **Alle Tests grün, Clippy sauber, `cargo fmt` ok.**
+- **Live-Debugging (diese Sitzung, direkt auf `main`):** Beim ersten Start über Docker blieb die
+  Karte leer — behoben: ungültige Font-Awesome-Glyphs-URL entfernt, Track-Label-Layer komplett auf
+  HTML-Marker (`maplibregl.Marker`) umgestellt (kein externer Glyphs-Server mehr nötig).
 - **PR:** keiner offen.
 
 ---
@@ -316,19 +313,16 @@ Warteschleife, Multi-Radar-Überlappung), acht stabile Track-IDs über 240 s,
 
 ✅ **M6 — Frontend-Showcase + Container ist abgeschlossen:**
 - ✅ **M6.2** OpenStreetMap-Hintergrundkarte + Airspace-Overlay (GeoJSON, Layer-Toggle).
-- ✅ **M6.3** Roh-Plot-Transparenz-Ebene (zeigt Radar-Plots vor Tracker-Verarbeitung,
-  MVP mit leeren Plots; polar→WGS84-Konvertierung deferred).
+- ✅ **M6.3** Roh-Plot-Transparenz-Ebene (zeigt Radar-Plots vor Tracker-Verarbeitung).
 - ✅ **M6.4** Docker-Containerisierung (Multi-Stage-Build, docker-compose, DOCKER.md).
+- ✅ **M6.5** Nachträge: Server-seitige polar→WGS84-Konvertierung für `plots` +
+  entflackerte Coasting-Anzeige bei mehreren Radaren.
 
 ➡️ **Als Nächstes — gemeinsam mit dem Projektverantwortlichen entscheiden:**
 
 Optionen:
-1. **Merge claude/m6-2-osm-openaip → main** und Start eines neuen Feature-Branches
-   (z. B. für M6.5-Nachträge oder nächste Phase).
-2. **M6.5-Nachträge** auf diesem Branch vor Merge:
-   - Server-seitige polar→WGS84-Konvertierung für `plots` (bisher MVP mit leer).
-   - Live-OpenAIP-API-Integration statt statische Airspaces-GeoJSON.
-3. **Sprung zu neuer Fachlichkeit** — z. B. offene Punkte aus Abschnitt 5:
+1. Live-OpenAIP-API-Integration statt statische Airspaces-GeoJSON.
+2. **Sprung zu neuer Fachlichkeit** — z. B. offene Punkte aus Abschnitt 5:
    - Sensor-Registrierung / Bias-Korrektur (M4-Nachtrag, S5).
    - FHA / Hazard-Analyse (Sicherheit, S4).
    - Coverage-Werkzeug (Visualisierung, S3).

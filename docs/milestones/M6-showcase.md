@@ -151,10 +151,23 @@ Tracker als *Input* bekommt, bevor daraus Tracks werden. Dazu trägt das
 der Button „raw plots" kleine rote Punkte über die Karte. Besonders sichtbar
 beim primary-only-Überflug (`overflight_primary`): er erscheint nur als
 Roh-Plot, nie als identifizierter Track, weil der Tracker für ihn nie eine
-SSR-Antwort bekommt. *MVP-Stand:* die Umrechnung der Plot-Positionen von
-Sensor-Polarkoordinaten nach WGS84 erfolgt serverseitig noch nicht vollständig
-(Player liefert aktuell eine leere Plot-Liste) — das ist ein offener
-Folgeschritt.
+SSR-Antwort bekommt. Die Umrechnung der Plot-Positionen von
+Sensor-Polarkoordinaten (Entfernung/Azimut/Elevation relativ zum Radar) nach
+WGS84 (Breite/Länge) übernimmt [`Player::frames`](../../crates/firefly-player/src/lib.rs)
+serverseitig über die geometrischen Bausteine aus `firefly-geo`
+(`Polar::to_enu` + `LocalFrame::enu_to_geodetic`), je nach Sensor des Plots.
+
+### Coasting-Anzeige bei mehreren Radaren
+
+Bei mehreren Radaren mit gestaffelten Scan-Zyklen (`scan_offset`, ADR 0012)
+liefert jeder Scan ein eigenes `Frame` — und ein Track, der gerade nur von
+*einem* der Radare aktualisiert wurde, hätte im jeweils anderen Frame
+formal den rohen „coasting"-Status (`Track::is_coasting`), obwohl er insgesamt
+aktuell ist. Damit das nicht als ständiges Blinken zwischen Blau und Orange
+sichtbar wird, zeigt das Frontend „coasting" erst, wenn `update_age_s` länger
+als eine Scan-Periode (`COAST_DISPLAY_THRESHOLD_S = 5.0 s`,
+`crates/firefly-server/static/index.html`) zurückliegt — also wirklich seit
+mehr als einem vollen Umlauf keine frische Messung mehr da war.
 
 ## M6.4 — Container-Setup (erledigt)
 
@@ -168,7 +181,5 @@ Umgebungsvariablen (`FIREFLY_SCENE`, `RUST_LOG`, 12-Factor), Healthcheck gegen
 
 ## Ausblick
 
-- Serverseitige Umrechnung der Roh-Plot-Positionen (Polar → WGS84) für eine
-  vollständige M6.3-Darstellung.
 - Live-Anbindung der OpenAIP-API für reale Luftraumdaten (statt der
   statischen Beispiel-`airspaces.geojson`).

@@ -19,4 +19,4 @@
 
 mod frame;
 
-pub use frame::{Frame, FrameTrack};
+pub use frame::{Frame, FramePlot, FrameTrack};
