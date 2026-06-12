@@ -1,6 +1,6 @@
 //! Running a scenario into a time-ordered stream of plots.
 
-use firefly_core::Plot;
+use firefly_core::{Plot, Timestamp};
 use firefly_geo::Enu;
 
 use crate::rng::Pcg32;
@@ -77,16 +77,16 @@ pub fn run(scenario: &Scenario) -> Vec<Plot> {
         // does not perturb another's noise sequence.
         let mut rng = Pcg32::new(scenario.seed(), radar_idx as u64);
 
-        for scan_start in radar.scan_times(scenario.duration()) {
+        for scan_time in radar.scan_times(scenario.duration()) {
+            let time = Timestamp(scan_time);
             for traj in &trajectories {
-                let Some(pos) = traj.position_at(scan_start) else {
+                let Some(pos) = traj.position_at(scan_time) else {
                     continue;
                 };
-                if let Some(plot) = radar.try_detect(scenario.frame(), pos, traj.target, scan_start, &mut rng)
+                if let Some(plot) =
+                    radar.try_detect(scenario.frame(), pos, traj.target, time, &mut rng)
                 {
-                    // Plot has its own azimuth-dependent time; extract it for sorting.
-                    let plot_time = plot.time.as_secs();
-                    plots.push((plot_time, radar.sensor.id.0, plot));
+                    plots.push((scan_time, radar.sensor.id.0, plot));
                 }
             }
         }

@@ -125,6 +125,7 @@ fn frankfurt_player() -> Player {
         RadarParams {
             max_range: 120_000.0,
             scan_period: 4.0,
+            scan_offset: 0.0,
             ..RadarParams::default()
         },
     );
@@ -133,6 +134,7 @@ fn frankfurt_player() -> Player {
         RadarParams {
             max_range: 100_000.0,
             scan_period: 10.0,
+            scan_offset: 1.3,
             ..RadarParams::default()
         },
     );
@@ -141,6 +143,7 @@ fn frankfurt_player() -> Player {
         RadarParams {
             max_range: 100_000.0,
             scan_period: 12.0,
+            scan_offset: 2.6,
             ..RadarParams::default()
         },
     );

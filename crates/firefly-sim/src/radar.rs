@@ -12,6 +12,9 @@ use crate::target::Target;
 pub struct RadarParams {
     /// Antenna revolution period, seconds (time between scans).
     pub scan_period: f64,
+    /// Phase offset of the first scan, seconds. Lets several radars be
+    /// deliberately un-synchronised.
+    pub scan_offset: f64,
     /// Probability of detection for a target inside coverage, per scan.
     pub prob_detection: f64,
     /// Range measurement noise (1σ), metres.
@@ -33,6 +36,7 @@ impl Default for RadarParams {
         // A plausible medium-range en-route surveillance radar.
         Self {
             scan_period: 4.0,
+            scan_offset: 0.0,
             prob_detection: 0.9,
             sigma_range: 50.0,
             sigma_azimuth: 0.08_f64.to_radians(),
@@ -66,15 +70,12 @@ impl Radar {
 
     /// Attempt to detect a target at a true scenario-frame position, returning a
     /// noisy plot if the target is in coverage and the detection roll succeeds.
-    ///
-    /// The plot's time is azimuth-dependent: `plot_time = scan_start + (noisy_azimuth / 2π) × scan_period`.
-    /// This models the realistic asynchrony within a single antenna sweep.
     pub fn try_detect(
         &self,
         scenario_frame: &LocalFrame,
         position: Enu,
         target: &Target,
-        scan_start: f64,
+        time: Timestamp,
         rng: &mut Pcg32,
     ) -> Option<Plot> {
         let truth = self.true_polar(scenario_frame, position);
@@ -97,14 +98,6 @@ impl Radar {
             elevation: truth.elevation + rng.next_normal(0.0, self.params.sigma_elevation),
         };
 
-        // Azimuth-dependent fine-time within the scan period (sub-second granularity).
-        // A plot detected at azimuth θ (0..2π) is timestamped within its scan at
-        // scan_start + (θ/2π)·min(scan_period, 0.1 s), so the timing variation is bounded to ~50 ms.
-        // This models realistic within-scan asynchrony without breaking sync at the 1-second level (ADR 0013 TODO).
-        let azimuth_fraction = (measurement.azimuth % std::f64::consts::TAU).max(0.0) / std::f64::consts::TAU;
-        let fine_time = azimuth_fraction * self.params.scan_period.min(0.1);
-        let plot_time = scan_start + fine_time;
-
         // Decide what kind of plot this is and what SSR data rides along.
         let target_has_transponder = target.mode_3a.is_some() || target.icao_address.is_some();
         let (kind, mode_ac) = if self.params.has_ssr && target_has_transponder {
@@ -126,20 +119,24 @@ impl Radar {
 
         Some(Plot {
             sensor: self.sensor.id,
-            time: Timestamp(plot_time),
+            time,
             measurement,
             kind,
             mode_ac,
         })
     }
 
-    /// The scan start times of this radar within `[0, duration]`.
-    /// All radars now start at t=0 and scan synchronously (ADR 0013).
+    /// The scan times of this radar within `[0, duration]`.
     pub fn scan_times(&self, duration: f64) -> Vec<f64> {
         let mut times = Vec::new();
-        let mut t = 0.0;
+        let mut t = self.params.scan_offset;
+        if t < 0.0 {
+            t = 0.0;
+        }
         while t <= duration + 1e-9 {
-            times.push(t);
+            if t >= 0.0 {
+                times.push(t);
+            }
             t += self.params.scan_period;
         }
         times
