@@ -142,10 +142,33 @@ später).
 
 ---
 
+## M6.3 — Roh-Plot-Transparenz-Ebene (erledigt)
+
+Das Frontend zeigt jetzt zusätzlich die **rohen Radar-Plots** — das, was der
+Tracker als *Input* bekommt, bevor daraus Tracks werden. Dazu trägt das
+`Frame` (`firefly-io`, FR-IO-001) neben den Tracks ein neues Feld
+`plots: Vec<FramePlot>` (Position in Grad + `has_ssr`-Flag). Im HUD blendet
+der Button „raw plots" kleine rote Punkte über die Karte. Besonders sichtbar
+beim primary-only-Überflug (`overflight_primary`): er erscheint nur als
+Roh-Plot, nie als identifizierter Track, weil der Tracker für ihn nie eine
+SSR-Antwort bekommt. *MVP-Stand:* die Umrechnung der Plot-Positionen von
+Sensor-Polarkoordinaten nach WGS84 erfolgt serverseitig noch nicht vollständig
+(Player liefert aktuell eine leere Plot-Liste) — das ist ein offener
+Folgeschritt.
+
+## M6.4 — Container-Setup (erledigt)
+
+Ein `Dockerfile` (Multi-Stage-Build: `rust:1.82-bookworm` zum Kompilieren,
+`debian:bookworm-slim` als ~50-MB-Laufzeit-Image) und ein `docker-compose.yml`
+erlauben den Start per `docker-compose up` — ohne lokale Rust-Installation,
+identisch zum Cloud-Deployment. Konfiguration ausschließlich über
+Umgebungsvariablen (`FIREFLY_SCENE`, `RUST_LOG`, 12-Factor), Healthcheck gegen
+`/health`. Details und Cloud-Hinweise (Kubernetes, Cloud Run, ECS) in
+[`DOCKER.md`](../../DOCKER.md).
+
 ## Ausblick
 
-- **M6.3** — Roh-Plot-Transparenz-Ebene: zeigt im Frontend zusätzlich die
-  Radar-Plots, *bevor* sie der Tracker zu Tracks verarbeitet — inkl. des
-  primary-only-Überflugs (`overflight_primary`), der nie eine SSR-Identität
-  bekommt.
-- **M6.4** — Dockerfile/docker-compose für den lokalen Start analog zur Cloud.
+- Serverseitige Umrechnung der Roh-Plot-Positionen (Polar → WGS84) für eine
+  vollständige M6.3-Darstellung.
+- Live-Anbindung der OpenAIP-API für reale Luftraumdaten (statt der
+  statischen Beispiel-`airspaces.geojson`).
