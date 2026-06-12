@@ -433,4 +433,47 @@ mod tests {
             "no frame should ever show more than the eight real targets (saw {max_per_frame})"
         );
     }
+
+    /// The two JPDA close-pair aircraft ([`arrival_west_a`]/[`arrival_west_b`],
+    /// track ids 1 and 2 in this scene) fly ~150 m apart for the entire run.
+    /// [`frankfurt_scene_keeps_one_identity_per_aircraft`] only checks that both
+    /// ids stay `confirmed`; it does not catch **track coalescence** — the
+    /// pathology where both tracks' *position estimates* drift onto the same
+    /// point because their gates permanently overlap. Coalesced tracks still
+    /// satisfy the id check, but on the map one symbol sits exactly on top of
+    /// the other and is effectively invisible.
+    ///
+    /// The threshold (50 m) is well below the real ~150 m separation but far
+    /// above plausible measurement noise, so it fails only on coalescence, not
+    /// on ordinary tracking jitter.
+    /// REQ: FR-TRK-018, FR-TRK-019
+    #[test]
+    fn frankfurt_close_pair_does_not_coalesce() {
+        let frames = frankfurt_frames();
+        let frame = LocalFrame::new(Wgs84::from_degrees(
+            FRANKFURT_ORIGIN.0,
+            FRANKFURT_ORIGIN.1,
+            0.0,
+        ));
+
+        let mut min_separation_m = f64::MAX;
+        for f in &frames {
+            let mut positions = f
+                .tracks
+                .iter()
+                .filter(|t| t.id.0 == 1 || t.id.0 == 2)
+                .map(|t| {
+                    frame.geodetic_to_enu(&Wgs84::from_degrees(t.lat_deg, t.lon_deg, t.height_m))
+                });
+            if let (Some(a), Some(b)) = (positions.next(), positions.next()) {
+                let separation = ((a.east - b.east).powi(2) + (a.north - b.north).powi(2)).sqrt();
+                min_separation_m = min_separation_m.min(separation);
+            }
+        }
+
+        assert!(
+            min_separation_m > 50.0,
+            "tracks 1 and 2 coalesced: minimum separation was {min_separation_m:.1} m, expected ~150 m"
+        );
+    }
 }
