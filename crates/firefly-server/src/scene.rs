@@ -115,10 +115,16 @@ fn frankfurt_player() -> Player {
     let site_west = frame.enu_to_geodetic(&Enu::new(-55_000.0, 5_000.0, 0.0));
     let site_northeast = frame.enu_to_geodetic(&Enu::new(45_000.0, 35_000.0, 0.0));
 
+    // Realistic, *mixed* revisit rates, as a real Frankfurt-area setup would
+    // have: the airport approach radar turns fast (~4 s), the two en-route
+    // radars turn slower (~10–12 s). The adaptive track lifecycle (ADR 0012)
+    // learns each track's true revisit interval, so the slow radars do not
+    // cause false coasting or deletion.
     let radar_center = Radar::new(
         Sensor::new(SensorId(1), site_center),
         RadarParams {
             max_range: 120_000.0,
+            scan_period: 4.0,
             scan_offset: 0.0,
             ..RadarParams::default()
         },
@@ -127,6 +133,7 @@ fn frankfurt_player() -> Player {
         Sensor::new(SensorId(2), site_west),
         RadarParams {
             max_range: 100_000.0,
+            scan_period: 10.0,
             scan_offset: 1.3,
             ..RadarParams::default()
         },
@@ -135,6 +142,7 @@ fn frankfurt_player() -> Player {
         Sensor::new(SensorId(3), site_northeast),
         RadarParams {
             max_range: 100_000.0,
+            scan_period: 12.0,
             scan_offset: 2.6,
             ..RadarParams::default()
         },
