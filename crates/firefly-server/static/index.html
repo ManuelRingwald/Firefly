@@ -48,6 +48,11 @@
     padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); display: none;
   }
+  .track-label {
+    font-size: 11px; color: #e8eef6; white-space: nowrap;
+    text-shadow: 0 0 2px #0b0e13, 0 0 2px #0b0e13, 0 0 2px #0b0e13;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
@@ -76,7 +81,6 @@
   // Inline MapLibre style: OpenStreetMap tiles + airspace overlays.
   const mapStyle = {
     version: 8,
-    glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
     sources: {
       'osm-tiles': {
         type: 'raster',
@@ -203,17 +207,38 @@
       },
     });
 
-    // Track label: id + speed. Uses Noto Sans Regular, served by the
-    // OpenMapTiles font server referenced in `glyphs` above.
-    map.addLayer({
-      id: 'track-label', type: 'symbol', source: 'tracks',
-      layout: {
-        'text-field': ['concat', '#', ['to-string', ['get', 'id']], '  ', ['to-string', ['get', 'speed']], ' m/s'],
-        'text-font': ['Noto Sans Regular'],
-        'text-size': 11, 'text-offset': [0, 1.2], 'text-anchor': 'top',
-      },
-      paint: { 'text-color': '#e8eef6', 'text-halo-color': '#0b0e13', 'text-halo-width': 1.2 },
-    });
+    // Track labels (id + speed) are rendered as HTML markers (see
+    // `updateLabels` below), not MapLibre symbol/text layers — this avoids
+    // depending on an external glyphs (font) server entirely.
+  }
+
+  // ---- Track labels (HTML markers, no glyphs server needed) ---------------
+  // One DOM marker per track id, repositioned/relabelled each frame; markers
+  // for tracks that vanished (left coverage, merged, deleted) are removed.
+  const labelMarkers = new Map();
+
+  function updateLabels(tracks) {
+    const seen = new Set();
+    for (const t of tracks) {
+      seen.add(t.id);
+      const text = `#${t.id}  ${Math.round(t.ground_speed_mps)} m/s`;
+      let marker = labelMarkers.get(t.id);
+      if (!marker) {
+        const el = document.createElement('div');
+        el.className = 'track-label';
+        marker = new maplibregl.Marker({ element: el, anchor: 'top', offset: [0, 8] });
+        marker.addTo(map);
+        labelMarkers.set(t.id, marker);
+      }
+      marker.getElement().textContent = text;
+      marker.setLngLat([t.lon_deg, t.lat_deg]);
+    }
+    for (const [id, marker] of labelMarkers) {
+      if (!seen.has(id)) {
+        marker.remove();
+        labelMarkers.delete(id);
+      }
+    }
   }
 
   // ---- Airspaces (M6.2) ---------------------------------------------------
@@ -317,6 +342,7 @@
     map.getSource('tracks').setData({ type: 'FeatureCollection', features: tracks });
     map.getSource('uncertainty').setData({ type: 'FeatureCollection', features: unc });
     map.getSource('velocity').setData({ type: 'FeatureCollection', features: vel });
+    updateLabels(frame.tracks);
 
     clockEl.textContent = `${frame.time.toFixed(1)} s`;
     sensorEl.textContent = frame.sensor;
