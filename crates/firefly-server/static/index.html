@@ -83,6 +83,12 @@
   // setup is normal and not worth flagging to the user.
   const COAST_DISPLAY_THRESHOLD_S = 5.0;
 
+  // History trail ("comet tail"), as on a real radar screen: raw plots and past
+  // track positions linger and fade out over this many data-seconds instead of
+  // being replaced each frame.
+  const PLOT_TRAIL_S = 20.0;
+  const TRACK_TRAIL_S = 24.0;
+
   // ---- Map ----------------------------------------------------------------
   // Inline MapLibre style: OpenStreetMap tiles + airspace overlays.
   const mapStyle = {
@@ -159,6 +165,8 @@
     map.addSource('uncertainty', { type: 'geojson', data: EMPTY });
     map.addSource('velocity', { type: 'geojson', data: EMPTY });
     map.addSource('tracks', { type: 'geojson', data: EMPTY });
+    // Track history "comet tail": the last few positions of each track symbol.
+    map.addSource('trackhistory', { type: 'geojson', data: EMPTY });
 
     // Airspaces overlay: TMA, CTR, restricted areas (from OpenAIP or local GeoJSON).
     map.addLayer({
@@ -171,12 +179,23 @@
     });
 
     // Raw radar plots (M6.3): small marker for each detection (input to tracker).
+    // Older plots fade out (history trail), newest are brightest.
     map.addLayer({
       id: 'plot-marker', type: 'circle', source: 'plots',
       paint: {
         'circle-radius': 3,
         'circle-color': '#ef4444',
-        'circle-opacity': 0.6,
+        'circle-opacity': ['interpolate', ['linear'], ['get', 'age'], 0, 0.7, PLOT_TRAIL_S, 0.05],
+      },
+    });
+
+    // Track history trail: faint dots where each track has been (comet tail).
+    map.addLayer({
+      id: 'track-history', type: 'circle', source: 'trackhistory',
+      paint: {
+        'circle-radius': 2,
+        'circle-color': '#9fb3c8',
+        'circle-opacity': ['interpolate', ['linear'], ['get', 'age'], 0, 0.55, TRACK_TRAIL_S, 0.04],
       },
     });
 
@@ -323,6 +342,10 @@
   let lastTime = 0;
   const deadReckon = { active: false, raf: 0 };
 
+  // Rolling history buffers for the comet tails (kept in data-time order).
+  let plotTrail = [];   // { lng, lat, has_ssr, time }
+  let trackTrail = [];  // { lng, lat, time }
+
   function stopDeadReckoning() {
     deadReckon.active = false;
     if (deadReckon.raf) { cancelAnimationFrame(deadReckon.raf); deadReckon.raf = 0; }
@@ -399,15 +422,36 @@
     lastTracks = frame.tracks;
     lastTime = frame.time;
 
-    const plots = [];
+    // Raw-plot comet tail: append this frame's plots, drop those older than
+    // PLOT_TRAIL_S data-seconds, render the rest with an age for fading.
     for (const p of (frame.plots || [])) {
-      plots.push({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [p.lon_deg, p.lat_deg] },
-        properties: { has_ssr: p.has_ssr },
-      });
+      plotTrail.push({ lng: p.lon_deg, lat: p.lat_deg, has_ssr: p.has_ssr, time: frame.time });
     }
-    map.getSource('plots').setData({ type: 'FeatureCollection', features: plots });
+    const plotCutoff = frame.time - PLOT_TRAIL_S;
+    while (plotTrail.length && plotTrail[0].time < plotCutoff) plotTrail.shift();
+    map.getSource('plots').setData({
+      type: 'FeatureCollection',
+      features: plotTrail.map(p => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+        properties: { has_ssr: p.has_ssr, age: frame.time - p.time },
+      })),
+    });
+
+    // Track-history comet tail: one dot per track per frame, fading with age.
+    for (const t of frame.tracks) {
+      trackTrail.push({ lng: t.lon_deg, lat: t.lat_deg, time: frame.time });
+    }
+    const trackCutoff = frame.time - TRACK_TRAIL_S;
+    while (trackTrail.length && trackTrail[0].time < trackCutoff) trackTrail.shift();
+    map.getSource('trackhistory').setData({
+      type: 'FeatureCollection',
+      features: trackTrail.map(h => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [h.lng, h.lat] },
+        properties: { age: frame.time - h.time },
+      })),
+    });
 
     drawTracks(frame.tracks, frame.time);
     sensorEl.textContent = frame.sensor;
