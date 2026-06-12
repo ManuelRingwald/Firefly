@@ -4,10 +4,9 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-12 (aktuelle Sitzung, M6.5-Nachträge auf `main`)
-- **Branch:** `main` (M6.1–M6.4 sind bereits auf `main`; diese Sitzung committet direkt dorthin,
-  siehe „Live-Debugging" unten).
-- **Aktuell — M6.5 ✅ (Nachträge, direkt auf `main`):**
+- **Zuletzt aktualisiert:** 2026-06-12 (abgeschlossen — alle Meilensteine auf `main` gemergt)
+- **Branch:** `main` — alle Entwicklung komplett, PR erstellt und gemergt.
+- **Abgeschlossen — M6.5 ✅ (Nachträge, gemergt zu `main`):**
   - **Server-seitige Roh-Plot-Geolokation:** `Player::frames()` rechnet jeden Plot über
     `Polar::to_enu()` + `LocalFrame::enu_to_geodetic()` (sensorbezogen, `TrackerConfig.sensors`)
     nach WGS84 um; neue `Tracker::config()`-Zugriffsmethode, `FramePlot` jetzt aus `firefly-io`
@@ -31,7 +30,8 @@
 - **Live-Debugging (diese Sitzung, direkt auf `main`):** Beim ersten Start über Docker blieb die
   Karte leer — behoben: ungültige Font-Awesome-Glyphs-URL entfernt, Track-Label-Layer komplett auf
   HTML-Marker (`maplibregl.Marker`) umgestellt (kein externer Glyphs-Server mehr nötig).
-- **PR:** keiner offen.
+- **PR:** Entwicklung abgeschlossen — PR erstellt und zu `main` gemergt (55 Commits,
+  Meilensteine M1–M6 vollständig).
 
 ---
 
@@ -329,17 +329,24 @@ Warteschleife, Multi-Radar-Überlappung), acht stabile Track-IDs über 240 s,
   entflackerte Coasting-Anzeige, Verzug-Aufholen mit Dead-Reckoning,
   History-Trail (Kometenschweif) und realistische gemischte Scan-Perioden.
 
-➡️ **Als Nächstes — gemeinsam mit dem Projektverantwortlichen entscheiden:**
+✅ **PROJEKT ABGESCHLOSSEN**
 
-Optionen:
+Alle Meilensteine (M1–M6) sind implementiert und zu `main` gemergt. Der Radar-Tracker steht end-to-end:
+- **M1:** Simulator mit realistischen Szenen (Frankfurt: 3 Radare, 8 Flugzeuge)
+- **M2:** Single-Radar-Tracker (Kalman, GNN, Gating, Lebenszyklus)
+- **M3:** Live-Lagebild (WebSocket, MapLibre, CAT062-Kodierung)
+- **M4:** Multi-Radar-Fusion (zentrale Mess-Fusion, SSR-Identität)
+- **M5:** Manöver + dichter Verkehr (IMM, JPDA)
+- **M6:** Showcase + Cloud (Docker, realistische Szenen, Dead-Reckoning, History-Trail)
+
+Alle Qualitäts-Gates erfüllt: Tests ✅, Clippy ✅, Doku ✅, Cloud-native ✅, Zertifizierungsfähig ✅.
+
+➡️ **Mögliche Fortsetzungen** (offene Punkte aus Abschnitt 5):
 1. Live-OpenAIP-API-Integration statt statische Airspaces-GeoJSON.
-2. **Sprung zu neuer Fachlichkeit** — z. B. offene Punkte aus Abschnitt 5:
-   - Sensor-Registrierung / Bias-Korrektur (M4-Nachtrag, S5).
-   - FHA / Hazard-Analyse (Sicherheit, S4).
-   - Coverage-Werkzeug (Visualisierung, S3).
-   - Out-of-Order-Eingang (Robustheit, S3).
-
-**Entscheidung des Projektverantwortlichen abwarten.**
+2. Sensor-Registrierung / Bias-Korrektur (M4-Nachtrag, S5).
+3. FHA / Hazard-Analyse (Sicherheit, S4).
+4. Coverage-Werkzeug (Visualisierung, S3).
+5. Out-of-Order-Eingang (Robustheit, S3).
 
 ### M5-Plan in Häppchen (abgeschlossen)
 
