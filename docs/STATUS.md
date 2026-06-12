@@ -4,8 +4,29 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-12 (abgeschlossen — alle Meilensteine auf `main` gemergt)
-- **Branch:** `main` — alle Entwicklung komplett, PR erstellt und gemergt.
+- **Zuletzt aktualisiert:** 2026-06-12 (Branch `claude/branch-merge-main-cqzdwk` stabilisiert + nach `main` gemergt; ADR 0013 angenommen, Umsetzung ausstehend)
+- **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5). Branch
+  `claude/branch-merge-main-cqzdwk` wurde aufgeräumt und gemergt.
+
+> 🔭 **NÄCHSTE WOCHE — ADR 0013 (asynchrone Pro-Plot-Verarbeitung) umsetzen.**
+> Die Architektur-Entscheidung ist **angenommen** (`docs/decisions/0013-…md`), die
+> Umsetzung steht noch aus. Ein erster Foundation-Schritt (Simulator: azimut-abhängige
+> Pro-Plot-Zeitstempel, `scan_offset` entfernt) wurde begonnen — Commit **`6a58a03`** —
+> und bewusst wieder **zurückgenommen** (Revert **`0959059`**), weil ohne die Tracker-
+> und Server-Teile der Frankfurt-Test rot wird (155 statt 8 Track-IDs). `main` ist
+> deshalb wieder grün. **Wiedereinstieg:** der Abschnitt *„Umsetzungsstand /
+> Wiedereinstieg"* in ADR 0013 enthält den vollständigen Häppchen-Plan
+> (**13.1 – 13.7**, beginnend mit `Tracker::process_plot`). Vorgehen wie immer:
+> *erst erklären, dann bauen* (CLAUDE.md §2).
+
+- **Diese Sitzung (Aufräumen + Merge):**
+  - Offener Branch endete mit unfertigem ADR-0013-WIP, der ein Qualitäts-Gate verletzte
+    (`cargo test` rot). WIP per `git revert` zurückgenommen → **alle 32 Suites grün**,
+    Clippy sauber, `cargo fmt` ok.
+  - ADR 0013 von „in Entscheidung" auf **„akzeptiert — Umsetzung ausstehend"** gesetzt
+    und um einen ausführlichen **Wiedereinstiegs-Abschnitt** (Foundation, Grund der
+    Rücknahme, Häppchen-Plan 13.1–13.7, Anker-Commits) ergänzt.
+  - Branch nach `main` gemergt und gepusht.
 - **Abgeschlossen — M6.5 ✅ (Nachträge, gemergt zu `main`):**
   - **Server-seitige Roh-Plot-Geolokation:** `Player::frames()` rechnet jeden Plot über
     `Polar::to_enu()` + `LocalFrame::enu_to_geodetic()` (sensorbezogen, `TrackerConfig.sensors`)
@@ -341,7 +362,14 @@ Alle Meilensteine (M1–M6) sind implementiert und zu `main` gemergt. Der Radar-
 
 Alle Qualitäts-Gates erfüllt: Tests ✅, Clippy ✅, Doku ✅, Cloud-native ✅, Zertifizierungsfähig ✅.
 
-➡️ **Mögliche Fortsetzungen** (offene Punkte aus Abschnitt 5):
+➡️ **Aktiver nächster Schritt — ADR 0013 umsetzen** (angenommen, Umsetzung
+ausstehend): asynchrone Pro-Plot-Verarbeitung + periodischer Ausgabetakt. Der
+vollständige Häppchen-Plan (13.1 `process_plot` → … → 13.7 CAT062 aus Snapshot)
+und die Wiedereinstiegs-Anker stehen im Abschnitt *„Umsetzungsstand /
+Wiedereinstieg"* von `docs/decisions/0013-…md`. Foundation-Commit `6a58a03`
+(zurückgenommen via `0959059`).
+
+➡️ **Weitere mögliche Fortsetzungen** (offene Punkte aus Abschnitt 5):
 1. Live-OpenAIP-API-Integration statt statische Airspaces-GeoJSON.
 2. Sensor-Registrierung / Bias-Korrektur (M4-Nachtrag, S5).
 3. FHA / Hazard-Analyse (Sicherheit, S4).
