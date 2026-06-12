@@ -227,11 +227,13 @@
         const el = document.createElement('div');
         el.className = 'track-label';
         marker = new maplibregl.Marker({ element: el, anchor: 'top', offset: [0, 8] });
+        marker.setLngLat([t.lon_deg, t.lat_deg]);
         marker.addTo(map);
         labelMarkers.set(t.id, marker);
+      } else {
+        marker.setLngLat([t.lon_deg, t.lat_deg]);
       }
       marker.getElement().textContent = text;
-      marker.setLngLat([t.lon_deg, t.lat_deg]);
     }
     for (const [id, marker] of labelMarkers) {
       if (!seen.has(id)) {
