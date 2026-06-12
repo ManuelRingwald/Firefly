@@ -1,6 +1,6 @@
 # ADR 0013 — Asynchrone Pro-Plot-Verarbeitung + Periodischer Ausgabetakt
 
-- **Status:** in Entscheidung
+- **Status:** akzeptiert — **Umsetzung ausstehend** (Foundation begonnen und bewusst zurückgenommen, siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
 - **Datum:** 2026-06-12
 
 ## Kontext
@@ -138,3 +138,88 @@ Dabei:
 - **ADR 0010:** Zentrale Mess-Fusion bleibt, ist aber nun **pro-Plot-Fusionierung**, nicht Scan-Fusion.
 - **ADR 0011:** Scan-Start-Referenz entfällt → Gating gegen Live-Schätzung. Initiierungs-Tor-Logik vereinfacht sich oder wird obsolet.
 - **ADR 0012:** Adaptive Lebenszyklus als Workaround für Batch-Semantik — kann mit echter Zeitkontinuität simplifiziert werden.
+
+---
+
+## Umsetzungsstand / Wiedereinstieg
+
+> **Zweck dieses Abschnitts:** Diese Architektur-Entscheidung ist **angenommen**, aber
+> noch **nicht implementiert**. Ein erster Foundation-Schritt wurde begonnen und
+> bewusst wieder zurückgenommen, damit `main` grün und stabil bleibt. Dieser
+> Abschnitt hält fest, *was* begonnen wurde, *warum* es zurückgenommen wurde und
+> *wie* die volle Umsetzung wieder aufgenommen wird.
+
+### Was wurde begonnen (Foundation-WIP)
+
+Ein erster Schritt — **nur Teil 1 (Simulator)** der drei konzeptionellen Änderungen —
+wurde umgesetzt und ist in der Git-Historie erhalten:
+
+- **Commit `6a58a03`** *„WIP: ADR 0013 foundation — azimuth-dependent plot timestamps, sync radars"*
+
+Inhalt dieses WIP (Dateien `crates/firefly-sim/src/radar.rs`, `crates/firefly-sim/src/run.rs`,
+`crates/firefly-server/src/scene.rs`):
+
+- **`scan_offset` entfernt** aus `RadarParams` — alle Radare starten bei `t = 0`,
+  laufen aber mit ihren eigenen, unabhängigen Perioden (4 / 10 / 12 s in Frankfurt).
+- **Azimut-abhängige Pro-Plot-Zeitstempel:** `Radar::try_detect` bekommt statt eines
+  fertigen `Timestamp` den `scan_start` und berechnet `plot_time = scan_start +
+  (azimut / 2π) · min(scan_period, 0,1 s)`. Jeder Plot trägt damit seinen eigenen,
+  feiner aufgelösten Zeitstempel innerhalb der Antennendrehung.
+- **`run()`** sortiert die Plots nach dieser neuen Pro-Plot-Zeit statt nach der Scan-Zeit.
+
+### Warum es zurückgenommen wurde
+
+Der WIP setzt **nur Teil 1** um. Die dafür *notwendigen* Teile 2 (Tracker:
+`process_plot` statt `process_scan`) und 3 (Server: periodischer Ausgabetakt) fehlen
+noch. Ohne sie kollidiert der Foundation-Schritt mit der bestehenden Batch-Semantik:
+
+- `Player::scans` gruppiert Plots nach **exakt gleicher** Datenzeit. Sobald jeder Plot
+  einen eigenen (azimut-abhängigen) Zeitstempel hat, fällt fast jeder Plot in seinen
+  *eigenen* „Scan" → der Tracker bucht massenhaft Fehltreffer → **Track-Churn**.
+- Sichtbarer Effekt: Der Regressionstest
+  `scene::frankfurt_scene_keeps_one_identity_per_aircraft` lieferte **155 statt 8**
+  Track-IDs.
+
+Da die Foundation allein einen roten Test (Qualitäts-Gate, `CLAUDE.md` §5) hinterlässt
+und die volle Umsetzung ein größerer, mehrstufiger Schritt ist (S4–S5, gehört laut
+„goldener Regel" in erklärte, freigegebene Häppchen), wurde der WIP mit
+**Commit `0959059`** (`git revert`) zurückgenommen. `main` ist damit wieder grün
+(M6.5-Stand, 8 stabile Track-IDs, `scan_offset = 0 / 1,3 / 2,6 s`).
+
+### Umsetzung in Häppchen (Plan für den Wiedereinstieg)
+
+Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
+
+- [ ] **13.1 — Tracker `process_plot` (Kern-Umbau, S5).** Neue API
+  `Tracker::process_plot(plot)` neben dem bestehenden `process_scan`. Jeder Aufruf
+  prädiziert alle Tracks auf die **Plot-Zeit** und gatet/assoziiert gegen die
+  Live-Schätzung (keine eingefrorene Scan-Start-Referenz, ADR 0011 entfällt hier).
+  `process_scan` zunächst als dünne Schleife über `process_plot` behalten →
+  bestehende Tests bleiben grün. *Erst erklären, dann bauen.*
+- [ ] **13.2 — Adaptiven Lebenszyklus auf Zeitkontinuität umstellen (S4).** Treffer/
+  Fehltreffer nach **tatsächlichen Zeitlücken** statt nach Scan-Aufrufen (ADR 0012
+  vereinfachen). Damit ist der Workaround-Anteil nicht mehr nötig.
+- [ ] **13.3 — `snapshot_at(t)` (S4).** `Tracker::snapshot_at(t: Timestamp) ->
+  Vec<SystemTrack>` prädiziert alle Tracks auf `t` (IMM + Dead-Reckoning) und
+  reportiert sie — ohne den Zustand zu verändern (read-only Projektion).
+- [ ] **13.4 — Periodischer Ausgabetakt im Player/Server (S4).** `Player::frames`
+  puffert Plots nach Datenzeit, arbeitet sie kontinuierlich in den Tracker und
+  emittiert Frames im festen Takt `T_out` (12-Factor: `FIREFLY_OUTPUT_PERIOD`,
+  Default = kleinste Sensorperiode). `pacing::due_at` bleibt unverändert.
+- [ ] **13.5 — Simulator-Foundation neu einspielen (S3).** Den WIP aus `6a58a03`
+  wieder aufnehmen (`git cherry-pick 6a58a03` als Ausgangspunkt) — jetzt *deckt*
+  ihn die Pro-Plot-Pipeline. `scan_offset` entfällt endgültig.
+- [ ] **13.6 — Frankfurt-Regression auf asynchrone Perioden anpassen (S3).** Test auf
+  8 stabile IDs bei echt asynchronen Radaren (0/4/8…, 0/10/20…, 0/12/24…). Neue
+  Regressions-Tests für periodischen Output.
+- [ ] **13.7 — CAT062-Adapter auf `snapshot_at` umstellen (S3).** Encoder speist sich
+  aus dem periodischen Snapshot statt aus „pro Scan".
+
+### Wiedereinstiegs-Anker (Kurzform)
+
+- **Akzeptierte Entscheidung:** dieses ADR (Option B).
+- **Foundation-Code:** `git show 6a58a03` (Simulator-Teil, Teil 1).
+- **Zurücknahme:** `git show 0959059` (Revert, damit `main` grün ist).
+- **Gebrochenes Symptom ohne Teile 2+3:** `frankfurt_scene_keeps_one_identity_per_aircraft`
+  → 155 statt 8 IDs.
+- **Erster echter Schritt:** Häppchen **13.1** (`process_plot`), erklären → Go → bauen.
