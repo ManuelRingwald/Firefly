@@ -76,7 +76,6 @@
   // Inline MapLibre style: OpenStreetMap tiles + airspace overlays.
   const mapStyle = {
     version: 8,
-    glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
     sources: {
       'osm-tiles': {
         type: 'raster',
@@ -203,15 +202,16 @@
       },
     });
 
-    // Track label: id + speed.
-    map.addLayer({
-      id: 'track-label', type: 'symbol', source: 'tracks',
-      layout: {
-        'text-field': ['concat', '#', ['to-string', ['get', 'id']], '  ', ['to-string', ['get', 'speed']], ' m/s'],
-        'text-size': 11, 'text-offset': [0, 1.2], 'text-anchor': 'top',
-      },
-      paint: { 'text-color': '#e8eef6', 'text-halo-color': '#0b0e13', 'text-halo-width': 1.2 },
-    });
+    // Track label: id + speed (deferred: requires a working font server).
+    // TODO: re-enable once a stable glyphs source is available.
+    // map.addLayer({
+    //   id: 'track-label', type: 'symbol', source: 'tracks',
+    //   layout: {
+    //     'text-field': ['concat', '#', ['to-string', ['get', 'id']], '  ', ['to-string', ['get', 'speed']], ' m/s'],
+    //     'text-size': 11, 'text-offset': [0, 1.2], 'text-anchor': 'top',
+    //   },
+    //   paint: { 'text-color': '#e8eef6', 'text-halo-color': '#0b0e13', 'text-halo-width': 1.2 },
+    // });
   }
 
   // ---- Airspaces (M6.2) ---------------------------------------------------
