@@ -4,10 +4,28 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-12 (aktuelle Sitzung, M6.5-Nachträge auf `main`)
-- **Branch:** `main` (M6.1–M6.4 sind bereits auf `main`; diese Sitzung committet direkt dorthin,
-  siehe „Live-Debugging" unten).
-- **Aktuell — M6.5 ✅ (Nachträge, direkt auf `main`):**
+- **Zuletzt aktualisiert:** 2026-06-12 (aktuelle Sitzung, JPDA-Kreuzungs-Showcase auf
+  `claude/next-steps-ft3t3n`)
+- **Branch:** `claude/next-steps-ft3t3n` (diese Sitzung). M6.1–M6.5 liegen auf `main`.
+- **Aktuell — JPDA-Showcase überarbeitet (ADR 0013, Branch `claude/next-steps-ft3t3n`):**
+  - **Befund:** Das parallele West-Anflug-Nahpaar (~150 m) der Frankfurt-Szene verschmolz in
+    der Demo dauerhaft zu einer sichtbaren Spur. Untersuchung (empirische Probe + Vergleich
+    einfaches JPDA vs. prototypisches JPDA\*): Das ist **kein** Algorithmus-Bug, sondern die
+    **physikalische Auflösungsgrenze** — 150 m sind bei ~70 m Messrauschen nur ~2,1σ, für
+    *kein* Datenassoziations-Verfahren trennbar. JPDA\* (Blom & Bloem) bringt in diesem Tracker
+    **keinen** messbaren Vorteil und wurde **verworfen** (ehrliche Grenze).
+  - **Umsetzung:** Das parallele Nahpaar durch zwei **kreuzende Ziele** ersetzt
+    (`crossing_northeast`/`crossing_southeast`, Kreuzung bei ENU ≈ (−30 km, 0), t ≈ 120 s,
+    gleiche Höhe, Kurse 45°/135°). Das ist der fachlich aussagekräftige JPDA-Fall: Identität
+    bleibt über den Geschwindigkeitszustand durch die Kreuzung erhalten, **kein Identitätstausch**.
+  - **Test:** `frankfurt_close_pair_does_not_coalesce` → ersetzt durch
+    `frankfurt_crossing_pair_keeps_identity_through_the_crossing` (Kreuzung real < 1 km, danach
+    > 10 km getrennt, Kurse durchgehend in disjunkten Quadranten).
+  - **Doku:** ADR 0013, Glossar (*Auflösungsgrenze*, *Identitätstausch*, präzisierte
+    *Track-Koaleszenz*), M6-Meilenstein, Requirements-Register (NFR-OPS-001).
+  - **Alle Tests grün (Workspace), Clippy sauber, `cargo fmt` ok.**
+  - **Nächster Schritt:** offen — z. B. M6-Restpunkte oder Branch nach Review mergen.
+- **Davor — M6.5 ✅ (Nachträge, direkt auf `main`):**
   - **Server-seitige Roh-Plot-Geolokation:** `Player::frames()` rechnet jeden Plot über
     `Polar::to_enu()` + `LocalFrame::enu_to_geodetic()` (sensorbezogen, `TrackerConfig.sensors`)
     nach WGS84 um; neue `Tracker::config()`-Zugriffsmethode, `FramePlot` jetzt aus `firefly-io`
