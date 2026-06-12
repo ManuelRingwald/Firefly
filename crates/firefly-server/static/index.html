@@ -74,7 +74,7 @@
   </div>
   <button id="delay-btn" type="button">Verzug simulieren (5 s)</button>
 </div>
-<div id="delay-banner">Zustellung pausiert — Tracks bleiben stabil…</div>
+<div id="delay-banner">Zustellung verzögert — Tracks werden extrapoliert (Dead-Reckoning), dann eingerastet…</div>
 
 <script>
   // A track is only shown as "coasting" once it has gone without a fresh
@@ -311,20 +311,51 @@
     }, durationS * 1000);
   }
 
-  function render(frame) {
-    const plots = [];
-    // M6.3: Render raw plots from the frame (currently empty in MVP,
-    // to be filled with actual converted polar→WGS84 data later).
-    for (const p of (frame.plots || [])) {
-      plots.push({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [p.lon_deg, p.lat_deg] },
-        properties: { has_ssr: p.has_ssr },
-      });
-    }
+  // ---- Dead-reckoning during a delivery delay -----------------------------
+  // While the server pauses *delivery* (the "delay" demo), no fresh frames
+  // arrive — but the real aircraft keep flying. Rather than freeze the picture,
+  // we extrapolate (dead-reckon) each track forward from its last known
+  // velocity, so the symbols keep gliding. When delivery resumes, the server's
+  // absolute pacing has caught the schedule up to the present, so the next real
+  // frame *snaps* the tracks to where they truly are (NFR-CLOUD-004). This is a
+  // display-only bridge; the track data itself is never altered.
+  let lastTracks = [];
+  let lastTime = 0;
+  const deadReckon = { active: false, raf: 0 };
 
+  function stopDeadReckoning() {
+    deadReckon.active = false;
+    if (deadReckon.raf) { cancelAnimationFrame(deadReckon.raf); deadReckon.raf = 0; }
+  }
+
+  function startDeadReckoning(speed) {
+    stopDeadReckoning();
+    const baseTracks = lastTracks;
+    const baseTime = lastTime;
+    const start = performance.now();
+    deadReckon.active = true;
+    const tick = () => {
+      if (!deadReckon.active) return;
+      const wallElapsed = (performance.now() - start) / 1000;
+      const dataElapsed = wallElapsed * speed;   // data-seconds advanced so far
+      const extrapolated = baseTracks.map(t => {
+        const dist = t.ground_speed_mps * dataElapsed;
+        const a = t.track_angle_deg * Math.PI / 180.0;
+        const [lng, lat] = offset(t.lon_deg, t.lat_deg, dist * Math.sin(a), dist * Math.cos(a));
+        return { ...t, lon_deg: lng, lat_deg: lat };
+      });
+      drawTracks(extrapolated, baseTime + dataElapsed);
+      deadReckon.raf = requestAnimationFrame(tick);
+    };
+    deadReckon.raf = requestAnimationFrame(tick);
+  }
+
+  // Draw the track dots, uncertainty rings, velocity leaders and labels for a
+  // list of tracks, and update the clock/count. Shared by live frames and the
+  // dead-reckoning loop so both look identical.
+  function drawTracks(trackList, clockTime) {
     const tracks = [], unc = [], vel = [];
-    for (const t of frame.tracks) {
+    for (const t of trackList) {
       const lng = t.lon_deg, lat = t.lat_deg;
       // With multiple radars on staggered scan cycles, a track is reported
       // as "coasting" in any frame where *that particular* radar didn't see
@@ -353,18 +384,36 @@
       });
     }
 
-    map.getSource('plots').setData({ type: 'FeatureCollection', features: plots });
     map.getSource('tracks').setData({ type: 'FeatureCollection', features: tracks });
     map.getSource('uncertainty').setData({ type: 'FeatureCollection', features: unc });
     map.getSource('velocity').setData({ type: 'FeatureCollection', features: vel });
-    updateLabels(frame.tracks);
+    updateLabels(trackList);
 
-    clockEl.textContent = `${frame.time.toFixed(1)} s`;
+    clockEl.textContent = `${clockTime.toFixed(1)} s`;
+    countEl.textContent = trackList.length;
+  }
+
+  function render(frame) {
+    // A real frame arrived: stop any dead-reckoning and snap to the truth.
+    stopDeadReckoning();
+    lastTracks = frame.tracks;
+    lastTime = frame.time;
+
+    const plots = [];
+    for (const p of (frame.plots || [])) {
+      plots.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [p.lon_deg, p.lat_deg] },
+        properties: { has_ssr: p.has_ssr },
+      });
+    }
+    map.getSource('plots').setData({ type: 'FeatureCollection', features: plots });
+
+    drawTracks(frame.tracks, frame.time);
     sensorEl.textContent = frame.sensor;
-    countEl.textContent = frame.tracks.length;
 
     // Fit the view to the first frame that has tracks.
-    if (!fitted && tracks.length > 0) {
+    if (!fitted && frame.tracks.length > 0) {
       const lons = frame.tracks.map(t => t.lon_deg), lats = frame.tracks.map(t => t.lat_deg);
       map.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
         { padding: 120, maxZoom: 9, duration: 0 });
@@ -381,6 +430,9 @@
       const data = JSON.parse(ev.data);
       if (data.event === 'delay_triggered') {
         showDelayBanner(data.duration_s);
+        // Bridge the delivery gap by extrapolating the tracks forward at the
+        // playback speed; the next real frame will snap them back to truth.
+        startDeadReckoning(data.speed || 1.0);
       } else {
         render(data);
       }

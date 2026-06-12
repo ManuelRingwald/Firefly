@@ -1,7 +1,7 @@
 //! The axum application: shared state, routes and the WebSocket frame pump.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -12,7 +12,7 @@ use axum::{
 };
 use firefly_io::Frame;
 
-use crate::pacing::delay_before;
+use crate::pacing::due_at;
 
 /// Shared, read-only application state handed to every request.
 ///
@@ -80,13 +80,20 @@ async fn pump_frames(mut socket: WebSocket, state: AppState) {
         frames = state.frames.len(),
         "client connected; replaying scene"
     );
-    let mut prev: Option<f64> = None;
+    // Absolute pacing: every frame's due time is measured from this fixed
+    // origin and the stream's first data-time, so a delivery hiccup is caught
+    // up afterwards instead of shifting the whole schedule (see `crate::pacing`).
+    let origin = Instant::now();
+    let first = state.frames.first().map(|f| f.time.as_secs());
     let mut sent = 0usize;
 
     for frame in state.frames.iter() {
-        let now = frame.time.as_secs();
-        let delay = delay_before(prev, now, state.speed);
-        if !wait_or_handle_delay_trigger(&mut socket, delay).await {
+        let delay = match first {
+            Some(first) => due_at(origin, first, frame.time.as_secs(), state.speed)
+                .saturating_duration_since(Instant::now()),
+            None => Duration::ZERO,
+        };
+        if !wait_or_handle_delay_trigger(&mut socket, delay, state.speed).await {
             tracing::info!(sent, "client disconnected mid-stream");
             return;
         }
@@ -103,7 +110,6 @@ async fn pump_frames(mut socket: WebSocket, state: AppState) {
             tracing::info!(sent, "client disconnected mid-stream");
             return;
         }
-        prev = Some(now);
         sent += 1;
     }
 
@@ -116,7 +122,7 @@ async fn pump_frames(mut socket: WebSocket, state: AppState) {
 /// Each time the trigger arrives, an `delay_triggered` event is sent and the
 /// wait restarts from [`DELAY_TRIGGER_PAUSE`]. Returns `false` if the socket
 /// closed or errored, in which case the caller should stop.
-async fn wait_or_handle_delay_trigger(socket: &mut WebSocket, delay: Duration) -> bool {
+async fn wait_or_handle_delay_trigger(socket: &mut WebSocket, delay: Duration, speed: f64) -> bool {
     let sleep = tokio::time::sleep(delay);
     tokio::pin!(sleep);
 
@@ -126,7 +132,14 @@ async fn wait_or_handle_delay_trigger(socket: &mut WebSocket, delay: Duration) -
             message = socket.recv() => match message {
                 Some(Ok(Message::Text(text))) if text == "delay" => {
                     tracing::info!(pause_s = DELAY_TRIGGER_PAUSE.as_secs_f64(), "delay trigger received");
-                    let notice = r#"{"event":"delay_triggered","duration_s":5.0}"#;
+                    // The notice carries the playback speed so the client can
+                    // dead-reckon the tracks forward over the pause at the same
+                    // data-time rate the live stream would have advanced.
+                    let notice = format!(
+                        r#"{{"event":"delay_triggered","duration_s":{},"speed":{}}}"#,
+                        DELAY_TRIGGER_PAUSE.as_secs_f64(),
+                        speed,
+                    );
                     if socket.send(Message::Text(notice.into())).await.is_err() {
                         return false;
                     }
