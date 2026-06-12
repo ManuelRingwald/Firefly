@@ -1,82 +1,158 @@
 # Firefly
 
-A web-based **radar tracker** — the computational heart of an air-situation
-picture (*Luftlagedarstellung*). Firefly turns the noisy, intermittent plot
-streams of primary (PSR) and secondary (SSR) surveillance radars into clean,
-continuous **tracks**: estimated position, velocity and identity for every
-aircraft in coverage.
+Ein web-basierter **Radar-Tracker** — das Rechen-Herzstück einer
+Luftlagedarstellung (*air-situation picture*). Firefly verwandelt die
+verrauschten, lückenhaften Meldungen von Primär- (PSR) und Sekundärradar (SSR)
+in saubere, durchgehende **Tracks**: Position, Geschwindigkeit und Identität
+jedes Flugzeugs im Überwachungsbereich — live als 2D-Karte im Browser.
 
-> **Status: early development.** This is an open, educational demonstrator of
-> the real algorithms used in air surveillance — not a certified operational
-> system.
+> **Status:** Lern- und Demonstrationsprojekt, kein zertifiziertes
+> Betriebssystem. Die Algorithmen orientieren sich aber an echten
+> Flugsicherungsverfahren (EUROCONTROL-/ASTERIX-Standards).
 
-## What it does (and will do)
+---
 
-The processing chain from detections to tracks:
+## Loslegen — in 2 Minuten zur Live-Karte
 
-1. **Sensor / measurement model** — PSR gives range + azimuth (no identity, no
-   barometric height); SSR adds Mode 3/A (squawk), Mode C (flight level) and
-   Mode S (ICAO address). Measurements are polar and sensor-referenced.
-2. **Track initiation** — forming tentative tracks from unassociated plots.
-3. **Prediction** — motion models: constant velocity / acceleration /
-   coordinated turn, ultimately IMM for manoeuvring targets.
-4. **Gating & data association** — assigning plots to tracks (NN → GNN →
-   JPDA / MHT) via a validation gate.
-5. **Filtering** — Kalman / Extended Kalman state estimation.
-6. **Track maintenance** — confirmation, coasting on misses, deletion.
-7. **Multi-radar fusion** — time/bias registration and combining PSR + SSR +
-   ADS-B into one air picture.
-8. **Web display** — live 2-D map of tracks over WebSocket.
+Es gibt zwei Wege, Firefly zu starten. Beide enden am selben Ort: einem
+Browser-Fenster mit einer 2D-Karte, auf der Flugzeuge live als Punkte mit
+Geschwindigkeitspfeil über den Bildschirm wandern.
 
-## Roadmap
+### Weg A — mit Docker (empfohlen, keine Rust-Installation nötig)
 
-| Milestone | Scope | Status |
-|-----------|-------|--------|
-| **M1** | Scenario + radar-plot simulator (data source) | ✅ in progress |
-| **M2** | Single-radar tracker: gating + GNN + Kalman, track lifecycle | ⏳ next |
-| **M3** | Web frontend with live 2-D map over WebSocket | ⏳ |
-| **M4** | SSR/ADS-B identity correlation + multi-radar fusion | ⏳ |
-| **M5** | IMM / JPDA for manoeuvres and dense traffic | ⏳ |
-
-## Architecture
-
-A Rust workspace (engine) plus a JavaScript map frontend (added in M3).
-Input/interchange targets the **ASTERIX** format used by real radar systems
-(CAT048 monoradar target reports, CAT021 ADS-B, CAT062 system tracks).
-
-```
-firefly-geo      Geodesy: WGS84 ↔ ECEF ↔ local ENU ↔ polar
-firefly-core     Shared domain types: plots, sensors, time, identities
-firefly-sim      Scenario + radar-plot simulator (M1)
-firefly-asterix  ASTERIX CAT048/021/062 encode/decode (M1.5)
-firefly-track    Gating + association + Kalman filter + track lifecycle (M2)
-firefly-server   axum WebSocket server (M3)
-web/             MapLibre 2-D air-picture frontend (M3)
-```
-
-## Building
-
-Requires a recent Rust toolchain.
+Voraussetzung: [Docker](https://www.docker.com/) ist installiert.
 
 ```bash
-cargo test --workspace          # run all tests
-cargo run --example demo -p firefly-sim   # see the M1 simulator in action
+docker-compose up
 ```
 
-The `demo` example builds a two-aircraft scenario around a single radar and
-prints the resulting plot stream.
+Dann im Browser öffnen: **http://localhost:8080**
 
-## Design notes
+### Weg B — lokal mit Rust
 
-- **Reproducibility:** the simulator uses a seeded PCG32 PRNG, so a given seed
-  yields exactly the same plot stream on any machine — essential for
-  regression-testing tracker behaviour.
-- **Polar noise:** measurement noise is applied in the radar's native polar
-  frame (range vs. angle), where it physically lives, not in Cartesian x/y.
-- **Frames:** target motion is scripted in one shared local ENU frame; each
-  radar re-projects ground truth into its own polar frame, keeping per-sensor
-  geometry geodetically correct.
+Voraussetzung: ein aktueller [Rust-Toolchain](https://www.rust-lang.org/) ist
+installiert.
 
-## License
+```bash
+cargo run -p firefly-server
+```
+
+Dann im Browser öffnen: **http://localhost:8080**
+
+---
+
+## Was du im Browser siehst
+
+Nach dem Start zeigt die Karte eine **Demo-Szene**: zwei Flugzeuge, die unter
+einem einzelnen Radar fliegen. Jedes Flugzeug erscheint als Punkt mit:
+
+- einem **Pfeil** (Richtung und Geschwindigkeit über Grund),
+- einer **Farbe**, die den Status anzeigt (bestätigter Track = grün,
+  noch unbestätigt/„tentativ" = gelb, „coasting" = grau — siehe
+  [Glossar](docs/glossary.md)),
+- einem **gestrichelten Unsicherheits-Ring**, wenn der Track gerade
+  „coastet" (extrapoliert wird, weil grade keine frische Messung da war).
+
+### Bedienelemente im HUD (oben rechts)
+
+| Knopf | Was er tut |
+|-------|-----------|
+| **„Verzug simulieren (5 s)"** | Simuliert eine 5 Sekunden lange Zustellverzögerung — die Berechnung läuft unverändert weiter, nur die Anzeige hängt kurz. Zeigt: Firefly ist *robust* gegenüber holpriger Netzwerkzustellung (siehe [M3 — Vom Tracker zum Live-Lagebild](docs/milestones/M3-live-picture.md)). |
+| **„airspaces"** | Blendet eine Luftraum-Übersicht (TMA, CTR, Sperrgebiet) als violette Flächen über die Karte. Beispieldaten rund um Frankfurt (`crates/firefly-server/static/airspaces.geojson`). |
+| **„raw plots"** | Blendet die **rohen Radar-Messungen** ein (kleine rote Punkte) — das, was der Tracker als *Input* bekommt, bevor daraus glatte Tracks werden. Gut zum Vergleich: „was misst das Radar" vs. „was berechnet der Tracker". |
+
+### Die Frankfurt-Showcase-Szene
+
+Die Demo-Szene ist bewusst klein und einfach. Für ein realistischeres Bild —
+**drei Radarstandorte, acht Flugzeuge**, mit überlappenden Reichweiten,
+Kurven, Warteschleife und einem Flugzeug ohne Transponder — gibt es die
+**Frankfurt-Szene**. Sie läuft 240 Sekunden lang und zeigt typische
+Situationen, für die der Tracker extra Mechanik braucht:
+
+- zwei parallele Anflüge mit nur ~150 m Abstand (JPDA — die Tracks dürfen
+  sich nicht vertauschen oder verschmelzen),
+- ein Abflug mit Kurve (IMM — Manöver-Erkennung),
+- ein Flugzeug ohne SSR-Transponder (zeigt nur als Roh-Plot, nie als
+  identifizierter Track),
+- ein Nordanflug, der mitten im Flug von einem zweiten Radar übernommen wird
+  (Multi-Radar-Handover).
+
+**Mit Docker:**
+
+```bash
+FIREFLY_SCENE=frankfurt docker-compose up
+```
+
+**Lokal:**
+
+```bash
+FIREFLY_SCENE=frankfurt cargo run -p firefly-server
+```
+
+Tipp: Schalte „raw plots" ein und beobachte das primary-only-Flugzeug — du
+siehst die roten Mess-Punkte, aber nie einen grünen Track mit Identität dafür.
+
+---
+
+## Was Firefly tut (Verarbeitungskette)
+
+Von der Radarmessung zum Track:
+
+1. **Sensor-/Messmodell** — PSR liefert Entfernung + Azimut (keine Identität,
+   keine Höhe aus Mode C); SSR liefert zusätzlich Mode 3/A (Squawk), Mode C
+   (Flughöhe) und Mode S (ICAO-Adresse). Messungen sind polar und
+   sensor-bezogen.
+2. **Track-Initiierung** — aus nicht zugeordneten Plots entstehen vorläufige
+   Tracks.
+3. **Prädiktion** — Bewegungsmodelle: konstante Geschwindigkeit,
+   koordinierte Kurve, kombiniert über IMM für manövrierende Ziele.
+4. **Gating & Datenassoziation** — Plots werden Tracks zugeordnet
+   (Validierungstor, JPDA bei dichtem Verkehr).
+5. **Filterung** — Kalman-Filter-Zustandsschätzung.
+6. **Track-Pflege** — Bestätigung, Coasting bei Fehltreffern, Löschung.
+7. **Multi-Radar-Fusion** — mehrere Radare tragen zu einem gemeinsamen
+   Lagebild bei (zentrale Mess-Fusion).
+8. **Web-Anzeige** — Live-2D-Karte über WebSocket, inkl. Roh-Plots und
+   Luftraum-Overlay.
+
+## Architektur
+
+Ein Rust-Workspace (Rechen-Kern + Server) plus ein JavaScript/MapLibre-Frontend.
+Aus-/Eingabe orientiert sich am **ASTERIX**-Format echter Radarsysteme
+(CAT048 Mono-Radar-Zielmeldungen, CAT062 System-Tracks).
+
+```
+firefly-geo        Geodäsie: WGS84 ↔ ECEF ↔ lokales ENU ↔ polar, Projektionen
+firefly-core       Gemeinsame Domänentypen: Plots, Sensoren, Zeit, Identitäten
+firefly-sim        Szenario- + Radar-Plot-Simulator (M1)
+firefly-track      Gating + Assoziation (GNN/JPDA) + Kalman/IMM + Track-Lebenszyklus (M2, M5)
+firefly-asterix    ASTERIX CAT062 Encoder/Decoder (M3.X, Häppchen C/D)
+firefly-io         Neutrales Ausgabe-Format „Frame" (Zeit + Tracks + Roh-Plots, JSON) (M3, M6.3)
+firefly-player     Szenario → Tracker → Frame-Strom, deterministisch (M3)
+firefly-multicast  UDP-Multicast-Versand/-Empfang von CAT062 (ADR 0006)
+firefly-server     axum-WebSocket-Server + eingebettetes Web-Frontend (M3, M6)
+```
+
+## Bauen & Testen
+
+```bash
+cargo test --workspace          # alle Tests
+cargo run -p firefly-server     # Server starten (siehe „Loslegen")
+cargo run --example demo -p firefly-sim   # nur den M1-Simulator sehen
+```
+
+## Container & Cloud-Deployment
+
+Details zu Docker, docker-compose und Cloud-Deployment (Kubernetes, Cloud
+Run, ECS) stehen in [DOCKER.md](DOCKER.md).
+
+## Mehr erfahren
+
+- [docs/README.md](docs/README.md) — Dokumentations-Wegweiser (Glossar,
+  Meilenstein-Erklärungen, Architektur-Entscheidungen, Anforderungs-Register).
+- [docs/STATUS.md](docs/STATUS.md) — aktueller Arbeitsstand & nächste Schritte.
+- [CLAUDE.md](CLAUDE.md) — Arbeitsregeln dieses Projekts.
+
+## Lizenz
 
 MIT

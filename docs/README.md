@@ -17,11 +17,15 @@ Schritt und ist bewusst für Leser **ohne** tiefe IT-Vorbildung geschrieben.
   - [M3 — Vom Tracker zum Live-Lagebild im Browser](milestones/M3-live-picture.md)
   - [M3.X — Der CAT062-Encoder](milestones/M3X-cat062-encoder.md)
   - [M4 — Mehrere Radare, ein Lagebild](milestones/M4-multi-radar-fusion.md)
+  - [M5 — IMM & JPDA: Manöver und dichter Verkehr](milestones/M5-imm.md)
+  - [M6 — Showcase Frankfurt, Karte & Container](milestones/M6-showcase.md)
 - **[decisions/](decisions/)** — Entscheidungs-Logbuch (ADRs): welche wichtige
   Weichenstellung *warum* getroffen wurde.
 - **[requirements/](requirements/)** — Anforderungs-Register mit
   Rückverfolgbarkeit (Anforderung → Code → Test). Kern der
   Zertifizierungs-Fähigkeit.
+- **[../DOCKER.md](../DOCKER.md)** — Container-Setup (Docker/docker-compose),
+  lokaler Start und Cloud-Deployment.
 
 ## Wie wir arbeiten
 
