@@ -179,6 +179,37 @@ Umgebungsvariablen (`FIREFLY_SCENE`, `RUST_LOG`, 12-Factor), Healthcheck gegen
 `/health`. Details und Cloud-Hinweise (Kubernetes, Cloud Run, ECS) in
 [`DOCKER.md`](../../DOCKER.md).
 
+## M6.5 — Realismus-Nachträge (erledigt)
+
+Drei Verbesserungen, die das Live-Bild näher an einen echten Radarschirm rücken:
+
+**Verzug-Demo holt jetzt auf (Dead-Reckoning + Snap).** Vorher pausierte der
+„Verzug"-Knopf die Zustellung und lief danach dort weiter, wo er eingefroren
+war — das Bild hing dauerhaft 5 s hinter der Wirklichkeit. Jetzt taktet der
+Server **absolut** (jeder Frame hat einen festen Soll-Sendezeitpunkt ab
+Replay-Start), sodass die während der Pause aufgelaufenen Frames danach sofort
+durchlaufen und das Bild zur Gegenwart **aufholt**. Während der Lücke
+extrapoliert das Frontend jedes Track-Symbol aus seiner Geschwindigkeit
+(*Dead-Reckoning*), sodass die Flieger weitergleiten statt einzufrieren; der
+nächste echte Frame lässt sie auf die wahre Position **einschnappen**. Wichtige
+Abgrenzung: Das ist reine Anzeige-Überbrückung verspäteter Daten — anders als
+echtes Tracker-*Coasting*, bei dem dem Track *Messungen fehlen*. Der
+deterministische Track-Strom bleibt in beiden Fällen unangetastet
+(NFR-CLOUD-004).
+
+**History-Trail (Kometenschweif).** Roh-Plots und vergangene Track-Positionen
+bleiben jetzt als verblassende Spur stehen (statt jeden Frame ersetzt zu
+werden) — das prägende Bild eines echten Radarschirms. Das behebt zugleich,
+dass Roh-Plots vorher nur einen Frame lang aufblitzten; sie sind nun als
+fadende Spur sicht- und (per „raw plots"-Knopf) schaltbar.
+
+**Realistische, gemischte Scan-Perioden.** Die drei Frankfurt-Radare drehten
+vorher alle mit 4 s. Jetzt mischt die Szene ein schnelles Anflugradar (~4 s) mit
+zwei langsameren En-Route-Radaren (~10 s und ~12 s), wie in einem echten Setup.
+Der adaptive Lebenszyklus (ADR 0012) lernt das wahre Revisit-Intervall jedes
+Tracks, sodass die acht Flugzeuge weiterhin je genau eine stabile Track-ID
+behalten.
+
 ## Ausblick
 
 - Live-Anbindung der OpenAIP-API für reale Luftraumdaten (statt der

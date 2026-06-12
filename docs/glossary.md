@@ -146,6 +146,25 @@ muss (oft „M aus N": z. B. in 3 von 4 Scans wiedergesehen).
 **Coasting**
 Wenn ein bestätigter Track in einem Scan keinen Plot bekommt (Ziel kurz nicht
 gesehen), „segelt" er auf Basis der Vorhersage weiter, statt sofort zu sterben.
+Das ist ein Vorgang **im Tracker**: dem Track *fehlt* eine Messung, seine
+Unsicherheit wächst wirklich. Nicht zu verwechseln mit dem *Anzeige*-
+Dead-Reckoning (siehe unten), bei dem die Daten nur *spät* ankommen.
+
+**Dead-Reckoning (Koppelnavigation, Anzeige-Ebene)**
+Überbrückt eine *Zustell*-Lücke (das Netz ist langsam, der „Verzug"-Knopf):
+Die Anzeige rechnet jedes Track-Symbol aus seiner letzten bekannten
+Geschwindigkeit **weiter**, damit der Flieger nicht in der Luft stehenbleibt.
+Kommen die echten Daten wieder, **schnappt** das Symbol auf die Wahrheit. Reine
+Anzeige-Überbrückung — die Track-Daten selbst bleiben unangetastet
+(NFR-CLOUD-004). Anders als beim Coasting *fehlen* keine Messungen; sie sind nur
+verspätet. Damit das Bild nicht dauerhaft nachhängt, holt der Server den
+Rückstand danach auf (absolutes Pacing, „springt nach vorn").
+
+**History-Trail / Kometenschweif**
+Auf einem echten Radarschirm verschwinden Plots und vergangene Track-Positionen
+nicht sofort, sondern bleiben als **verblassende Spur** stehen. Firefly zeichnet
+dafür die Roh-Plots und die letzten Track-Positionen der jeweils letzten
+Sekunden, deren Helligkeit mit dem Alter abnimmt.
 
 **Update-Alter (*Track Update Age*)**
 Wie viel **Datenzeit** seit dem letzten *realen Treffer* eines Tracks vergangen

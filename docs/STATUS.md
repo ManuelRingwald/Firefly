@@ -17,7 +17,17 @@
     aktuell war. Frontend zeigt „coasting" jetzt erst, wenn `update_age_s` über
     `COAST_DISPLAY_THRESHOLD_S = 5.0` (eine Scan-Periode) liegt.
   - Doku: `docs/milestones/M6-showcase.md` (M6.3-Abschnitt ergänzt, „Ausblick" bereinigt).
-  - **Alle Tests grün, Clippy sauber, `cargo fmt` ok.**
+  - **Verzug-Demo holt auf (Dead-Reckoning + Snap):** Server taktet jetzt **absolut**
+    (`pacing::due_at`), sodass nach dem 5-s-Verzug die aufgelaufenen Frames durchlaufen und
+    das Bild zur Gegenwart aufholt. Das Frontend extrapoliert die Tracks während der Lücke aus
+    ihrer Geschwindigkeit und schnappt beim nächsten echten Frame ein. Die `delay_triggered`-
+    Nachricht trägt jetzt `speed`. Track-Strom unangetastet (NFR-CLOUD-004).
+  - **History-Trail (Kometenschweif):** Roh-Plots und vergangene Track-Positionen bleiben als
+    verblassende Spur (Frontend), behebt auch das kurze Aufblitzen der Plots.
+  - **Realistische, gemischte Scan-Perioden:** Frankfurt-Radare 4 s (Anflug) / 10 s / 12 s
+    (En-Route) statt einheitlich 4 s; 8 stabile IDs bleiben (ADR 0012).
+  - Glossar: Dead-Reckoning, History-Trail/Kometenschweif ergänzt.
+  - **Alle Tests grün (32 Suites), Clippy sauber, `cargo fmt` ok, JS-Syntax geprüft.**
 - **Live-Debugging (diese Sitzung, direkt auf `main`):** Beim ersten Start über Docker blieb die
   Karte leer — behoben: ungültige Font-Awesome-Glyphs-URL entfernt, Track-Label-Layer komplett auf
   HTML-Marker (`maplibregl.Marker`) umgestellt (kein externer Glyphs-Server mehr nötig).
@@ -315,8 +325,9 @@ Warteschleife, Multi-Radar-Überlappung), acht stabile Track-IDs über 240 s,
 - ✅ **M6.2** OpenStreetMap-Hintergrundkarte + Airspace-Overlay (GeoJSON, Layer-Toggle).
 - ✅ **M6.3** Roh-Plot-Transparenz-Ebene (zeigt Radar-Plots vor Tracker-Verarbeitung).
 - ✅ **M6.4** Docker-Containerisierung (Multi-Stage-Build, docker-compose, DOCKER.md).
-- ✅ **M6.5** Nachträge: Server-seitige polar→WGS84-Konvertierung für `plots` +
-  entflackerte Coasting-Anzeige bei mehreren Radaren.
+- ✅ **M6.5** Nachträge: Server-seitige polar→WGS84-Konvertierung für `plots`,
+  entflackerte Coasting-Anzeige, Verzug-Aufholen mit Dead-Reckoning,
+  History-Trail (Kometenschweif) und realistische gemischte Scan-Perioden.
 
 ➡️ **Als Nächstes — gemeinsam mit dem Projektverantwortlichen entscheiden:**
 
