@@ -242,10 +242,18 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   Status zu `t`: `update_age = t − last_hit_time`, `coasting = t >
   last_hit_time`. WGS84-Projektion mit `system_tracks` geteilt
   (`system_track_from`). **FR-TRK-024**, Tests `tracker::snapshot_at_*`.
-- [ ] **13.4 — Periodischer Ausgabetakt im Player/Server (S4).** `Player::frames`
-  puffert Plots nach Datenzeit, arbeitet sie kontinuierlich in den Tracker und
-  emittiert Frames im festen Takt `T_out` (12-Factor: `FIREFLY_OUTPUT_PERIOD`,
-  Default = kleinste Sensorperiode). `pacing::due_at` bleibt unverändert.
+- [x] **13.4 — Periodischer Ausgabetakt im Player (S4). ✅ umgesetzt (Player-Kern;
+  Server-Cutover in 13.7).** `Player::periodic_snapshots(t_out)` /
+  `periodic_frames(t_out)` arbeiten die Plots in Datenzeit-Reihenfolge einzeln
+  über `process_plot` ein und emittieren das Lagebild im festen Takt `t_out`
+  über `snapshot_at`. Default `t_out` = kleinste Sensorperiode
+  (`default_output_period`); `FIREFLY_OUTPUT_PERIOD`-Anbindung folgt beim
+  Server-Cutover (13.7). `periodic_frames` bündelt die Roh-Plots des
+  Ausgabe-Fensters. Bestehende `scans()`/`frames()` (Batch) unverändert
+  (Ansatz B); `pacing::due_at` unberührt. **FR-IO-005**, Tests
+  `firefly-player::{periodic_*, default_output_period_*, finer_heartbeat_*}`.
+  Bis 13.5 für Einzel-Radar validiert (der async-Pfad setzt zeitlich getrennte
+  Plots voraus).
 - [ ] **13.5 — Simulator-Foundation neu einspielen (S3).** Den WIP aus `6a58a03`
   wieder aufnehmen (`git cherry-pick 6a58a03` als Ausgangspunkt) — jetzt *deckt*
   ihn die Pro-Plot-Pipeline. `scan_offset` entfällt endgültig.
@@ -270,7 +278,9 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
 - **13.3 erledigt:** `Tracker::snapshot_at(t)` (read-only Zeit-Projektion aller
   Tracks, `system_track_from` geteilt mit `system_tracks`), FR-TRK-024; alle
   Gates grün.
-- **Nächster Schritt:** Häppchen **13.4** (periodischer Ausgabetakt im
-  Player/Server — Plots puffern, kontinuierlich in den Tracker arbeiten, Frames
-  im festen Takt `T_out` via `snapshot_at` emittieren, S4), erklären → Go →
-  bauen.
+- **13.4 erledigt:** periodischer Ausgabetakt im Player
+  (`periodic_snapshots`/`periodic_frames`, `default_output_period`), FR-IO-005;
+  Batch unverändert, alle Gates grün.
+- **Nächster Schritt:** Häppchen **13.5** (Simulator-Foundation neu einspielen —
+  azimut-abhängige Pro-Plot-Zeitstempel, `scan_offset` entfernen; Basis-WIP in
+  Commit `6a58a03`, jetzt von der Pro-Plot-Pipeline gedeckt, S3).

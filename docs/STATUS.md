@@ -5,10 +5,10 @@
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
 - **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/serene-heisenberg-xq4rla`:
-  **ADR 0013 Häppchen 13.1 + 13.2 + 13.3 umgesetzt** — `Tracker::process_plot`
-  (asynchrone Pro-Plot-Verarbeitung) additiv, zeit-kontinuierlicher
-  Lebenszyklus, und `Tracker::snapshot_at(t)` (read-only Zeit-Projektion aller
-  Tracks für den künftigen periodischen Ausgabetakt), Ansatz B;
+  **ADR 0013 Häppchen 13.1–13.4 umgesetzt** — `Tracker::process_plot` (async
+  Pro-Plot-Verarbeitung) additiv, zeit-kontinuierlicher Lebenszyklus,
+  `Tracker::snapshot_at(t)` (read-only Zeit-Projektion) und der **periodische
+  Ausgabetakt** im Player (`periodic_snapshots`/`periodic_frames`), Ansatz B;
   `process_scan`/Batch unverändert, alle Gates grün)
 - **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
   Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
@@ -43,12 +43,14 @@
 > ADR 0011) ist für die heutigen Tests tragend, solange der Simulator
 > gleichzeitige Plots liefert (bis 13.5). FR-TRK-022/023, Tests
 > `tracker::process_plot_*`, `track::expected_revisit_*`.
-> **13.3 ist umgesetzt:** `Tracker::snapshot_at(t)` projiziert read-only **alle**
-> Tracks auf eine gemeinsame Ausgabezeit `t` (IMM-Prädiktion auf einer Kopie,
-> ohne den Zustand zu verändern) — die Grundlage für den festen Ausgabe-Herzschlag.
-> FR-TRK-024, Tests `tracker::snapshot_at_*`.
-> **Nächster Schritt: Häppchen 13.4** (periodischer Ausgabetakt im Player/Server,
-> S4). Der Foundation-WIP des Simulators
+> **13.3 + 13.4 sind umgesetzt:** `Tracker::snapshot_at(t)` projiziert read-only
+> **alle** Tracks auf eine gemeinsame Ausgabezeit `t`; darauf bauen
+> `Player::periodic_snapshots`/`periodic_frames` den **festen Ausgabe-Herzschlag**
+> (`t_out`, Default = kleinste Sensorperiode) — entkoppelt vom unregelmäßigen
+> Eingang. FR-TRK-024 / FR-IO-005, Tests `tracker::snapshot_at_*`,
+> `firefly-player::periodic_*`.
+> **Nächster Schritt: Häppchen 13.5** (Simulator-Foundation neu einspielen, S3).
+> Der Foundation-WIP des Simulators
 > (azimut-abhängige Zeitstempel, `scan_offset` entfernt) liegt weiter in Commit
 > **`6a58a03`** (zurückgenommen via **`0959059`**) und wird in 13.5 wieder
 > eingespielt. Vollständiger Häppchen-Plan (**13.1–13.7**) im Abschnitt

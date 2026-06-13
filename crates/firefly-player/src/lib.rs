@@ -30,6 +30,10 @@ pub struct Player {
     sensor: SensorId,
     plots: Vec<Plot>,
     tracker: Tracker,
+    /// Default period (seconds) for the **decoupled periodic output**
+    /// (ADR 0013, Häppchen 13.4): the smallest radar scan period in the
+    /// scenario, so the heartbeat is at least as fast as the quickest sensor.
+    default_output_period: f64,
 }
 
 impl Player {
@@ -47,10 +51,24 @@ impl Player {
             .map(|radar| radar.sensor.id)
             .unwrap_or(SensorId(0));
 
+        // The default output heartbeat is the fastest sensor's scan period; with
+        // no radar it falls back to a plausible 4 s so the value is always sane.
+        let default_output_period = scenario
+            .radars()
+            .iter()
+            .map(|radar| radar.params.scan_period)
+            .fold(f64::INFINITY, f64::min);
+        let default_output_period = if default_output_period.is_finite() {
+            default_output_period
+        } else {
+            4.0
+        };
+
         Self {
             sensor,
             plots: firefly_sim::run(scenario),
             tracker: Tracker::new(config),
+            default_output_period,
         }
     }
 
@@ -119,6 +137,93 @@ impl Player {
                 &frame_plots,
                 &self.tracker.system_tracks(),
             ));
+        }
+        out
+    }
+
+    /// The default output heartbeat period (seconds): the fastest radar's scan
+    /// period (ADR 0013, Häppchen 13.4). The caller (server) may override it via
+    /// configuration (`FIREFLY_OUTPUT_PERIOD`) at the cut-over (Häppchen 13.7).
+    pub fn default_output_period(&self) -> f64 {
+        self.default_output_period
+    }
+
+    /// Run the whole scenario on the **asynchronous** path and report the air
+    /// picture on a **fixed output heartbeat** of `t_out` seconds (ADR 0013,
+    /// Häppchen 13.4) — the periodic counterpart to [`scans`](Player::scans).
+    ///
+    /// Plots are fed one at a time, in data-time order, through
+    /// [`Tracker::process_plot`]; at each tick `k · t_out` the tracks are
+    /// reported via [`Tracker::snapshot_at`] (a read-only projection to that
+    /// instant). The result is a regular, predictable stream independent of the
+    /// irregular input cadence — what a real SDPS emits — while staying a pure,
+    /// deterministic function of the scenario (NFR-CLOUD-002, NFR-REPRO-001).
+    /// Ticks with no fresh plots still produce a snapshot (coasting tracks),
+    /// which is exactly the stable heartbeat the ASD wants.
+    ///
+    /// This is the shared periodic core both output adapters build on; the
+    /// server/CAT062 cut-over to it is Häppchen 13.7. Until the simulator emits
+    /// per-plot (azimuth-dependent) timestamps (Häppchen 13.5), feed it
+    /// single-radar scenarios — the per-plot path assumes time-separated plots.
+    pub fn periodic_snapshots(mut self, t_out: f64) -> Vec<(Timestamp, Vec<SystemTrack>)> {
+        let mut out = Vec::new();
+        if t_out <= 0.0 || self.plots.is_empty() {
+            return out;
+        }
+        let horizon = self.plots.last().unwrap().time.as_secs();
+        let mut i = 0;
+        let mut tick = t_out;
+        while tick <= horizon + 1e-9 {
+            // Work in every plot whose data time is at or before this tick.
+            while i < self.plots.len() && self.plots[i].time.as_secs() <= tick + 1e-9 {
+                self.tracker.process_plot(&self.plots[i]);
+                i += 1;
+            }
+            let ts = Timestamp(tick);
+            out.push((ts, self.tracker.snapshot_at(ts)));
+            tick += t_out;
+        }
+        out
+    }
+
+    /// Periodic [`Frame`] stream: the JSON-adapter projection over
+    /// [`periodic_snapshots`](Player::periodic_snapshots) (ADR 0013, Häppchen
+    /// 13.4). Each tick's [`Frame`] carries the track snapshot at that instant
+    /// plus the **raw plots that arrived in this output window** (since the
+    /// previous tick), lifted to WGS84 — keeping the web view's plot overlay
+    /// meaningful at the fixed heartbeat. A plot whose sensor is unregistered is
+    /// dropped (it could not be geolocated or tracked).
+    pub fn periodic_frames(mut self, t_out: f64) -> Vec<Frame> {
+        let sensor = self.sensor;
+        let mut out = Vec::new();
+        if t_out <= 0.0 || self.plots.is_empty() {
+            return out;
+        }
+        let horizon = self.plots.last().unwrap().time.as_secs();
+        let mut i = 0;
+        let mut tick = t_out;
+        while tick <= horizon + 1e-9 {
+            let start = i;
+            while i < self.plots.len() && self.plots[i].time.as_secs() <= tick + 1e-9 {
+                self.tracker.process_plot(&self.plots[i]);
+                i += 1;
+            }
+            let frame_plots: Vec<FramePlot> = self.plots[start..i]
+                .iter()
+                .filter_map(|p| {
+                    let sensor_model = self.tracker.config().sensors.get(&p.sensor)?;
+                    let position = sensor_model.frame.enu_to_geodetic(&p.measurement.to_enu());
+                    Some(FramePlot::from_plot(
+                        position.lat_deg(),
+                        position.lon_deg(),
+                        p.kind.has_secondary(),
+                    ))
+                })
+                .collect();
+            let ts = Timestamp(tick);
+            let snapshot = self.tracker.snapshot_at(ts);
+            out.push(Frame::new(ts, sensor, &frame_plots, &snapshot));
+            tick += t_out;
         }
         out
     }
@@ -235,5 +340,86 @@ mod tests {
             .add_target(northbound_target());
         let frames = Player::new(&scenario, config()).frames();
         assert!(frames.is_empty());
+    }
+
+    // --- ADR 0013, Häppchen 13.4: decoupled periodic output ----------------
+
+    /// The default output heartbeat is the fastest radar's scan period (4 s
+    /// here). REQ: FR-IO-005
+    #[test]
+    fn default_output_period_is_the_fastest_scan_period() {
+        let player = Player::new(&scenario(), config());
+        assert!((player.default_output_period() - 4.0).abs() < 1e-9);
+    }
+
+    /// `periodic_snapshots` emits on a fixed heartbeat regardless of the input
+    /// cadence: ticks at t_out, 2·t_out, … up to the last data time.
+    /// REQ: FR-IO-005
+    #[test]
+    fn periodic_snapshots_emit_on_a_fixed_heartbeat() {
+        let snaps = Player::new(&scenario(), config()).periodic_snapshots(4.0);
+        // duration 40 s, perfect radar → last plot at t = 40 ⇒ ticks 4 … 40.
+        assert_eq!(snaps.len(), 10);
+        for (k, (time, _)) in snaps.iter().enumerate() {
+            let expected = (k as f64 + 1.0) * 4.0;
+            assert!(
+                (time.as_secs() - expected).abs() < 1e-9,
+                "tick {k} should be at {expected} s, was {}",
+                time.as_secs()
+            );
+        }
+    }
+
+    /// The target confirms within the periodic stream. REQ: FR-IO-005
+    #[test]
+    fn periodic_snapshots_confirm_a_track() {
+        let snaps = Player::new(&scenario(), config()).periodic_snapshots(4.0);
+        let confirmed = snaps
+            .iter()
+            .any(|(_, tracks)| tracks.iter().any(|t| t.confirmed));
+        assert!(
+            confirmed,
+            "the target should confirm on the heartbeat stream"
+        );
+    }
+
+    /// A finer heartbeat out-ticks the input scans: snapshots between plots show
+    /// coasting tracks, the stable picture an ASD wants. REQ: FR-IO-005
+    #[test]
+    fn finer_heartbeat_emits_more_ticks_than_input_scans() {
+        let scans = Player::new(&scenario(), config()).scans().len();
+        let snaps = Player::new(&scenario(), config())
+            .periodic_snapshots(1.0)
+            .len();
+        assert!(
+            snaps > scans,
+            "1 s heartbeat ({snaps}) should out-tick the 4 s scans ({scans})"
+        );
+    }
+
+    /// `periodic_frames` is a pure, deterministic function of the scenario.
+    /// REQ: FR-IO-005, NFR-REPRO-001
+    #[test]
+    fn periodic_frames_are_deterministic() {
+        let a = Player::new(&scenario(), config()).periodic_frames(4.0);
+        let b = Player::new(&scenario(), config()).periodic_frames(4.0);
+        assert_eq!(a, b);
+    }
+
+    /// Each periodic [`Frame`] bundles the raw plots of its output window plus
+    /// the track snapshot; across the stream every scan's plot is accounted for.
+    /// REQ: FR-IO-005
+    #[test]
+    fn periodic_frames_bundle_window_plots_and_tracks() {
+        let frames = Player::new(&scenario(), config()).periodic_frames(4.0);
+        assert!(!frames.is_empty());
+        // Perfect radar: one plot per scan, 11 scans (t = 0 … 40); each lands in
+        // exactly one output window.
+        let total_plots: usize = frames.iter().map(|f| f.plots.len()).sum();
+        assert_eq!(total_plots, 11, "every scan's plot lands in one window");
+        assert!(
+            frames.iter().any(|f| !f.tracks.is_empty()),
+            "tracks reported"
+        );
     }
 }
