@@ -98,13 +98,14 @@ fn turning() -> Target {
 pub const FRANKFURT_ORIGIN: (f64, f64) = (50.0379, 8.5622);
 
 /// Build the Frankfurt showcase [`Player`]: three radars with overlapping
-/// coverage and eight aircraft — two arrivals, two departures, two
+/// coverage and eight aircraft — two crossing targets, two departures, two
 /// overflights (one SSR-equipped, one primary-only), a holding pattern and a
 /// north-side arrival — a "busy day" picture for the M6 demonstration.
 ///
-/// Two of the eight (the parallel west arrivals) fly only ~150 m apart, on
-/// purpose: their tracker gates overlap, which is exactly the situation JPDA
-/// (M5.5–M5.9) was built to keep apart without swapping identities.
+/// Two of the eight ([`crossing_northeast`]/[`crossing_southeast`]) cross at a
+/// common point and time, so their gates overlap for a scan or two: exactly
+/// the ambiguity JPDA (M5.5–M5.9) was built to carry each track through on its
+/// own velocity, without swapping the two identities.
 fn frankfurt_player() -> Player {
     let origin = Wgs84::from_degrees(FRANKFURT_ORIGIN.0, FRANKFURT_ORIGIN.1, 0.0);
     let frame = LocalFrame::new(origin);
@@ -153,8 +154,8 @@ fn frankfurt_player() -> Player {
         .add_radar(radar_center)
         .add_radar(radar_west)
         .add_radar(radar_northeast)
-        .add_target(arrival_west_a())
-        .add_target(arrival_west_b())
+        .add_target(crossing_northeast())
+        .add_target(crossing_southeast())
         .add_target(departure_straight())
         .add_target(departure_turning())
         .add_target(overflight_ssr())
@@ -188,37 +189,46 @@ pub fn frankfurt_scans() -> Vec<(Timestamp, Vec<SystemTrack>)> {
     frankfurt_player().scans()
 }
 
-/// West arrival, aircraft A: descending into Frankfurt from the west.
+/// JPDA crossing showcase, aircraft A: flies north-east, crossing the path of
+/// [`crossing_southeast`] at a common point and time.
 ///
-/// Flies a parallel track ~150 m north of [`arrival_west_b`] at the same
-/// speed and heading — the deliberate JPDA close-pair.
-fn arrival_west_a() -> Target {
+/// The two crossers meet at ENU ≈ (−30 km, 0) at t ≈ 120 s, at the same
+/// altitude — so for a scan or two their plots are genuinely ambiguous (the
+/// gates overlap on top of each other). Unlike two *parallel* targets (which
+/// are unresolvable while close, with no kinematic cue to tell them apart),
+/// crossers carry **distinct velocity directions**: the Kalman velocity state
+/// predicts each onto the correct side after the crossing, so JPDA's soft
+/// association maintains identity through the ambiguity instead of swapping
+/// the two ids — the behaviour M5.5–M5.9 was built to demonstrate.
+fn crossing_northeast() -> Target {
     Target {
         id: TargetId(10),
         initial: State {
-            position: Enu::new(-95_000.0, -8_000.0, 3_000.0),
-            speed: 130.0,
-            heading: 75.0_f64.to_radians(),
-            climb_rate: -3.0,
+            // Crossing point (−30 km, 0) minus 120 s of NE velocity.
+            position: Enu::new(-45_276.0, -15_276.0, 6_000.0),
+            speed: 180.0,
+            heading: 45.0_f64.to_radians(),
+            climb_rate: 0.0,
         },
-        legs: vec![Leg::cruise(240.0).with_climb(-3.0)],
+        legs: vec![Leg::cruise(240.0)],
         mode_3a: Some(0o2001),
         icao_address: Some(0x3C_10_01),
     }
 }
 
-/// West arrival, aircraft B: ~150 m south of, and parallel to,
-/// [`arrival_west_a`] — together they form the JPDA close-pair showcase.
-fn arrival_west_b() -> Target {
+/// JPDA crossing showcase, aircraft B: flies south-east, crossing the path of
+/// [`crossing_northeast`] (see its doc for the full setup).
+fn crossing_southeast() -> Target {
     Target {
         id: TargetId(11),
         initial: State {
-            position: Enu::new(-95_000.0, -8_150.0, 3_000.0),
-            speed: 130.0,
-            heading: 75.0_f64.to_radians(),
-            climb_rate: -3.0,
+            // Same crossing point minus 120 s of SE velocity (mirror of A).
+            position: Enu::new(-45_276.0, 15_276.0, 6_000.0),
+            speed: 180.0,
+            heading: 135.0_f64.to_radians(),
+            climb_rate: 0.0,
         },
-        legs: vec![Leg::cruise(240.0).with_climb(-3.0)],
+        legs: vec![Leg::cruise(240.0)],
         mode_3a: Some(0o2002),
         icao_address: Some(0x3C_10_02),
     }
@@ -431,6 +441,76 @@ mod tests {
         assert!(
             max_per_frame <= 8,
             "no frame should ever show more than the eight real targets (saw {max_per_frame})"
+        );
+    }
+
+    /// The JPDA crossing showcase ([`crossing_northeast`]/[`crossing_southeast`],
+    /// track ids 1 and 2) is the scene's deliberate data-association stress
+    /// test: the two aircraft meet at one point at one time, so for a scan or
+    /// two their plots are ambiguous. JPDA must carry each track through the
+    /// crossing on its own velocity and **not swap the two identities** — the
+    /// failure a hard 1:1 association is prone to.
+    ///
+    /// We assert three things from the frame stream alone:
+    /// 1. the pair genuinely crosses (their separation drops to a few hundred
+    ///    metres — gates really do overlap), then
+    /// 2. they separate again afterwards (no merge), and
+    /// 3. their courses stay in disjoint quadrants the whole run — the
+    ///    north-east crosser always heads `< 90°`, the south-east crosser
+    ///    always `> 90°`. A swapped identity at the crossing would flip these.
+    ///
+    /// REQ: FR-TRK-018, FR-TRK-019
+    #[test]
+    fn frankfurt_crossing_pair_keeps_identity_through_the_crossing() {
+        let frames = frankfurt_frames();
+        let frame = LocalFrame::new(Wgs84::from_degrees(
+            FRANKFURT_ORIGIN.0,
+            FRANKFURT_ORIGIN.1,
+            0.0,
+        ));
+
+        let mut min_separation_m = f64::MAX;
+        let mut final_separation_m = 0.0;
+        for f in &frames {
+            // The two crossers head into disjoint course quadrants and must
+            // stay there — never swapping across the 90° divide.
+            for t in f.tracks.iter().filter(|t| t.confirmed) {
+                if t.id.0 == 1 {
+                    assert!(
+                        t.track_angle_deg < 90.0,
+                        "north-east crosser (id 1) veered to {:.0}° — identity swapped?",
+                        t.track_angle_deg
+                    );
+                } else if t.id.0 == 2 {
+                    assert!(
+                        t.track_angle_deg > 90.0,
+                        "south-east crosser (id 2) veered to {:.0}° — identity swapped?",
+                        t.track_angle_deg
+                    );
+                }
+            }
+
+            let mut positions = f
+                .tracks
+                .iter()
+                .filter(|t| t.id.0 == 1 || t.id.0 == 2)
+                .map(|t| {
+                    frame.geodetic_to_enu(&Wgs84::from_degrees(t.lat_deg, t.lon_deg, t.height_m))
+                });
+            if let (Some(a), Some(b)) = (positions.next(), positions.next()) {
+                let separation = ((a.east - b.east).powi(2) + (a.north - b.north).powi(2)).sqrt();
+                min_separation_m = min_separation_m.min(separation);
+                final_separation_m = separation;
+            }
+        }
+
+        assert!(
+            min_separation_m < 1_000.0,
+            "the pair should actually cross (gates overlap), but got no closer than {min_separation_m:.0} m"
+        );
+        assert!(
+            final_separation_m > 10_000.0,
+            "the pair should be far apart again after crossing, but ended {final_separation_m:.0} m apart"
         );
     }
 }

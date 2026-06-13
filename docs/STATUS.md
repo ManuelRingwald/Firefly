@@ -4,30 +4,28 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-12 (Branch `claude/branch-merge-main-cqzdwk` stabilisiert + nach `main` gemergt; ADR 0013 angenommen, Umsetzung ausstehend)
-- **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5). Branch
-  `claude/branch-merge-main-cqzdwk` wurde aufgeräumt und gemergt.
-
-> 🔭 **NÄCHSTE WOCHE — ADR 0013 (asynchrone Pro-Plot-Verarbeitung) umsetzen.**
-> Die Architektur-Entscheidung ist **angenommen** (`docs/decisions/0013-…md`), die
-> Umsetzung steht noch aus. Ein erster Foundation-Schritt (Simulator: azimut-abhängige
-> Pro-Plot-Zeitstempel, `scan_offset` entfernt) wurde begonnen — Commit **`6a58a03`** —
-> und bewusst wieder **zurückgenommen** (Revert **`0959059`**), weil ohne die Tracker-
-> und Server-Teile der Frankfurt-Test rot wird (155 statt 8 Track-IDs). `main` ist
-> deshalb wieder grün. **Wiedereinstieg:** der Abschnitt *„Umsetzungsstand /
-> Wiedereinstieg"* in ADR 0013 enthält den vollständigen Häppchen-Plan
-> (**13.1 – 13.7**, beginnend mit `Tracker::process_plot`). Vorgehen wie immer:
-> *erst erklären, dann bauen* (CLAUDE.md §2).
-
-- **Diese Sitzung (Aufräumen + Merge):**
-  - Offener Branch endete mit unfertigem ADR-0013-WIP, der ein Qualitäts-Gate verletzte
-    (`cargo test` rot). WIP per `git revert` zurückgenommen → **alle 32 Suites grün**,
-    Clippy sauber, `cargo fmt` ok.
-  - ADR 0013 von „in Entscheidung" auf **„akzeptiert — Umsetzung ausstehend"** gesetzt
-    und um einen ausführlichen **Wiedereinstiegs-Abschnitt** (Foundation, Grund der
-    Rücknahme, Häppchen-Plan 13.1–13.7, Anker-Commits) ergänzt.
-  - Branch nach `main` gemergt und gepusht.
-- **Abgeschlossen — M6.5 ✅ (Nachträge, gemergt zu `main`):**
+- **Zuletzt aktualisiert:** 2026-06-12 (aktuelle Sitzung, JPDA-Kreuzungs-Showcase auf
+  `claude/next-steps-ft3t3n`)
+- **Branch:** `claude/next-steps-ft3t3n` (diese Sitzung). M6.1–M6.5 liegen auf `main`.
+- **Aktuell — JPDA-Showcase überarbeitet (ADR 0013, Branch `claude/next-steps-ft3t3n`):**
+  - **Befund:** Das parallele West-Anflug-Nahpaar (~150 m) der Frankfurt-Szene verschmolz in
+    der Demo dauerhaft zu einer sichtbaren Spur. Untersuchung (empirische Probe + Vergleich
+    einfaches JPDA vs. prototypisches JPDA\*): Das ist **kein** Algorithmus-Bug, sondern die
+    **physikalische Auflösungsgrenze** — 150 m sind bei ~70 m Messrauschen nur ~2,1σ, für
+    *kein* Datenassoziations-Verfahren trennbar. JPDA\* (Blom & Bloem) bringt in diesem Tracker
+    **keinen** messbaren Vorteil und wurde **verworfen** (ehrliche Grenze).
+  - **Umsetzung:** Das parallele Nahpaar durch zwei **kreuzende Ziele** ersetzt
+    (`crossing_northeast`/`crossing_southeast`, Kreuzung bei ENU ≈ (−30 km, 0), t ≈ 120 s,
+    gleiche Höhe, Kurse 45°/135°). Das ist der fachlich aussagekräftige JPDA-Fall: Identität
+    bleibt über den Geschwindigkeitszustand durch die Kreuzung erhalten, **kein Identitätstausch**.
+  - **Test:** `frankfurt_close_pair_does_not_coalesce` → ersetzt durch
+    `frankfurt_crossing_pair_keeps_identity_through_the_crossing` (Kreuzung real < 1 km, danach
+    > 10 km getrennt, Kurse durchgehend in disjunkten Quadranten).
+  - **Doku:** ADR 0013, Glossar (*Auflösungsgrenze*, *Identitätstausch*, präzisierte
+    *Track-Koaleszenz*), M6-Meilenstein, Requirements-Register (NFR-OPS-001).
+  - **Alle Tests grün (Workspace), Clippy sauber, `cargo fmt` ok.**
+  - **Nächster Schritt:** offen — z. B. M6-Restpunkte oder Branch nach Review mergen.
+- **Davor — M6.5 ✅ (Nachträge, direkt auf `main`):**
   - **Server-seitige Roh-Plot-Geolokation:** `Player::frames()` rechnet jeden Plot über
     `Polar::to_enu()` + `LocalFrame::enu_to_geodetic()` (sensorbezogen, `TrackerConfig.sensors`)
     nach WGS84 um; neue `Tracker::config()`-Zugriffsmethode, `FramePlot` jetzt aus `firefly-io`
@@ -51,8 +49,7 @@
 - **Live-Debugging (diese Sitzung, direkt auf `main`):** Beim ersten Start über Docker blieb die
   Karte leer — behoben: ungültige Font-Awesome-Glyphs-URL entfernt, Track-Label-Layer komplett auf
   HTML-Marker (`maplibregl.Marker`) umgestellt (kein externer Glyphs-Server mehr nötig).
-- **PR:** Entwicklung abgeschlossen — PR erstellt und zu `main` gemergt (55 Commits,
-  Meilensteine M1–M6 vollständig).
+- **PR:** keiner offen.
 
 ---
 
@@ -350,31 +347,17 @@ Warteschleife, Multi-Radar-Überlappung), acht stabile Track-IDs über 240 s,
   entflackerte Coasting-Anzeige, Verzug-Aufholen mit Dead-Reckoning,
   History-Trail (Kometenschweif) und realistische gemischte Scan-Perioden.
 
-✅ **PROJEKT ABGESCHLOSSEN**
+➡️ **Als Nächstes — gemeinsam mit dem Projektverantwortlichen entscheiden:**
 
-Alle Meilensteine (M1–M6) sind implementiert und zu `main` gemergt. Der Radar-Tracker steht end-to-end:
-- **M1:** Simulator mit realistischen Szenen (Frankfurt: 3 Radare, 8 Flugzeuge)
-- **M2:** Single-Radar-Tracker (Kalman, GNN, Gating, Lebenszyklus)
-- **M3:** Live-Lagebild (WebSocket, MapLibre, CAT062-Kodierung)
-- **M4:** Multi-Radar-Fusion (zentrale Mess-Fusion, SSR-Identität)
-- **M5:** Manöver + dichter Verkehr (IMM, JPDA)
-- **M6:** Showcase + Cloud (Docker, realistische Szenen, Dead-Reckoning, History-Trail)
-
-Alle Qualitäts-Gates erfüllt: Tests ✅, Clippy ✅, Doku ✅, Cloud-native ✅, Zertifizierungsfähig ✅.
-
-➡️ **Aktiver nächster Schritt — ADR 0013 umsetzen** (angenommen, Umsetzung
-ausstehend): asynchrone Pro-Plot-Verarbeitung + periodischer Ausgabetakt. Der
-vollständige Häppchen-Plan (13.1 `process_plot` → … → 13.7 CAT062 aus Snapshot)
-und die Wiedereinstiegs-Anker stehen im Abschnitt *„Umsetzungsstand /
-Wiedereinstieg"* von `docs/decisions/0013-…md`. Foundation-Commit `6a58a03`
-(zurückgenommen via `0959059`).
-
-➡️ **Weitere mögliche Fortsetzungen** (offene Punkte aus Abschnitt 5):
+Optionen:
 1. Live-OpenAIP-API-Integration statt statische Airspaces-GeoJSON.
-2. Sensor-Registrierung / Bias-Korrektur (M4-Nachtrag, S5).
-3. FHA / Hazard-Analyse (Sicherheit, S4).
-4. Coverage-Werkzeug (Visualisierung, S3).
-5. Out-of-Order-Eingang (Robustheit, S3).
+2. **Sprung zu neuer Fachlichkeit** — z. B. offene Punkte aus Abschnitt 5:
+   - Sensor-Registrierung / Bias-Korrektur (M4-Nachtrag, S5).
+   - FHA / Hazard-Analyse (Sicherheit, S4).
+   - Coverage-Werkzeug (Visualisierung, S3).
+   - Out-of-Order-Eingang (Robustheit, S3).
+
+**Entscheidung des Projektverantwortlichen abwarten.**
 
 ### M5-Plan in Häppchen (abgeschlossen)
 

@@ -26,3 +26,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0010 — Multi-Radar-Fusions-Architektur M4 (zentrale Mess-Fusion)](0010-multi-radar-fusion-architektur-m4.md)
 - [0011 — Gemeinsame Scan-Referenz & getrenntes Initiierungs-Tor gegen Geister-Tracks](0011-scan-fusion-referenz-und-initiierungs-tor.md)
 - [0012 — Adaptiver Track-Lebenszyklus (Revisit-Intervall × Feed-Kadenz)](0012-adaptiver-track-lebenszyklus.md)
+- [0013 — JPDA-Showcase: kreuzende Ziele statt parallelem Nahpaar](0013-jpda-showcase-kreuzende-ziele-statt-paralleles-nahpaar.md)

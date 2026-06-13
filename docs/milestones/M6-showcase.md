@@ -31,10 +31,25 @@ Frankfurt-Szene bildet ein „Tag im Leben" nach: drei Radarstandorte mit sich
 überlappender Reichweite und acht Flugzeuge, die typische Situationen
 durchspielen:
 
-- **Zwei West-Anflüge** (`arrival_west_a`/`b`), die nur ~150 m parallel
-  auseinander liegen — die Tore (Gates) der beiden Tracks überlappen sich.
-  Genau für diese Situation wurde JPDA (M5.5–M5.9) gebaut: die beiden Spuren
-  dürfen sich nicht zu einer verschmelzen oder die Identität tauschen.
+- **Zwei kreuzende Ziele** (`crossing_northeast`/`crossing_southeast`), die
+  sich an *einem* Punkt zur *gleichen* Zeit und auf gleicher Höhe treffen — für
+  ein, zwei Scans sind ihre Plots dadurch nicht mehr eindeutig dem einen oder
+  anderen Track zuzuordnen (die Tore überlappen). Genau für diese Mehrdeutigkeit
+  wurde JPDA (M5.5–M5.9) gebaut: jeder Track wird über seinen eigenen
+  **Geschwindigkeitszustand** durch die Kreuzung getragen, sodass die Identität
+  erhalten bleibt und die beiden Spuren *nicht vertauscht* werden.
+
+  > **Warum kreuzend und nicht parallel?** Eine frühere Fassung ließ die beiden
+  > nur ~150 m *parallel* fliegen. Das ist jedoch **physikalisch unauflösbar**:
+  > 150 m sind bei dem hier wirksamen Messrauschen (~70 m, 1σ) nur ~2σ — zwei so
+  > nahe Radar-Rückmeldungen lassen sich grundsätzlich von *keinem*
+  > Datenassoziations-Verfahren trennen (die Information dafür steckt nicht in
+  > den Daten). Die beiden Schätzungen verschmolzen daher korrekterweise. Erst
+  > ab ~4σ (~280 m bei dieser Geometrie) hält der Tracker zwei parallele Ziele
+  > stabil getrennt. Kreuzende Ziele sind der *aussagekräftige* JPDA-Showcase,
+  > weil sie einen **kinematischen Unterschied** (verschiedene
+  > Geschwindigkeitsrichtungen) tragen, an dem sich die Identität festmachen
+  > lässt — siehe ADR 0013.
 - **Zwei Abflüge**, einer geradeaus beschleunigend, einer mit einer
   2°/s-Kurve nach dem Steigflug — letzterer ist das **IMM-Schaufenster**
   (Manöver-Erkennung, M5.1–M5.4).
@@ -59,10 +74,15 @@ wie `demo_player`/`demo_frames`/`demo_scans`:
 - `frankfurt_frames()` / `frankfurt_scans()` liefern denselben deterministischen
   Player-Lauf für das Web-Frontend (JSON/WebSocket) bzw. die CAT062-Multicast-
   Ausgabe — exakt wie bei der bisherigen Demo (ADR 0006).
-- Zwei Regressionstests (`frankfurt_scene_is_non_trivial`,
-  `frankfurt_scene_keeps_one_identity_per_aircraft`) prüfen über den ganzen
-  240-s-Lauf: acht Flugzeuge → **acht** Track-IDs, nie mehr als acht Tracks
-  gleichzeitig in einem Frame — kein Zerbrechen, keine Geister.
+- Drei Regressionstests (`frankfurt_scene_is_non_trivial`,
+  `frankfurt_scene_keeps_one_identity_per_aircraft`,
+  `frankfurt_crossing_pair_keeps_identity_through_the_crossing`) prüfen über den
+  ganzen 240-s-Lauf: acht Flugzeuge → **acht** Track-IDs, nie mehr als acht
+  Tracks gleichzeitig in einem Frame — kein Zerbrechen, keine Geister; und das
+  kreuzende Paar kommt sich erst nahe (Tore überlappen, Trennung < 1 km), trennt
+  sich danach wieder weit (> 10 km) und behält dabei durchgehend seinen Kurs im
+  richtigen Quadranten (NE-Flieger < 90°, SE-Flieger > 90°) — also **kein
+  Identitätstausch** an der Kreuzung.
 - **Szenenauswahl** (`crates/firefly-server/src/config.rs`): neues
   `Scene`-Enum (`Demo` | `Frankfurt`) und Feld `ServerConfig::scene`,
   12-Factor wie alle anderen Einstellungen — `FIREFLY_SCENE=frankfurt` schaltet
