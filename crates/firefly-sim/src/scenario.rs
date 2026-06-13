@@ -11,6 +11,15 @@ use crate::target::Target;
 /// [`Scenario::origin`]; each radar then re-projects truth into its own polar
 /// frame. This keeps target scripting intuitive (flat-earth-ish local metres)
 /// while the per-sensor geometry stays geodetically correct.
+///
+/// **Time:** [`Timestamp`] is "seconds since the start of the simulation"
+/// (e.g., frame i runs at time 0, 4 seconds, 8 seconds, etc.). But each
+/// `Timestamp` is interpreted relative to [`simulation_start_time_of_day`] —
+/// e.g., if the simulation starts at 06:00 UTC (21600 seconds), then
+/// `Timestamp(3600.0)` becomes 07:00:00 UTC in the wire output. This allows
+/// the CAT062 encoder to emit correct Time-of-Day (ASTERIX I062/070) without
+/// conversion, while the simulator itself stays deterministic (same input →
+/// same output stream).
 #[derive(Debug, Clone)]
 pub struct Scenario {
     origin: Wgs84,
@@ -22,10 +31,14 @@ pub struct Scenario {
     truth_step: f64,
     /// Master RNG seed.
     seed: u64,
+    /// Seconds since UTC midnight at the start of the simulation.
+    /// For example, 21600.0 = 06:00 UTC. Default: 0.0 (midnight).
+    simulation_start_time_of_day: f64,
 }
 
 impl Scenario {
     /// Start building a scenario anchored at the given geodetic origin.
+    /// By default, the simulation starts at UTC midnight (00:00:00).
     pub fn new(origin: Wgs84) -> Self {
         Self {
             origin,
@@ -35,6 +48,7 @@ impl Scenario {
             duration: 60.0,
             truth_step: 0.1,
             seed: 0xF15E_F1A0_u64,
+            simulation_start_time_of_day: 0.0,
         }
     }
 
@@ -50,6 +64,11 @@ impl Scenario {
 
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
+        self
+    }
+
+    pub fn with_simulation_start_time_of_day(mut self, seconds: f64) -> Self {
+        self.simulation_start_time_of_day = seconds;
         self
     }
 
@@ -89,5 +108,9 @@ impl Scenario {
 
     pub fn seed(&self) -> u64 {
         self.seed
+    }
+
+    pub fn simulation_start_time_of_day(&self) -> f64 {
+        self.simulation_start_time_of_day
     }
 }

@@ -21,15 +21,14 @@
 
 ## Version
 
-**1.0.0** (2026-06-13) — Erstfassung, extrahiert aus Fireflys
-`firefly-asterix::cat062` (Encoder) und Wayfinders `CLAUDE.md` Abschnitt 2.
-Referenz-Implementierung: `crates/firefly-asterix/src/cat062.rs`.
+**1.1.0** (2026-06-13) — UTC Time-of-Day Migration (Issue #9).
 
 ### Changelog
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
-| 1.0.0 | 2026-06-13 | Erstfassung. |
+| 1.1.0 | 2026-06-13 | **UTC Time-of-Day in I062/070.** I062/070 wird jetzt als echte ASTERIX-Time-of-Day kodiert (Sekunden seit UTC-Mitternacht des Simulationstags), nicht relativ zur Szenario-Start-Zeit. `Scenario` trägt `simulation_start_time_of_day: f64` (Default 0 = Mitternacht); `Timestamp` bleibt intern deterministisch (Offset seit Szenario-Start). `Cat062Encoder` nimmt die Startzeit im Konstruktor entgegen. |
+| 1.0.0 | 2026-06-13 | Erstfassung, extrahiert aus `firefly-asterix::cat062` und Wayfinders `CLAUDE.md` Abschnitt 2. |
 
 ---
 
@@ -129,13 +128,12 @@ isotrop — gleicher Wert für X und Y).
 
 ## 6. Zeit (I062/070)
 
-⚠️ **Bekannte Lücke (Firefly-Roadmap: "UTC Time-of-Day", ehem. Issue #9, weiterhin
-offen):** I062/070 wird zwar als gültiger Time-of-Day-Wert kodiert (Wert modulo
-86400 s, Einheit 1/128 s), **das zugrunde liegende `Timestamp` ist aber
-"Sekunden seit Szenario-Start"**, nicht echte UTC-Tageszeit. Das Feld ist also
-syntaktisch korrekt, semantisch aber (noch) nicht UTC. Wayfinder sollte sich
-**nicht** darauf verlassen, dass I062/070 aktuell eine reale Uhrzeit
-widerspiegelt — das ist Gegenstand der laufenden Migration in Firefly.
+**✅ v1.1.0 (2026-06-13): I062/070 kodiert jetzt echte ASTERIX Time-of-Day (UTC).**
+Jede `Timestamp` wird relativ zu `Scenario.simulation_start_time_of_day`
+interpretiert. Beispiel: Wenn die Szenario um 06:00 UTC beginnt (21600 Sekunden)
+und eine `Timestamp(3600.0)` ankommt, wird I062/070 als 07:00:00 UTC kodiert.
+Der Simulator bleibt deterministisch (gleicher Input → gleicher Output), während
+die Ausgabe semantisch korrekt ist.
 
 ## 7. Referenzen
 

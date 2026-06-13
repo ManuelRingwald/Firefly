@@ -1,11 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-/// A point in time, expressed as seconds since an arbitrary but fixed epoch.
+/// A point in time, expressed as seconds since the start of the simulation.
 ///
-/// For simulation this is simply seconds since scenario start. It maps cleanly
-/// onto ASTERIX "time of day" (seconds since UTC midnight) later on. We keep it
-/// as `f64` because sub-scan timing (fractions of a second) matters for
-/// prediction, and the dynamic range is tiny compared to `f64` precision.
+/// Within the simulation, this is a relative offset (frame i at t=0, i+1 at t=Δt, etc.).
+/// But the wire output (CAT062 I062/070, ASTERIX Time-of-Day) interprets it relative
+/// to the scenario's `simulation_start_time_of_day` — e.g., if the scenario starts at
+/// 06:00 UTC (21600 seconds), `Timestamp(3600.0)` becomes 07:00:00 UTC on the wire.
+/// This preserves simulator determinism (same input → same output stream) while
+/// emitting correct Time-of-Day without conversion. We keep it as `f64` because
+/// sub-scan timing (fractions of a second) matters for prediction, and the dynamic
+/// range is tiny compared to `f64` precision.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Timestamp(pub f64);
 

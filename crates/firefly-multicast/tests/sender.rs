@@ -38,6 +38,7 @@ fn encoder() -> Cat062Encoder {
     Cat062Encoder::new(
         DataSourceId::new(25, 2),
         Wgs84::from_degrees(48.0, 11.0, 0.0),
+        0.0, // simulation starts at UTC midnight
     )
 }
 

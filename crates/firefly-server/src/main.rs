@@ -69,7 +69,11 @@ fn spawn_cat062_multicast(speed: f64, scene: Scene) {
     }
 
     let destination = config.destination();
-    let encoder = Cat062Encoder::new(config.data_source(), config.reference_point);
+    let encoder = Cat062Encoder::new(
+        config.data_source(),
+        config.reference_point,
+        0.0, // TODO: make this configurable per scenario (ADR 0014: UTC Time-of-Day)
+    );
     let scans = match scene {
         Scene::Demo => scene::demo_scans(),
         Scene::Frankfurt => scene::frankfurt_scans(),
