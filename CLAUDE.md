@@ -112,13 +112,15 @@ Zertifizierungs-Nachweis (ADR 0004). Vier Ebenen:
 | **Feature-/Meilenstein-Doku** | `docs/milestones/` | Pro Baustein eine präzise Erklärung: Fachlichkeit + Technik + Mathematik. |
 | **Glossar** | `docs/glossary.md` | Domänen-Referenz; jeder Fachbegriff einmal sauber definiert (Onboarding/Audit). |
 | **Entscheidungen** | `docs/decisions/` | Architecture Decision Records (ADR): *welche* Entscheidung *warum*. |
+| **ICD** | `docs/ICD-CAT062.md` | Maßgebliche, versionierte Beschreibung des CAT062/UDP-Vertrags mit Wayfinder (Transport, FSPEC/UAP, FRN-Items, Changelog). |
 
 Regeln:
 - Jeder neue Baustein bekommt **vor dem Abschluss** seine Doku in
   `docs/milestones/`.
 - Jede architektonisch relevante Weichenstellung bekommt einen ADR.
 - **Schnittstellen-Änderungen** (CAT062-Ausgabe-Vertrag) werden als ADR
-  festgehalten und mit Wayfinder abgeglichen (Abschnitt 9).
+  festgehalten, in `docs/ICD-CAT062.md` versioniert (Changelog) und mit
+  Wayfinder abgeglichen (Abschnitt 9).
 - Das Glossar wird bei jedem neuen Begriff gepflegt.
 
 ---
@@ -167,7 +169,7 @@ stehen in `docs/STATUS.md`.
 | **UTC Time-of-Day** | Echtes ASTERIX-ToD statt "Sekunden seit Szenario-Start" in I062/070 (ehem. Issue #9) | ⏳ geplant |
 | **Multicast-Feed-Sicherheit** | Authentizität/Netz-Isolation des CAT062-Eingangspfads (ehem. Issue #7, transformiert) | ⏳ geplant |
 | **Konfigurierbarer System-Referenzpunkt** | I062/100-Referenzpunkt jenseits des Demo-Ursprungs (ADR 0006, offen) | ⏳ geplant |
-| **CAT062-ICD** | Versionierte Schnittstellen-Doku für Wayfinder | ⏳ geplant |
+| **CAT062-ICD** | Versionierte Schnittstellen-Doku für Wayfinder (`docs/ICD-CAT062.md`) | ✅ v1.0.0 erstellt |
 | **ADR 0013** | Asynchrone Pro-Plot-Verarbeitung + periodischer Ausgabetakt (13.1–13.7) | ⏳ angenommen, Umsetzung offen |
 | **Betriebs-Härtung** | Observability-Ausbau, Lastfestigkeit, Deployment | ⏳ |
 
