@@ -166,7 +166,7 @@ stehen in `docs/STATUS.md`.
 | Vorhaben | Inhalt | Status |
 |----------|--------|--------|
 | **ADR 0014** | Pivot Lernprojekt → Produktion; Wayfinder konsumiert CAT062/UDP | ✅ akzeptiert |
-| **UTC Time-of-Day** | Echtes ASTERIX-ToD statt "Sekunden seit Szenario-Start" in I062/070 (ehem. Issue #9) | ⏳ geplant |
+| **UTC Time-of-Day** | Echtes ASTERIX-ToD statt "Sekunden seit Szenario-Start" in I062/070 (Issue #9) | ✅ erledigt, geschlossen |
 | **Multicast-Feed-Sicherheit** | Authentizität/Netz-Isolation des CAT062-Eingangspfads (ehem. Issue #7, transformiert) | ⏳ geplant |
 | **Konfigurierbarer System-Referenzpunkt** | I062/100-Referenzpunkt jenseits des Demo-Ursprungs (ADR 0006, offen) | ⏳ geplant |
 | **CAT062-ICD** | Versionierte Schnittstellen-Doku für Wayfinder (`docs/ICD-CAT062.md`) | ✅ v1.0.0 erstellt |
@@ -244,8 +244,9 @@ JSON/WebSocket-Pfad formuliert. Nach dem Pivot auf CAT062/UDP (ADR 0014):
   gegenstandslos.
 - **#7** (Auth auf `/ws`) — **transformiert**: Sicherheitsfrage verschiebt sich
   auf Netz-Isolation des Multicast-Pfads + Browser-Rand von Wayfinder.
-- **#9** (UTC Time-of-Day) — **bleibt offen und wird zentraler**: CAT062
-  I062/070 ist das Time-of-Day-Feld; siehe Roadmap (Abschnitt 7).
+- **#9** (UTC Time-of-Day) — **erledigt und geschlossen**: CAT062 I062/070
+  liefert echtes UTC-ToD (PR #11, Commit `a2449cf`); Wayfinder hat dies in M1
+  gegen den Referenz-Dump verifiziert.
 
 ---
 

@@ -4,10 +4,17 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/loving-turing-2obzk6`:
-  Charter-Pivot Lernprojekt → Produktion, ADR 0014 angenommen)
-- **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5). Branch
-  `claude/branch-merge-main-cqzdwk` wurde aufgeräumt und gemergt.
+- **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/serene-heisenberg-xq4rla`:
+  Issue #9 geschlossen — Wayfinder M1 (CAT062-Pipeline + Live-Karte) ist
+  abgeschlossen und hat den Vertrag (ICD v1.0.0) Ende-zu-Ende gegen den
+  Referenz-Dump verifiziert)
+- **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
+  Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
+  I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches
+  `claude/branch-merge-main-cqzdwk`, `claude/next-steps-ft3t3n` und
+  `claude/pr-main-merge-oggshe` sind bereits in `main` enthalten und können
+  remote gelöscht werden (Branch-Löschung war in dieser Sitzung wegen
+  fehlender Berechtigung nicht möglich).
 
 > 🔁 **ADR 0014 (Pivot Produktion, Wayfinder konsumiert CAT062/UDP) — akzeptiert.**
 > `CLAUDE.md` ist auf Produktionsbetrieb umgestellt (Modell-Angabe pro Schritt
@@ -15,10 +22,11 @@
 > Typ-Diskriminator, Schema-Versionierung) sind **geschlossen** — durch die
 > CAT062-Architektur gegenstandslos. **#7** (Auth) ist **transformiert** auf
 > Netz-Isolation des Multicast-Pfads + Wayfinder-Browser-Rand. **#9** (UTC
-> Time-of-Day in I062/070) bleibt offen und wird **zentraler** — siehe
-> Produktions-Roadmap in `CLAUDE.md` Abschnitt 7. Das eigentliche
-> ADR-0013-Vorhaben (siehe nächster Absatz) bleibt der fachlich nächste Schritt;
-> #9 (UTC ToD) ist ein eigenes, parallel einplanbares Produktions-Häppchen.
+> Time-of-Day in I062/070) ist **erledigt und geschlossen** — Wayfinder hat
+> M1 (CAT062-Pipeline + Live-Karte) abgeschlossen und den Vertrag gegen den
+> Referenz-Dump verifiziert (`TestReferenceVector`), keine neuen
+> Schnittstellen-Probleme. Das ADR-0013-Vorhaben (siehe nächster Absatz)
+> bleibt der fachlich nächste Schritt.
 
 > 🔭 **NÄCHSTE WOCHE — ADR 0013 (asynchrone Pro-Plot-Verarbeitung) umsetzen.**
 > Die Architektur-Entscheidung ist **angenommen** (`docs/decisions/0013-…md`), die
