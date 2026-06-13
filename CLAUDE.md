@@ -128,7 +128,7 @@ Ein Schritt gilt erst als fertig, wenn:
 ## 6. Git & Branches
 
 - Entwicklung **immer** auf dem vereinbarten Feature-Branch
-  (`claude/radar-track-calculator-BoaU8`).
+  (`claude/loving-turing-2obzk6`).
 - Niemals ungefragt auf einen anderen Branch pushen.
 - **Kein** Pull Request, außer der Projektverantwortliche bittet ausdrücklich
   darum.
@@ -177,7 +177,39 @@ Zwei nicht-funktionale Anforderungen prägen die gesamte Architektur und werden
   (Safety Case, SMS, unabhängige V&V, Regulator) und nicht Teil dieses
   Code-Projekts — das versprechen wir nicht.
 
-## 9. Was Claude NICHT tut
+---
+
+## 9. Cross-Project-Todos (Firefly ↔ Wayfinder)
+
+Firefly und Wayfinder sind getrennte Projekte mit getrennten Claude-Sitzungen.
+Eine Claude-Sitzung hat jetzt Zugriff auf **beide** Repos. Das ermöglicht
+**direkte Cross-Project-Kommunikation über GitHub Issues**.
+
+### Workflow
+
+1. **Beobachtung** — Während der Arbeit an Firefly erkennt Claude ein Thema,
+   das Wayfinder betreffen könnte (z.B. fehlende Schnittstellen, unklarere Daten).
+2. **Issue erstellen** — Claude erstellt ein Issue im anderen Repo mit Label
+   `from-firefly` (oder `from-wayfinder`).
+3. **Dokumentieren** — Die Issue wird referenziert in
+   `docs/cross-project/todo-for-<anderes-projekt>.md`.
+4. **Checken** — Beim Sitzungsstart: Offene Issues aus der anderen Sitzung
+   ansehen (GitHub-Issues mit `from-firefly` oder `from-wayfinder`).
+5. **Aktualisieren** — Wenn ein Issue erledigt ist, wird es geschlossen und
+   die Referenz in der `.md`-Datei aktualisiert.
+
+### Dateien
+
+- **`docs/cross-project/todo-for-wayfinder.md`** — Probleme/Wünsche aus
+  Firefly, die Wayfinder-Arbeit beeinflussen.
+- **`docs/cross-project/todo-for-firefly.md`** — Probleme/Wünsche aus
+  Wayfinder, die Firefly-Arbeit beeinflussen (derzeit 5 offene Issues: #6–#10).
+
+Siehe auch `docs/cross-project/README.md` für die Hintergrund-Erklärung.
+
+---
+
+## 10. Was Claude NICHT tut
 
 - Keine unerklärten Fachbegriffe oder Abkürzungen verwenden.
 - Nicht mehrere Bausteine ungefragt hintereinander bauen.
