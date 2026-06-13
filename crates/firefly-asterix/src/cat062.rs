@@ -860,7 +860,8 @@ mod tests {
     /// velocity and the track number. REQ: FR-IO-003, FR-TRK-009
     #[test]
     fn identity_items_appear_only_when_present() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
 
         // FRN 9 and FRN 11 both live in the *second* FSPEC octet: FRN 9 → bit
         // 1<<(7-((9-1)%7)) = 0x40, FRN 11 → 0x10. Octet 1 is untouched.
@@ -974,7 +975,8 @@ mod tests {
     /// REQ: FR-IO-003
     #[test]
     fn single_track_matches_reference_dump() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
         let block = encoder.encode(Timestamp(12.0), &[track(1)]);
 
         let expected = vec![
@@ -1024,7 +1026,8 @@ mod tests {
     /// REQ: FR-IO-003
     #[test]
     fn decode_inverts_encode_for_a_plain_track() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
         let block = encoder.encode(Timestamp(12.0), &[track(1)]);
 
         let records = decode_data_block(&block).unwrap();
@@ -1051,7 +1054,8 @@ mod tests {
     /// `mode_3a`/`icao_address`. REQ: FR-IO-003, FR-TRK-009
     #[test]
     fn decode_recovers_identity_when_present() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
         let mut t = track(1);
         t.mode_3a = Some(0o2613);
         t.icao_address = Some(0x3C_65_AC);
