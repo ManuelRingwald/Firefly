@@ -124,24 +124,35 @@ impl DataSourceId {
 
 /// Encodes neutral system tracks into CAT062 data blocks.
 ///
-/// Holds the fixed [`DataSourceId`] and the [`StereographicProjection`] used to
-/// compute I062/100 (system-stereographic X/Y, ADR 0006); everything else comes
-/// from the tracks and the scan time passed to [`encode`](Cat062Encoder::encode).
+/// Holds the fixed [`DataSourceId`], the [`StereographicProjection`] used to
+/// compute I062/100 (system-stereographic X/Y, ADR 0006), and the simulation
+/// start time for correct Time-of-Day encoding (I062/070, ASTERIX). Everything
+/// else comes from the tracks and the scan time passed to
+/// [`encode`](Cat062Encoder::encode).
 #[derive(Debug, Clone, Copy)]
 pub struct Cat062Encoder {
     source: DataSourceId,
     system_projection: StereographicProjection,
+    /// Seconds since UTC midnight at the start of the simulation.
+    /// I062/070 is encoded as `(simulation_start_time_of_day + timestamp) % 86400`.
+    simulation_start_time_of_day: f64,
 }
 
 impl Cat062Encoder {
-    /// An encoder that stamps every block with `source` as the data source and
+    /// An encoder that stamps every block with `source` as the data source,
     /// projects positions onto the system-stereographic plane tangent at
     /// `system_reference_point` (the system reference point, e.g. the tracking
-    /// frame's origin) for I062/100.
-    pub fn new(source: DataSourceId, system_reference_point: Wgs84) -> Self {
+    /// frame's origin) for I062/100, and encodes Time-of-Day (I062/070) as
+    /// `(simulation_start_time_of_day + timestamp) % 86400` seconds.
+    pub fn new(
+        source: DataSourceId,
+        system_reference_point: Wgs84,
+        simulation_start_time_of_day: f64,
+    ) -> Self {
         Self {
             source,
             system_projection: StereographicProjection::new(system_reference_point),
+            simulation_start_time_of_day,
         }
     }
 
@@ -163,7 +174,10 @@ impl Cat062Encoder {
                 uap::DATA_SOURCE_IDENTIFIER,
                 encode_data_source(&self.source),
             )
-            .item(uap::TIME_OF_TRACK_INFORMATION, encode_time_of_track(time))
+            .item(
+                uap::TIME_OF_TRACK_INFORMATION,
+                encode_time_of_track(self.simulation_start_time_of_day, time),
+            )
             .item(uap::POSITION_WGS84, encode_position(track))
             .item(
                 uap::POSITION_CARTESIAN,
@@ -193,8 +207,12 @@ fn encode_data_source(source: &DataSourceId) -> Vec<u8> {
 
 /// I062/070 — time of track as a 24-bit count of 1/128-second ticks since
 /// midnight, big-endian.
-fn encode_time_of_track(time: Timestamp) -> Vec<u8> {
-    let tod = time.as_secs().rem_euclid(SECONDS_PER_DAY);
+///
+/// `simulation_start_time_of_day` is the UTC time (seconds since midnight)
+/// at which the simulation started. The Time-of-Day is computed as
+/// `(simulation_start_time_of_day + timestamp) % 86400`.
+fn encode_time_of_track(simulation_start_time_of_day: f64, time: Timestamp) -> Vec<u8> {
+    let tod = (simulation_start_time_of_day + time.as_secs()).rem_euclid(SECONDS_PER_DAY);
     let ticks = (tod / TIME_LSB_SECONDS).round() as u32; // ≤ 11_059_200 < 2^24
     let bytes = ticks.to_be_bytes();
     bytes[1..4].to_vec() // low three octets; the top octet is always zero here
@@ -719,12 +737,12 @@ mod tests {
     #[test]
     fn time_of_track_scales_to_128th_seconds() {
         assert_eq!(
-            encode_time_of_track(Timestamp(12.0)),
+            encode_time_of_track(0.0, Timestamp(12.0)),
             vec![0x00, 0x06, 0x00]
         );
         // One tick is 1/128 s; just under two ticks still rounds to one.
         assert_eq!(
-            encode_time_of_track(Timestamp(1.0 / 128.0)),
+            encode_time_of_track(0.0, Timestamp(1.0 / 128.0)),
             vec![0x00, 0x00, 0x01]
         );
     }
@@ -732,7 +750,7 @@ mod tests {
     /// Time of day folds into 24 hours so the field cannot overflow.
     #[test]
     fn time_of_track_wraps_at_one_day() {
-        let just_past_midnight = encode_time_of_track(Timestamp(86_400.0 + 12.0));
+        let just_past_midnight = encode_time_of_track(0.0, Timestamp(86_400.0 + 12.0));
         assert_eq!(just_past_midnight, vec![0x00, 0x06, 0x00]);
     }
 
@@ -842,7 +860,7 @@ mod tests {
     /// velocity and the track number. REQ: FR-IO-003, FR-TRK-009
     #[test]
     fn identity_items_appear_only_when_present() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
 
         // FRN 9 and FRN 11 both live in the *second* FSPEC octet: FRN 9 → bit
         // 1<<(7-((9-1)%7)) = 0x40, FRN 11 → 0x10. Octet 1 is untouched.
@@ -956,7 +974,7 @@ mod tests {
     /// REQ: FR-IO-003
     #[test]
     fn single_track_matches_reference_dump() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
         let block = encoder.encode(Timestamp(12.0), &[track(1)]);
 
         let expected = vec![
@@ -982,7 +1000,7 @@ mod tests {
     /// REQ: FR-IO-003
     #[test]
     fn length_field_covers_all_records() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point(), 0.0);
         let block = encoder.encode(Timestamp(0.0), &[track(1), track(2)]);
 
         assert_eq!(block[0], 0x3E, "category");
@@ -995,7 +1013,7 @@ mod tests {
     /// REQ: FR-IO-003
     #[test]
     fn empty_scan_is_a_valid_empty_block() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point(), 0.0);
         let block = encoder.encode(Timestamp(0.0), &[]);
         assert_eq!(block, vec![0x3E, 0x00, 0x03]);
     }
@@ -1006,7 +1024,7 @@ mod tests {
     /// REQ: FR-IO-003
     #[test]
     fn decode_inverts_encode_for_a_plain_track() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
         let block = encoder.encode(Timestamp(12.0), &[track(1)]);
 
         let records = decode_data_block(&block).unwrap();
@@ -1033,7 +1051,7 @@ mod tests {
     /// `mode_3a`/`icao_address`. REQ: FR-IO-003, FR-TRK-009
     #[test]
     fn decode_recovers_identity_when_present() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
         let mut t = track(1);
         t.mode_3a = Some(0o2613);
         t.icao_address = Some(0x3C_65_AC);
@@ -1049,7 +1067,7 @@ mod tests {
     /// REQ: FR-IO-003, FR-TRK-008
     #[test]
     fn decode_recovers_status_for_tentative_coasting_track() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point(), 0.0);
         let mut t = track(1);
         t.confirmed = false;
         t.coasting = true;
@@ -1064,7 +1082,7 @@ mod tests {
     /// REQ: FR-IO-003
     #[test]
     fn decode_handles_multiple_records() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point(), 0.0);
         let block = encoder.encode(Timestamp(0.0), &[track(1), track(2)]);
 
         let records = decode_data_block(&block).unwrap();
@@ -1077,7 +1095,7 @@ mod tests {
     /// REQ: FR-IO-003
     #[test]
     fn decode_handles_empty_block() {
-        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point(), 0.0);
         let block = encoder.encode(Timestamp(0.0), &[]);
 
         assert_eq!(decode_data_block(&block).unwrap(), vec![]);
@@ -1103,7 +1121,7 @@ mod tests {
     fn position_cartesian_unprojects_close_to_position_wgs84() {
         let reference = system_reference_point();
         let projection = StereographicProjection::new(reference);
-        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), reference);
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), reference, 0.0);
 
         let block = encoder.encode(Timestamp(0.0), &[track_at(1, 45.01, 11.26, 0.0, 0.0)]);
         let record = &decode_data_block(&block).unwrap()[0];
@@ -1141,7 +1159,7 @@ mod tests {
         );
 
         // A valid header but a record cut short mid-FSPEC payload.
-        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point());
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point(), 0.0);
         let mut block = encoder.encode(Timestamp(0.0), &[track(1)]);
         let truncated_len = (block.len() - 1) as u16;
         block.truncate(block.len() - 1);
