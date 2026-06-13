@@ -4,10 +4,15 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/loving-turing-2obzk6`:
-  Charter-Pivot Lernprojekt → Produktion, ADR 0014 angenommen)
-- **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5). Branch
-  `claude/branch-merge-main-cqzdwk` wurde aufgeräumt und gemergt.
+- **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/serene-heisenberg-xq4rla`:
+  Aufräumen — `claude/loving-turing-2obzk6` per PR #11 nach `main` gemergt)
+- **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
+  Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
+  I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches
+  `claude/branch-merge-main-cqzdwk`, `claude/next-steps-ft3t3n` und
+  `claude/pr-main-merge-oggshe` sind bereits in `main` enthalten und können
+  remote gelöscht werden (Branch-Löschung war in dieser Sitzung wegen
+  fehlender Berechtigung nicht möglich).
 
 > 🔁 **ADR 0014 (Pivot Produktion, Wayfinder konsumiert CAT062/UDP) — akzeptiert.**
 > `CLAUDE.md` ist auf Produktionsbetrieb umgestellt (Modell-Angabe pro Schritt
