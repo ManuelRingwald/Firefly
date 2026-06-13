@@ -4,9 +4,21 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-12 (Branch `claude/branch-merge-main-cqzdwk` stabilisiert + nach `main` gemergt; ADR 0013 angenommen, Umsetzung ausstehend)
+- **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/loving-turing-2obzk6`:
+  Charter-Pivot Lernprojekt → Produktion, ADR 0014 angenommen)
 - **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5). Branch
   `claude/branch-merge-main-cqzdwk` wurde aufgeräumt und gemergt.
+
+> 🔁 **ADR 0014 (Pivot Produktion, Wayfinder konsumiert CAT062/UDP) — akzeptiert.**
+> `CLAUDE.md` ist auf Produktionsbetrieb umgestellt (Modell-Angabe pro Schritt
+> jetzt Pflicht). Cross-Project-Status: Issues **#6, #8, #10** (Pub/Sub-Fanout,
+> Typ-Diskriminator, Schema-Versionierung) sind **geschlossen** — durch die
+> CAT062-Architektur gegenstandslos. **#7** (Auth) ist **transformiert** auf
+> Netz-Isolation des Multicast-Pfads + Wayfinder-Browser-Rand. **#9** (UTC
+> Time-of-Day in I062/070) bleibt offen und wird **zentraler** — siehe
+> Produktions-Roadmap in `CLAUDE.md` Abschnitt 7. Das eigentliche
+> ADR-0013-Vorhaben (siehe nächster Absatz) bleibt der fachlich nächste Schritt;
+> #9 (UTC ToD) ist ein eigenes, parallel einplanbares Produktions-Häppchen.
 
 > 🔭 **NÄCHSTE WOCHE — ADR 0013 (asynchrone Pro-Plot-Verarbeitung) umsetzen.**
 > Die Architektur-Entscheidung ist **angenommen** (`docs/decisions/0013-…md`), die
