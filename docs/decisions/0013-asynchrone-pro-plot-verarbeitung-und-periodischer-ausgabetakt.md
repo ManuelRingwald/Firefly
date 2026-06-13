@@ -217,9 +217,23 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   > bleibt in **jedem** Häppchen grün, kein Test-Churn vor der Zeit. Kosten:
   > temporäre Logik-Duplikation zwischen beiden Pfaden, in 13.4/13.5
   > zusammengeführt.
-- [ ] **13.2 — Adaptiven Lebenszyklus auf Zeitkontinuität umstellen (S4).** Treffer/
-  Fehltreffer nach **tatsächlichen Zeitlücken** statt nach Scan-Aufrufen (ADR 0012
-  vereinfachen). Damit ist der Workaround-Anteil nicht mehr nötig.
+- [x] **13.2 — Adaptiven Lebenszyklus auf Zeitkontinuität umstellen (S4). ✅
+  umgesetzt (Ansatz B — nur async-Pfad).** Im `process_plot`-Pfad skalieren
+  Bestätigung und Löschung allein über die **eigene** Revisit-Kadenz jedes
+  Tracks (`Track::expected_revisit(nominal)` = gemessenes `revisit_interval`,
+  sonst `NOMINAL_REVISIT_INTERVAL` = 5 s Bootstrap) — **keine** global
+  geschätzte Feed-Kadenz mehr (die `sensor_period`/`sensor_last_scan`-Buchhaltung
+  bleibt unberührt, nur für den Batch-`process_scan`). Löschung über
+  `should_delete_continuous`. **FR-TRK-023**, Tests
+  `track::expected_revisit_*`, `tracker::process_plot_deletes_unseen_tentative`,
+  `tracker::process_plot_two_async_sensors_make_one_track`.
+
+  > **Scoping (Ansatz B).** `coast_reference`/`should_delete` (global-cadence,
+  > Batch) bleiben unverändert, damit `process_scan` und die Frankfurt-Szene
+  > grün bleiben; die zeit-kontinuierliche Variante (`expected_revisit`,
+  > `should_delete_continuous`) wirkt nur im async-Pfad. Die beiden Pfade werden
+  > in 13.4/13.5 zusammengeführt, wenn der Player auf `process_plot` umschaltet;
+  > dann wird auch `NOMINAL_REVISIT_INTERVAL` zum 12-Factor-Knopf (13.4).
 - [ ] **13.3 — `snapshot_at(t)` (S4).** `Tracker::snapshot_at(t: Timestamp) ->
   Vec<SystemTrack>` prädiziert alle Tracks auf `t` (IMM + Dead-Reckoning) und
   reportiert sie — ohne den Zustand zu verändern (read-only Projektion).
@@ -245,5 +259,8 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   → 155 statt 8 IDs.
 - **13.1 erledigt:** `Tracker::process_plot` additiv (Ansatz B), FR-TRK-022, Tests
   `tracker::process_plot_*`; `process_scan` unverändert, alle Gates grün.
-- **Nächster Schritt:** Häppchen **13.2** (adaptiven Lebenszyklus auf
-  Zeitkontinuität umstellen, S4), erklären → Go → bauen.
+- **13.2 erledigt:** zeit-kontinuierlicher Lebenszyklus im async-Pfad
+  (`expected_revisit`, `should_delete_continuous`, `NOMINAL_REVISIT_INTERVAL`),
+  FR-TRK-023; Batch-Pfad + Frankfurt unverändert, alle Gates grün.
+- **Nächster Schritt:** Häppchen **13.3** (`snapshot_at(t)` — alle Tracks
+  read-only auf Zeit `t` prädizieren und reportieren, S4), erklären → Go → bauen.

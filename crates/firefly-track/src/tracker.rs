@@ -37,6 +37,15 @@ use crate::track::{Track, TrackStatus};
 /// at least one plot in its gate (a hit) rather than coasting.
 const NO_DETECTION_EPSILON: f64 = 1e-9;
 
+/// Assumed revisit interval (seconds) for a track that has not yet established
+/// its own from a second hit — the bootstrap of the asynchronous,
+/// time-continuous lifecycle (ADR 0013, Häppchen 13.2). A freshly born track is
+/// protected for a few of these nominal revisits before it can be deleted (the
+/// time-continuous analog of ADR 0012's cadence bootstrap). It is deliberately
+/// a single, local constant for now; it becomes a 12-factor config knob when the
+/// periodic output stage lands (Häppchen 13.4).
+const NOMINAL_REVISIT_INTERVAL: f64 = 5.0;
+
 /// Where one sensor sits and how noisy the tracker believes it is.
 ///
 /// Central measurement fusion (ADR 0010) needs both per sensor: the [`LocalFrame`]
@@ -480,7 +489,11 @@ impl Tracker {
     /// and contributing-sensor bookkeeping are kept deliberately minimal here —
     /// they are reworked onto true time-continuity in 13.2/13.4.
     ///
-    /// REQ: FR-TRK-001, FR-TRK-006, FR-TRK-010, FR-TRK-022
+    /// The lifecycle (steps 4–5) is **time-continuous** (Häppchen 13.2): it is
+    /// governed by each track's own measured revisit interval, not a
+    /// globally-estimated feed cadence (see [`should_delete_continuous`]).
+    ///
+    /// REQ: FR-TRK-001, FR-TRK-006, FR-TRK-010, FR-TRK-022, FR-TRK-023
     pub fn process_plot(&mut self, plot: &Plot) {
         // Cheap scalar tuning copied out so the rest can mutate `self.tracks`
         // without holding a borrow on `self.config`.
@@ -523,23 +536,11 @@ impl Tracker {
             }
         }
 
-        // Refresh the feed-cadence estimate the adaptive lifecycle scales by:
-        // the slowest sensor's plot-to-plot gap. Until any sensor has shown a
-        // second plot there is no basis for a cadence, so treat it as unbounded
-        // — a freshly born track must not be deleted before its founding sensor
-        // even revisits it (mirrors the bootstrap in `process_scan`).
-        if let Some(&last) = self.sensor_last_scan.get(&sensor) {
-            let period = t - last;
-            if period > 0.0 {
-                self.sensor_period.insert(sensor, period);
-            }
-        }
-        self.sensor_last_scan.insert(sensor, t);
-        let cadence = if self.sensor_period.is_empty() {
-            f64::INFINITY
-        } else {
-            self.sensor_period.values().copied().fold(0.0, f64::max)
-        };
+        // The asynchronous lifecycle (steps 4–5) is governed purely by each
+        // track's *own* revisit cadence (ADR 0013, Häppchen 13.2) — there is no
+        // globally-estimated feed cadence on this path, so the
+        // `sensor_period`/`sensor_last_scan` bookkeeping that `process_scan`
+        // maintains is intentionally left untouched here.
 
         // 2./3. Associate the single measurement against the tracks' live
         //       estimates. `references` is captured once (post-prediction) so
@@ -578,20 +579,22 @@ impl Tracker {
             self.tracks.push(track);
         }
 
-        // 4. Confirm tentative tracks that reached M-of-N hits within the
-        //    adaptive time window.
+        // 4. Confirm tentative tracks that reached M-of-N hits within a time
+        //    window scaled by the track's *own* expected revisit (Häppchen
+        //    13.2), falling back to the nominal interval until it has one.
         for track in &mut self.tracks {
             if track.status() == TrackStatus::Tentative {
-                let window = confirm_n as f64 * track.coast_reference(cadence);
+                let window = confirm_n as f64 * track.expected_revisit(NOMINAL_REVISIT_INTERVAL);
                 if track.hits_within(window, t) >= confirm_m {
                     track.confirm();
                 }
             }
         }
 
-        // 5. Delete tracks that have coasted past their missed-revisit budget.
+        // 5. Delete tracks that have coasted past their missed-revisit budget,
+        //    counted in the track's own revisit intervals (time-continuous).
         self.tracks
-            .retain(|track| !should_delete(track, delete_tentative, delete_confirmed, cadence));
+            .retain(|track| !should_delete_continuous(track, delete_tentative, delete_confirmed));
     }
 }
 
@@ -612,6 +615,22 @@ fn should_delete(
     } as f64;
     let age = track.update_age();
     age > 0.0 && age >= budget * track.coast_reference(cadence)
+}
+
+/// Whether a track should be deleted on the **asynchronous** path (ADR 0013,
+/// Häppchen 13.2). Like [`should_delete`], but the missed-revisit budget counts
+/// the track's **own** revisit intervals ([`Track::expected_revisit`]) rather
+/// than a globally-estimated feed cadence: a track lives or dies purely by how
+/// overdue *its* next update is. A track that has not yet measured its own
+/// cadence falls back to [`NOMINAL_REVISIT_INTERVAL`]; a freshly hit track
+/// (`update_age == 0`) is never deleted.
+fn should_delete_continuous(track: &Track, budget_tentative: u32, budget_confirmed: u32) -> bool {
+    let budget = match track.status() {
+        TrackStatus::Tentative => budget_tentative,
+        TrackStatus::Confirmed => budget_confirmed,
+    } as f64;
+    let age = track.update_age();
+    age > 0.0 && age >= budget * track.expected_revisit(NOMINAL_REVISIT_INTERVAL)
 }
 
 #[cfg(test)]
@@ -1252,18 +1271,29 @@ mod tests {
     }
 
     /// A lone tentative track (e.g. a clutter plot) that is never seen again is
-    /// deleted once later plots show its missed-revisit budget is spent.
-    /// REQ: FR-TRK-006, FR-TRK-022
+    /// deleted once it is overdue by its budget of *nominal* revisits. The
+    /// time-continuous lifecycle (Häppchen 13.2) scales deletion by the track's
+    /// own expected revisit — here the nominal fallback, since it was never
+    /// re-hit — not by the cadence of whichever other sensor drives time
+    /// forward. REQ: FR-TRK-006, FR-TRK-022, FR-TRK-023
     #[test]
     fn process_plot_deletes_unseen_tentative() {
         let mut tracker = Tracker::new(config());
-        // A lone tentative track (id 1) due north.
+        // A lone tentative track (id 1) due north, born at t = 0.
         tracker.process_plot(&plot(0.0, 50_000.0, 0.0));
-        // A different, far-away target (due east) drives time forward. The
-        // north track is never seen again; delete_misses_tentative = 2.
-        tracker.process_plot(&plot(4.0, 30_000.0, std::f64::consts::FRAC_PI_2));
-        tracker.process_plot(&plot(8.0, 30_000.0, std::f64::consts::FRAC_PI_2));
 
+        // A different, far-away target (due east) drives time forward; the north
+        // track is never seen again. delete_misses_tentative = 2 and the nominal
+        // revisit is 5 s, so it survives until ~10 s overdue.
+        let east = |t: f64| plot(t, 30_000.0, std::f64::consts::FRAC_PI_2);
+        tracker.process_plot(&east(4.0));
+        tracker.process_plot(&east(8.0)); // north age 8 s < 2 × 5 s: still alive
+        assert!(
+            tracker.tracks().iter().any(|tr| tr.id().0 == 1),
+            "north track is still within its nominal-revisit budget at t = 8 s"
+        );
+
+        tracker.process_plot(&east(12.0)); // north age 12 s ≥ 2 × 5 s: deleted
         assert_eq!(tracker.tracks().len(), 1, "the unseen tentative is deleted");
         assert_eq!(
             tracker.tracks()[0].id().0,
@@ -1284,5 +1314,40 @@ mod tests {
             0,
             "unregistered plot must be ignored"
         );
+    }
+
+    /// Two co-located sensors report the *same* aircraft at interleaved times.
+    /// Because the plots are separated in time, each is gated against the track
+    /// predicted to that instant, so the second sensor's plot folds into the
+    /// same track instead of spawning a ghost — the asynchronous path needs no
+    /// frozen scan-start reference (ADR 0011). The interleaved hits keep one
+    /// confirmed identity, exercising the time-continuous lifecycle across two
+    /// sensors. REQ: FR-TRK-010, FR-TRK-022, FR-TRK-023
+    #[test]
+    fn process_plot_two_async_sensors_make_one_track() {
+        let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
+        let cfg = TrackerConfig::new(frame())
+            .with_sensor(SensorId(1), frame(), error)
+            .with_sensor(SensorId(2), frame(), error);
+        let mut tracker = Tracker::new(cfg);
+
+        // One stationary target 50 km due north; the two sensors alternate every
+        // 2 s (each revisiting every 4 s, offset by 2 s).
+        for k in 0..6 {
+            let t = k as f64 * 2.0;
+            let sensor = if k % 2 == 0 { SensorId(1) } else { SensorId(2) };
+            tracker.process_plot(&Plot::primary(
+                sensor,
+                Timestamp(t),
+                Polar::new(50_000.0, 0.0, 0.0),
+            ));
+        }
+
+        assert_eq!(
+            tracker.tracks().len(),
+            1,
+            "two async sensors seeing one aircraft must fuse into one track"
+        );
+        assert_eq!(tracker.confirmed_count(), 1, "and it confirms");
     }
 }
