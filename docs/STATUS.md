@@ -5,10 +5,11 @@
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
 - **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/serene-heisenberg-xq4rla`:
-  **ADR 0013 Häppchen 13.1 + 13.2 umgesetzt** — `Tracker::process_plot`
-  (asynchrone Pro-Plot-Verarbeitung) additiv eingeführt und mit einem
-  zeit-kontinuierlichen Lebenszyklus versehen, Ansatz B; `process_scan`/Batch
-  unverändert, alle Gates grün)
+  **ADR 0013 Häppchen 13.1 + 13.2 + 13.3 umgesetzt** — `Tracker::process_plot`
+  (asynchrone Pro-Plot-Verarbeitung) additiv, zeit-kontinuierlicher
+  Lebenszyklus, und `Tracker::snapshot_at(t)` (read-only Zeit-Projektion aller
+  Tracks für den künftigen periodischen Ausgabetakt), Ansatz B;
+  `process_scan`/Batch unverändert, alle Gates grün)
 - **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
   Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
   I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches
@@ -42,8 +43,12 @@
 > ADR 0011) ist für die heutigen Tests tragend, solange der Simulator
 > gleichzeitige Plots liefert (bis 13.5). FR-TRK-022/023, Tests
 > `tracker::process_plot_*`, `track::expected_revisit_*`.
-> **Nächster Schritt: Häppchen 13.3** (`snapshot_at(t)` — alle Tracks read-only
-> auf Zeit `t` prädizieren und reportieren, S4). Der Foundation-WIP des Simulators
+> **13.3 ist umgesetzt:** `Tracker::snapshot_at(t)` projiziert read-only **alle**
+> Tracks auf eine gemeinsame Ausgabezeit `t` (IMM-Prädiktion auf einer Kopie,
+> ohne den Zustand zu verändern) — die Grundlage für den festen Ausgabe-Herzschlag.
+> FR-TRK-024, Tests `tracker::snapshot_at_*`.
+> **Nächster Schritt: Häppchen 13.4** (periodischer Ausgabetakt im Player/Server,
+> S4). Der Foundation-WIP des Simulators
 > (azimut-abhängige Zeitstempel, `scan_offset` entfernt) liegt weiter in Commit
 > **`6a58a03`** (zurückgenommen via **`0959059`**) und wird in 13.5 wieder
 > eingespielt. Vollständiger Häppchen-Plan (**13.1–13.7**) im Abschnitt

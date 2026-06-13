@@ -210,25 +210,54 @@ impl Tracker {
         self.tracks
             .iter()
             .map(|track| {
-                let p = track.position();
-                let v = track.velocity();
-                // The 2-D estimate sits on the tracking plane (up = 0), i.e. at
-                // the tracking-frame origin's ellipsoidal height.
-                let position = frame.enu_to_geodetic(&Enu::new(p[0], p[1], 0.0));
-                SystemTrack {
-                    id: track.id(),
-                    time: Timestamp(track.last_time),
-                    position,
-                    v_east: v[0],
-                    v_north: v[1],
-                    confirmed: track.is_confirmed(),
-                    coasting: track.is_coasting(),
-                    update_age: track.update_age(),
-                    position_uncertainty: track.estimate().position_uncertainty(),
-                    mode_3a: track.mode_3a(),
-                    icao_address: track.icao_address(),
-                    contributing_sensors: track.contributing_sensors().iter().copied().collect(),
-                }
+                system_track_from(
+                    track,
+                    &track.estimate(),
+                    track.last_time,
+                    track.is_coasting(),
+                    track.update_age(),
+                    frame,
+                )
+            })
+            .collect()
+    }
+
+    /// Project **all** tracks onto a single common output time `t`, **without
+    /// mutating the tracker** — the read-only counterpart to
+    /// [`system_tracks`](Self::system_tracks).
+    ///
+    /// For the periodic output stage (ADR 0013, Häppchen 13.3 → 13.4) the air
+    /// picture must carry one consistent time stamp regardless of when each
+    /// track was last updated. Each track's IMM bank is therefore predicted **on
+    /// a clone** to `t` (IMM mixing + dead reckoning), so the tracker's own
+    /// state is untouched: `snapshot_at` never advances a track, books a hit, or
+    /// deletes anything. This is what later lets the output run on a fixed
+    /// heartbeat decoupled from the asynchronous input.
+    ///
+    /// A track already at or after `t` is reported as-is (no backward
+    /// prediction). Status is evaluated at `t`: `update_age = t − last_hit_time`,
+    /// and the track is `coasting` once `t` is past its last hit.
+    ///
+    /// REQ: NFR-INT-001, NFR-INT-002, FR-TRK-024
+    pub fn snapshot_at(&self, t: Timestamp) -> Vec<SystemTrack> {
+        let frame = &self.config.tracking_frame;
+        let process_noise = self.config.process_noise;
+        let t = t.as_secs();
+        self.tracks
+            .iter()
+            .map(|track| {
+                // Predict to `t` on a clone so the live track is not advanced.
+                let dt = t - track.last_time;
+                let estimate = if dt > 0.0 {
+                    let mut imm = track.imm.clone();
+                    imm.predict(dt, &process_noise);
+                    imm.combined_estimate()
+                } else {
+                    track.estimate()
+                };
+                let update_age = (t - track.last_hit_time).max(0.0);
+                let coasting = t > track.last_hit_time;
+                system_track_from(track, &estimate, t, coasting, update_age, frame)
             })
             .collect()
     }
@@ -595,6 +624,40 @@ impl Tracker {
         //    counted in the track's own revisit intervals (time-continuous).
         self.tracks
             .retain(|track| !should_delete_continuous(track, delete_tentative, delete_confirmed));
+    }
+}
+
+/// Assemble a neutral [`SystemTrack`] from a track and a (possibly predicted)
+/// estimate, lifting the position back to WGS84 through `frame`. Shared by
+/// [`Tracker::system_tracks`] (current estimate, per-track last time) and
+/// [`Tracker::snapshot_at`] (estimate predicted to a common output time), so the
+/// two output ports cannot drift apart. The 2-D estimate sits on the tracking
+/// plane (up = 0), i.e. at the tracking-frame origin's ellipsoidal height (the
+/// tracker carries no independent vertical estimate yet).
+fn system_track_from(
+    track: &Track,
+    estimate: &LinearKalman,
+    time: f64,
+    coasting: bool,
+    update_age: f64,
+    frame: &LocalFrame,
+) -> SystemTrack {
+    let p = estimate.position();
+    let v = estimate.velocity();
+    let position = frame.enu_to_geodetic(&Enu::new(p[0], p[1], 0.0));
+    SystemTrack {
+        id: track.id(),
+        time: Timestamp(time),
+        position,
+        v_east: v[0],
+        v_north: v[1],
+        confirmed: track.is_confirmed(),
+        coasting,
+        update_age,
+        position_uncertainty: estimate.position_uncertainty(),
+        mode_3a: track.mode_3a(),
+        icao_address: track.icao_address(),
+        contributing_sensors: track.contributing_sensors().iter().copied().collect(),
     }
 }
 
@@ -1349,5 +1412,94 @@ mod tests {
             "two async sensors seeing one aircraft must fuse into one track"
         );
         assert_eq!(tracker.confirmed_count(), 1, "and it confirms");
+    }
+
+    // --- ADR 0013, Häppchen 13.3: read-only time snapshot ------------------
+
+    /// `snapshot_at` predicts every track forward to a common output time and
+    /// must leave the tracker's own state untouched: a far-future snapshot
+    /// neither advances nor deletes the live track, and repeating a snapshot
+    /// yields the same result. REQ: FR-TRK-024
+    #[test]
+    fn snapshot_at_predicts_forward_and_is_read_only() {
+        let mut tracker = Tracker::new(config());
+        // A target moving due east at 200 m/s, seen every 4 s.
+        let speed = 200.0;
+        for k in 0..5 {
+            let t = k as f64 * 4.0;
+            let polar = firefly_geo::Enu::new(speed * t, 50_000.0, 0.0).to_polar();
+            tracker.process_plot(&Plot::primary(SensorId(1), Timestamp(t), polar));
+        }
+        assert_eq!(tracker.confirmed_count(), 1);
+
+        // Current estimate (at last update t = 16) and the state we must not touch.
+        let east_now = frame()
+            .geodetic_to_enu(&tracker.system_tracks()[0].position)
+            .east;
+        let pos_before = tracker.tracks()[0].position();
+        let n_before = tracker.tracks().len();
+
+        // Snapshot 4 s into the future: the track is predicted along its velocity
+        // and sits well ahead of its last update.
+        let snap = tracker.snapshot_at(Timestamp(20.0));
+        assert_eq!(snap.len(), 1);
+        let east_future = frame().geodetic_to_enu(&snap[0].position).east;
+        assert!(
+            east_future > east_now + 400.0,
+            "predicted east {east_future} should be ahead of {east_now}"
+        );
+        assert!(
+            (snap[0].time.as_secs() - 20.0).abs() < 1e-9,
+            "snapshot carries t"
+        );
+
+        // Read-only: even a far-future snapshot must not delete or mutate the
+        // live track, and a repeated snapshot is identical.
+        let _ = tracker.snapshot_at(Timestamp(10_000.0));
+        assert_eq!(tracker.tracks().len(), n_before, "snapshot must not delete");
+        assert_eq!(
+            tracker.tracks()[0].position(),
+            pos_before,
+            "snapshot must not mutate the live estimate"
+        );
+        let east_again = frame()
+            .geodetic_to_enu(&tracker.snapshot_at(Timestamp(20.0))[0].position)
+            .east;
+        assert!(
+            (east_again - east_future).abs() < 1e-9,
+            "snapshot is deterministic"
+        );
+    }
+
+    /// `snapshot_at` evaluates the safety status at the *output* time, not the
+    /// last update time: a track fresh at its last hit shows up coasting with a
+    /// matching update age when projected into the future. REQ: FR-TRK-024
+    #[test]
+    fn snapshot_at_reports_age_and_coasting_at_output_time() {
+        let mut tracker = Tracker::new(config());
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_plot(&plot(t, 50_000.0, 0.0));
+        }
+        // At the last update (t = 8) the track is fresh.
+        let now = tracker.system_tracks();
+        assert!(!now[0].coasting);
+        assert!(now[0].update_age.abs() < 1e-9);
+
+        // Projected 4 s later it coasts, with a 4 s update age — no plot needed.
+        let snap = tracker.snapshot_at(Timestamp(12.0));
+        assert!(snap[0].coasting, "past the last hit → coasting");
+        assert!(
+            (snap[0].update_age - 4.0).abs() < 1e-9,
+            "update age = t − last hit"
+        );
+        assert!((snap[0].time.as_secs() - 12.0).abs() < 1e-9);
+    }
+
+    /// An empty tracker snapshots to an empty air picture.
+    #[test]
+    fn snapshot_at_on_empty_tracker_is_empty() {
+        let tracker = Tracker::new(config());
+        assert!(tracker.snapshot_at(Timestamp(5.0)).is_empty());
     }
 }

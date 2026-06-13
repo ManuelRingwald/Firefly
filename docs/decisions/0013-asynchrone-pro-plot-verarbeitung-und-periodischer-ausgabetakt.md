@@ -234,9 +234,14 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   > `should_delete_continuous`) wirkt nur im async-Pfad. Die beiden Pfade werden
   > in 13.4/13.5 zusammengeführt, wenn der Player auf `process_plot` umschaltet;
   > dann wird auch `NOMINAL_REVISIT_INTERVAL` zum 12-Factor-Knopf (13.4).
-- [ ] **13.3 — `snapshot_at(t)` (S4).** `Tracker::snapshot_at(t: Timestamp) ->
-  Vec<SystemTrack>` prädiziert alle Tracks auf `t` (IMM + Dead-Reckoning) und
-  reportiert sie — ohne den Zustand zu verändern (read-only Projektion).
+- [x] **13.3 — `snapshot_at(t)` (S4). ✅ umgesetzt.**
+  `Tracker::snapshot_at(t: Timestamp) -> Vec<SystemTrack>` prädiziert **alle**
+  Tracks **auf einer Kopie** der IMM-Bank auf `t` (IMM + Dead-Reckoning, nur
+  `dt > 0`) und reportiert sie — **read-only**, der Tracker-Zustand bleibt
+  unangetastet (kein predict am echten Track, kein Treffer, keine Löschung).
+  Status zu `t`: `update_age = t − last_hit_time`, `coasting = t >
+  last_hit_time`. WGS84-Projektion mit `system_tracks` geteilt
+  (`system_track_from`). **FR-TRK-024**, Tests `tracker::snapshot_at_*`.
 - [ ] **13.4 — Periodischer Ausgabetakt im Player/Server (S4).** `Player::frames`
   puffert Plots nach Datenzeit, arbeitet sie kontinuierlich in den Tracker und
   emittiert Frames im festen Takt `T_out` (12-Factor: `FIREFLY_OUTPUT_PERIOD`,
@@ -262,5 +267,10 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
 - **13.2 erledigt:** zeit-kontinuierlicher Lebenszyklus im async-Pfad
   (`expected_revisit`, `should_delete_continuous`, `NOMINAL_REVISIT_INTERVAL`),
   FR-TRK-023; Batch-Pfad + Frankfurt unverändert, alle Gates grün.
-- **Nächster Schritt:** Häppchen **13.3** (`snapshot_at(t)` — alle Tracks
-  read-only auf Zeit `t` prädizieren und reportieren, S4), erklären → Go → bauen.
+- **13.3 erledigt:** `Tracker::snapshot_at(t)` (read-only Zeit-Projektion aller
+  Tracks, `system_track_from` geteilt mit `system_tracks`), FR-TRK-024; alle
+  Gates grün.
+- **Nächster Schritt:** Häppchen **13.4** (periodischer Ausgabetakt im
+  Player/Server — Plots puffern, kontinuierlich in den Tracker arbeiten, Frames
+  im festen Takt `T_out` via `snapshot_at` emittieren, S4), erklären → Go →
+  bauen.
