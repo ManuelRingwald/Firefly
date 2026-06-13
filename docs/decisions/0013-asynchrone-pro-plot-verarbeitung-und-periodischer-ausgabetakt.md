@@ -1,6 +1,6 @@
 # ADR 0013 — Asynchrone Pro-Plot-Verarbeitung + Periodischer Ausgabetakt
 
-- **Status:** akzeptiert — **Umsetzung ausstehend** (Foundation begonnen und bewusst zurückgenommen, siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
+- **Status:** akzeptiert — **Umsetzung läuft** (13.1 `process_plot` umgesetzt, Ansatz B/additiv; 13.2–13.7 offen — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
 - **Datum:** 2026-06-12
 
 ## Kontext
@@ -190,12 +190,33 @@ und die volle Umsetzung ein größerer, mehrstufiger Schritt ist (S4–S5, gehö
 
 Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
 
-- [ ] **13.1 — Tracker `process_plot` (Kern-Umbau, S5).** Neue API
-  `Tracker::process_plot(plot)` neben dem bestehenden `process_scan`. Jeder Aufruf
-  prädiziert alle Tracks auf die **Plot-Zeit** und gatet/assoziiert gegen die
-  Live-Schätzung (keine eingefrorene Scan-Start-Referenz, ADR 0011 entfällt hier).
-  `process_scan` zunächst als dünne Schleife über `process_plot` behalten →
-  bestehende Tests bleiben grün. *Erst erklären, dann bauen.*
+- [x] **13.1 — Tracker `process_plot` (Kern-Umbau, S5). ✅ umgesetzt
+  (Ansatz B — additiv).** Neue API `Tracker::process_plot(plot)` **neben** dem
+  bestehenden `process_scan`. Jeder Aufruf prädiziert alle Tracks auf die
+  **Plot-Zeit** und gatet/assoziiert gegen die **Live-Schätzung** (keine
+  eingefrorene Scan-Start-Referenz; ADR 0011 entfällt im async-Pfad, weil
+  zeitlich getrennte Plots durch die Prädiktions-Kovarianz wieder ins Tor
+  wachsen). Update per PDA über die eine Messung (JPDA-Exklusivität über Tracks)
+  bzw. Initiierung außerhalb jedes `init_gate`; danach zeit-skalierte
+  Bestätigung/Löschung. **FR-TRK-022**, Tests `tracker::process_plot_*`.
+
+  > **Abweichung von der ursprünglichen Planung (bewusst, freigegeben).** Der
+  > erste Entwurf sah vor, `process_scan` *sofort* als dünne Schleife über
+  > `process_plot` umzuschreiben. Bei der Umsetzung zeigte sich: die
+  > Same-Time-Batch-Semantik (eingefrorene Fusions-Referenz + Joint-Association,
+  > ADR 0011/FR-TRK-020) ist für die heutigen Tests **tragend**, solange Plots
+  > dieselbe Datenzeit teilen (was der Simulator bis 13.5 noch tut) — eine
+  > naive Pro-Plot-Schleife mit Live-Schätzung würde
+  > `two_sensors_seeing_one_aircraft_make_one_track` (Geist nach sequenzieller
+  > Tor-Verengung) und `jpda_keeps_two_close_parallel_tracks_distinct`
+  > (verlorene Joint-Exklusivität) brechen. Daher **Ansatz B**: `process_plot`
+  > wird additiv eingeführt, `process_scan` bleibt unverändert. Der Batch-Pfad
+  > treibt den Player weiter, bis die asynchrone Ausgabe-Pipeline (13.4/13.5)
+  > umschaltet; dort wird der Frankfurt-Batch-Test durch eine Async-Regression
+  > ersetzt und `process_scan` zurückgebaut. Vorteil: jedes Qualitäts-Gate
+  > bleibt in **jedem** Häppchen grün, kein Test-Churn vor der Zeit. Kosten:
+  > temporäre Logik-Duplikation zwischen beiden Pfaden, in 13.4/13.5
+  > zusammengeführt.
 - [ ] **13.2 — Adaptiven Lebenszyklus auf Zeitkontinuität umstellen (S4).** Treffer/
   Fehltreffer nach **tatsächlichen Zeitlücken** statt nach Scan-Aufrufen (ADR 0012
   vereinfachen). Damit ist der Workaround-Anteil nicht mehr nötig.
@@ -222,4 +243,7 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
 - **Zurücknahme:** `git show 0959059` (Revert, damit `main` grün ist).
 - **Gebrochenes Symptom ohne Teile 2+3:** `frankfurt_scene_keeps_one_identity_per_aircraft`
   → 155 statt 8 IDs.
-- **Erster echter Schritt:** Häppchen **13.1** (`process_plot`), erklären → Go → bauen.
+- **13.1 erledigt:** `Tracker::process_plot` additiv (Ansatz B), FR-TRK-022, Tests
+  `tracker::process_plot_*`; `process_scan` unverändert, alle Gates grün.
+- **Nächster Schritt:** Häppchen **13.2** (adaptiven Lebenszyklus auf
+  Zeitkontinuität umstellen, S4), erklären → Go → bauen.

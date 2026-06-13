@@ -5,9 +5,9 @@
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
 - **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/serene-heisenberg-xq4rla`:
-  Issue #9 geschlossen — Wayfinder M1 (CAT062-Pipeline + Live-Karte) ist
-  abgeschlossen und hat den Vertrag (ICD v1.0.0) Ende-zu-Ende gegen den
-  Referenz-Dump verifiziert)
+  **ADR 0013 Häppchen 13.1 umgesetzt** — `Tracker::process_plot` (asynchrone
+  Pro-Plot-Verarbeitung) additiv eingeführt, Ansatz B; `process_scan`
+  unverändert, alle Gates grün)
 - **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
   Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
   I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches
@@ -28,15 +28,22 @@
 > Schnittstellen-Probleme. Das ADR-0013-Vorhaben (siehe nächster Absatz)
 > bleibt der fachlich nächste Schritt.
 
-> 🔭 **NÄCHSTE WOCHE — ADR 0013 (asynchrone Pro-Plot-Verarbeitung) umsetzen.**
-> Die Architektur-Entscheidung ist **angenommen** (`docs/decisions/0013-…md`), die
-> Umsetzung steht noch aus. Ein erster Foundation-Schritt (Simulator: azimut-abhängige
-> Pro-Plot-Zeitstempel, `scan_offset` entfernt) wurde begonnen — Commit **`6a58a03`** —
-> und bewusst wieder **zurückgenommen** (Revert **`0959059`**), weil ohne die Tracker-
-> und Server-Teile der Frankfurt-Test rot wird (155 statt 8 Track-IDs). `main` ist
-> deshalb wieder grün. **Wiedereinstieg:** der Abschnitt *„Umsetzungsstand /
-> Wiedereinstieg"* in ADR 0013 enthält den vollständigen Häppchen-Plan
-> (**13.1 – 13.7**, beginnend mit `Tracker::process_plot`). Vorgehen wie immer:
+> 🔭 **ADR 0013 (asynchrone Pro-Plot-Verarbeitung) — Umsetzung läuft.**
+> Die Architektur-Entscheidung ist **angenommen** (`docs/decisions/0013-…md`).
+> **13.1 ist umgesetzt:** `Tracker::process_plot` verarbeitet einen einzelnen
+> Plot zu seiner eigenen Datenzeit (prädizieren → gegen Live-Schätzung
+> gaten/assoziieren → updaten/initiieren → zeit-skalierte Bestätigung/Löschung),
+> **additiv** neben `process_scan` (**Ansatz B**, mit dem Verantwortlichen
+> abgestimmt). Grund für additiv statt sofortiger dünner Schleife: die
+> Same-Time-Batch-Semantik (frozen reference + Joint-Association, ADR 0011) ist
+> für die heutigen Tests tragend, solange der Simulator gleichzeitige Plots
+> liefert (bis 13.5). FR-TRK-022, Tests `tracker::process_plot_*`.
+> **Nächster Schritt: Häppchen 13.2** (adaptiven Lebenszyklus auf
+> Zeitkontinuität umstellen, S4). Der Foundation-WIP des Simulators
+> (azimut-abhängige Zeitstempel, `scan_offset` entfernt) liegt weiter in Commit
+> **`6a58a03`** (zurückgenommen via **`0959059`**) und wird in 13.5 wieder
+> eingespielt. Vollständiger Häppchen-Plan (**13.1–13.7**) im Abschnitt
+> *„Umsetzungsstand / Wiedereinstieg"* der ADR 0013. Vorgehen wie immer:
 > *erst erklären, dann bauen* (CLAUDE.md §2).
 
 - **Diese Sitzung (Aufräumen + Merge):**
