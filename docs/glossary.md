@@ -359,9 +359,32 @@ Eine bekannte Eigenheit von PDA/JPDA bei eng benachbarten Zielen: Weil jeder
 Plot *weich* (mit `β<1`) auf mehrere Tracks verteilt wird statt ihn fest einem
 zuzuschlagen, ziehen sich die Schätzungen mehrerer naher Tracks ein Stück
 **aufeinander zu** (zu den geteilten Plots hin), statt exakt getrennt zu bleiben.
-Die Tracks bleiben dabei unterscheidbar — verschmelzen also nicht zu einem —,
-rücken aber näher zusammen als ihre wahren Positionen. Ein dokumentierter
-Kompromiss von JPDA, kein Fehler.
+Solange die Ziele **auflösbar** sind (siehe *Auflösungsgrenze*), bleiben die
+Tracks unterscheidbar — sie rücken nur etwas näher zusammen als ihre wahren
+Positionen. **Unterhalb der Auflösungsgrenze** (Ziele näher als ~3–4σ des
+Messrauschens) verschmelzen die Schätzungen dagegen vollständig zu einer — das
+ist dann aber *keine* JPDA-Schwäche, sondern die korrekte Konsequenz daraus,
+dass die Daten die beiden Ziele gar nicht mehr trennen (vgl. ADR 0013).
+
+**Auflösungsgrenze (Radar)**
+Der kleinste Abstand, bei dem zwei Ziele noch als *zwei* getrennte Rückmeldungen
+erkennbar sind. Praktisch bestimmt vom Messrauschen: Liegen zwei Plots enger als
+grob **3–4σ** beieinander (σ = Standardabweichung des Messfehlers, quer zur
+Sichtlinie wächst sie mit der Entfernung), überlappen sich ihre
+Wahrscheinlichkeits­wolken so stark, dass *kein* Verfahren sie zuverlässig
+trennen kann — die Information dafür steckt nicht in den Daten. Wichtige
+Konsequenz: Ein Tracker, der zwei sub-σ-nahe Ziele zu einer Spur verschmilzt,
+macht keinen Fehler, sondern bildet die physikalische Grenze korrekt ab.
+
+**Identitätstausch (*Track Swap*)**
+Wenn ein Tracker zwei sich nahe kommende Ziele zwar als zwei Spuren behält, aber
+beim Auseinandergehen die **Identitäten vertauscht** — Spur A folgt plötzlich
+Ziel B und umgekehrt. Typische Gefahr bei einer *harten* 1:1-Zuordnung am
+Kreuzungspunkt. JPDA beugt dem vor, indem es jede Spur über ihren eigenen
+**Geschwindigkeitszustand** (Bewegungsmodell) durch die Mehrdeutigkeit trägt:
+Wer von links-unten nach rechts-oben fliegt, taucht nach der Kreuzung auch
+rechts-oben wieder auf. Der Frankfurt-Showcase prüft genau das (kreuzende
+Ziele, Kurs bleibt im richtigen Quadranten).
 
 **Zuordnungsproblem (*assignment problem*)**
 Die Aufgabe, Zeilen (Tracks) und Spalten (Plots) einer Kostentabelle so paarweise
