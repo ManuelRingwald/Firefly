@@ -21,14 +21,27 @@
 
 ## Version
 
-**1.1.0** (2026-06-13) — UTC Time-of-Day Migration (Issue #9).
+**1.1.1** (2026-06-14) — Doku-Politur: Spec-Edition, Update-Rate, ToD-Rollover.
 
 ### Changelog
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 1.1.1 | 2026-06-14 | **Doku-Politur (kein Wire-Format-Change).** Normative Spec-Edition referenziert (Abschnitt 0), Update-Rate/Scan-Period dokumentiert (Abschnitt 1), Mitternachts-Rollover von I062/070 präzisiert (Abschnitt 6), Stand zum I062/100-Referenzpunkt verlinkt (Abschnitt 5). |
 | 1.1.0 | 2026-06-13 | **UTC Time-of-Day in I062/070.** I062/070 wird jetzt als echte ASTERIX-Time-of-Day kodiert (Sekunden seit UTC-Mitternacht des Simulationstags), nicht relativ zur Szenario-Start-Zeit. `Scenario` trägt `simulation_start_time_of_day: f64` (Default 0 = Mitternacht); `Timestamp` bleibt intern deterministisch (Offset seit Szenario-Start). `Cat062Encoder` nimmt die Startzeit im Konstruktor entgegen. |
 | 1.0.0 | 2026-06-13 | Erstfassung, extrahiert aus `firefly-asterix::cat062` und Wayfinders `CLAUDE.md` Abschnitt 2. |
+
+---
+
+## 0. Normative Referenz
+
+Alle Item-Kodierungen (Längen, LSB-Werte, Bit-Layouts) in Abschnitt 4 sind
+gegen **EUROCONTROL SUR.ET1.ST05.2000-STD-09-01, Edition 1.10** ("CAT062
+System Track Data") verifiziert — siehe Doc-Kommentare in
+`crates/firefly-asterix/src/cat062.rs` (jede Item-Kodierung referenziert die
+jeweilige Spec-Sektion, z. B. §5.2.20, §5.2.24, §5.2.26). Diese ICD beschreibt
+ein **bewusst gewähltes Subset** dieser Edition (siehe Abschnitt 4); sie
+ersetzt die Edition nicht als normative Quelle.
 
 ---
 
@@ -41,6 +54,12 @@
 | Default-Port | `8600` (Env: `FIREFLY_CAT062_PORT`) |
 | TTL | 1 (subnetz-lokal, Default) |
 | Framing | **Ein Datagramm = ein vollständiger CAT062-Datenblock = ein Scan.** Keine zusätzliche Anwendungs-Rahmung (keine Sequenznummern, keine Extra-Header). |
+
+**Update-Rate.** Es gibt **keine feste, globale Update-Periode** — jeder Sensor
+hat seine eigene `scan_period` (typisch 4–12 s, konfiguriert pro Radar, siehe
+ADR 0013). Jeder abgeschlossene Scan eines Sensors erzeugt einen
+Datenblock/Scan im Sinne dieser ICD; Wayfinder muss daher mit Datenblöcken in
+unregelmäßigem Takt rechnen, nicht mit einem festen Intervall.
 
 ## 2. Datenblock-Format
 
@@ -123,8 +142,15 @@ isotrop — gleicher Wert für X und Y).
   rendert direkt daraus — **keine** Rückprojektion nötig.
 - **I062/100 (System-Stereografisch)** ist eine zusätzliche Systemebene,
   optional verwertbar (z. B. für Debugging/Vergleich). Referenzpunkt der
-  Projektion ist aktuell der Demo-Ursprung (siehe Firefly-Roadmap: "Konfigurierbarer
-  System-Referenzpunkt", offen).
+  Projektion ist aktuell der Demo-Ursprung (Frankfurt-Szenario,
+  `Cat062Encoder::new(source, system_reference_point)` in
+  `crates/firefly-asterix/src/cat062.rs`). Ein frei konfigurierbarer
+  System-Referenzpunkt ist als offener Punkt in
+  `docs/decisions/0006-integration-phoenix-asd-cat062.md` (Abschnitt
+  "Nachtrag (Häppchen C.1–C.3)", Unterabschnitt "Ehrliche Grenze") und in der
+  Firefly-Roadmap ("Konfigurierbarer System-Referenzpunkt") vermerkt — bis
+  dahin ist I062/100 nur im Demo-Kontext sinnvoll interpretierbar, I062/105
+  (WGS-84) bleibt die primäre, kontextfreie Position.
 
 ## 6. Zeit (I062/070)
 
@@ -134,6 +160,15 @@ interpretiert. Beispiel: Wenn die Szenario um 06:00 UTC beginnt (21600 Sekunden)
 und eine `Timestamp(3600.0)` ankommt, wird I062/070 als 07:00:00 UTC kodiert.
 Der Simulator bleibt deterministisch (gleicher Input → gleicher Output), während
 die Ausgabe semantisch korrekt ist.
+
+**Mitternachts-Rollover.** I062/070 ist ein 24-Bit-Zähler in 1/128-s-Ticks seit
+UTC-Mitternacht (Wertebereich 0 … 86 399,99…, max. 11 059 200 Ticks < 2²⁴) und
+wird als `(simulation_start_time_of_day + timestamp) % 86400` Sekunden
+kodiert — der Zähler **springt bei Mitternacht auf 0 zurück**, unabhängig
+davon, wie lange das Szenario schon läuft. Wayfinder darf daraus **keinen
+monoton steigenden Zeitstempel über Mitternacht hinweg ableiten**; ein
+Sprung von einem Wert nahe 86 400 s auf einen kleinen Wert ist ein normaler
+Tageswechsel, kein Datenfehler.
 
 ## 7. Referenzen
 
