@@ -531,6 +531,26 @@ impl Tracker {
                 }
             }
 
+            // Refresh the per-sensor scan-period estimate from this opportunity,
+            // then take the slowest known period as the deletion **cadence
+            // floor** (ADR 0013, Häppchen 13.5c — the time-continuous analog of
+            // ADR 0012's `coast_reference`). Without it a track hit briefly by a
+            // fast sensor settles a short revisit estimate and is then churned
+            // away during the longer gap until a slow radar revisits it; flooring
+            // by the slowest observed sensor period keeps it alive. `0` until any
+            // sensor has been seen twice, so a fresh track still falls back to the
+            // nominal revisit (the 13.2 behaviour).
+            for &sensor in by_sensor.keys() {
+                if let Some(&last) = self.sensor_last_scan.get(&sensor) {
+                    let period = t - last;
+                    if period > 0.0 {
+                        self.sensor_period.insert(sensor, period);
+                    }
+                }
+                self.sensor_last_scan.insert(sensor, t);
+            }
+            let cadence = self.sensor_period.values().copied().fold(0.0, f64::max);
+
             // 1. Predict every track to this opportunity's time; refresh the
             //    per-opportunity sensor provenance.
             for track in &mut self.tracks {
@@ -556,9 +576,10 @@ impl Tracker {
                 }
             }
 
-            // 5. Delete via the time-continuous missed-revisit budget.
+            // 5. Delete via the time-continuous missed-revisit budget, floored
+            //    by the slowest observed sensor cadence (Häppchen 13.5c).
             self.tracks.retain(|track| {
-                !should_delete_continuous(track, delete_tentative, delete_confirmed)
+                !should_delete_continuous(track, delete_tentative, delete_confirmed, cadence)
             });
 
             gi = gj;
@@ -729,19 +750,32 @@ fn should_delete(
 }
 
 /// Whether a track should be deleted on the **asynchronous** path (ADR 0013,
-/// Häppchen 13.2). Like [`should_delete`], but the missed-revisit budget counts
-/// the track's **own** revisit intervals ([`Track::expected_revisit`]) rather
-/// than a globally-estimated feed cadence: a track lives or dies purely by how
-/// overdue *its* next update is. A track that has not yet measured its own
-/// cadence falls back to [`NOMINAL_REVISIT_INTERVAL`]; a freshly hit track
-/// (`update_age == 0`) is never deleted.
-fn should_delete_continuous(track: &Track, budget_tentative: u32, budget_confirmed: u32) -> bool {
+/// Häppchen 13.2 + 13.5c). The missed-revisit budget counts the track's **own**
+/// revisit intervals ([`Track::expected_revisit`]), floored by the slowest
+/// observed sensor `cadence`: a track lives or dies by how overdue *its* next
+/// update is, but is never deleted faster than the feed's slowest radar would
+/// revisit it. This is the time-continuous analog of [`should_delete`]'s
+/// `coast_reference` — it stops a track that a fast sensor saw briefly (short
+/// own-revisit estimate) from being churned away across the longer gap until a
+/// slow radar revisits it (Häppchen 13.5c). A track that has not yet measured
+/// its own cadence and sees no sensor period yet falls back to
+/// [`NOMINAL_REVISIT_INTERVAL`]; a freshly hit track (`update_age == 0`) is
+/// never deleted.
+fn should_delete_continuous(
+    track: &Track,
+    budget_tentative: u32,
+    budget_confirmed: u32,
+    cadence: f64,
+) -> bool {
     let budget = match track.status() {
         TrackStatus::Tentative => budget_tentative,
         TrackStatus::Confirmed => budget_confirmed,
     } as f64;
     let age = track.update_age();
-    age > 0.0 && age >= budget * track.expected_revisit(NOMINAL_REVISIT_INTERVAL)
+    let interval = track
+        .expected_revisit(NOMINAL_REVISIT_INTERVAL)
+        .max(cadence);
+    age > 0.0 && age >= budget * interval
 }
 
 #[cfg(test)]
@@ -1564,6 +1598,57 @@ mod tests {
             westbound.mode_3a(),
             Some(0o2222),
             "westbound keeps B's squawk"
+        );
+    }
+
+    /// A track briefly seen by a fast sensor settles a short own-revisit
+    /// estimate; once the fast sensor drops out, only a slow (12 s) sensor still
+    /// covers it. The **cadence floor** (Häppchen 13.5c) keeps it alive across
+    /// the long gap instead of churning it away — without the floor the short
+    /// revisit estimate (≈2 s, confirmed budget 4) would delete it after ≈8 s of
+    /// coast. REQ: FR-TRK-023, FR-TRK-026
+    #[test]
+    fn process_plots_cadence_floor_survives_a_slow_sensor_gap() {
+        let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
+        let cfg = TrackerConfig::new(frame())
+            .with_sensor(SensorId(1), frame(), error) // fast sensor
+            .with_sensor(SensorId(2), frame(), error); // slow sensor
+        let mut tracker = Tracker::new(cfg);
+
+        let fast =
+            |t: f64| Plot::primary(SensorId(1), Timestamp(t), Polar::new(50_000.0, 0.0, 0.0));
+        let slow =
+            |t: f64| Plot::primary(SensorId(2), Timestamp(t), Polar::new(50_000.0, 0.0, 0.0));
+
+        // Both sensors register a first observation at t = 0.
+        tracker.process_plots(&[fast(0.0), slow(0.0)]);
+        // Fast sensor hits every 2 s up to t = 12 (own revisit settles ≈2 s);
+        // the slow sensor re-hits at t = 12, establishing its 12 s period — so
+        // the cadence floor becomes 12 s.
+        for k in 1..=6 {
+            tracker.process_plots(&[fast(k as f64 * 2.0)]);
+        }
+        tracker.process_plots(&[slow(12.0)]);
+        assert_eq!(tracker.confirmed_count(), 1);
+        let id = tracker.tracks()[0].id();
+
+        // Fast sensor drops out. A far-away plot at t = 20 advances data time by
+        // 8 s without touching the north track, which now coasts with age = 8 s —
+        // past budget × own-revisit (4 × 2 s) but well inside budget × cadence
+        // floor (4 × 12 s), so the floor must keep it alive.
+        let decoy = Plot::primary(
+            SensorId(1),
+            Timestamp(20.0),
+            Polar::new(30_000.0, std::f64::consts::FRAC_PI_2, 0.0),
+        );
+        tracker.process_plots(&[decoy]);
+
+        assert!(
+            tracker
+                .tracks()
+                .iter()
+                .any(|tr| tr.id() == id && tr.is_confirmed()),
+            "the slowly-revisited track must survive the gap via the cadence floor"
         );
     }
 

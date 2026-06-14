@@ -5,13 +5,14 @@
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
 - **Zuletzt aktualisiert:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
-  **ADR 0013 Häppchen 13.1–13.4 + 13.5a umgesetzt** — `Tracker::process_plot`
+  **ADR 0013 Häppchen 13.1–13.4 + 13.5a + 13.5c umgesetzt** — `Tracker::process_plot`
   (async Pro-Plot-Verarbeitung) additiv, zeit-kontinuierlicher Lebenszyklus,
   `Tracker::snapshot_at(t)` (read-only Zeit-Projektion), der **periodische
-  Ausgabetakt** im Player (`periodic_snapshots`/`periodic_frames`) und nun
-  **13.5a: gemeinsame Assoziation über nahezu gleichzeitige Plots**
-  (`process_plots` + Simultaneitäts-Fenster + geteilter `fuse_simultaneous_plots`,
-  FR-TRK-025); `process_scan`/Batch verhaltensgleich, alle Gates grün)
+  Ausgabetakt** im Player (`periodic_snapshots`/`periodic_frames`), **13.5a:
+  gemeinsame Assoziation über nahezu gleichzeitige Plots** (`process_plots` +
+  Simultaneitäts-Fenster + geteilter `fuse_simultaneous_plots`, FR-TRK-025) und
+  **13.5c: Kadenz-Boden im async-Lösch-Lebenszyklus** (FR-TRK-026);
+  `process_scan`/Batch verhaltensgleich, alle Gates grün)
 - **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
   Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
   I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches
@@ -65,12 +66,24 @@
 > `fuse_simultaneous_plots` ist aus `process_scan` extrahiert und geteilt
 > (`process_scan` verhaltensgleich, `process_plot` = Ein-Plot-Bequemlichkeit).
 > FR-TRK-025, Tests `tracker::process_plots_*`.
-> **Nächster Schritt: Häppchen 13.6** (Simulator azimut-abhängige Pro-Plot-
-> Zeitstempel, `scan_offset` raus; Basis-WIP `6a58a03`) → dann 13.7-Cutover und
-> *danach* 13.5c (Lösch-Kadenz-Boden) / 13.5b (Rest-Geister) empirisch gegen die
-> Frankfurt-8-ID-Zahl. Neuer Häppchen-Plan (**13.1–13.4, 13.5a–c, 13.6, 13.7**)
-> im Abschnitt *„Umsetzungsstand / Wiedereinstieg"* der ADR 0013. Vorgehen wie
-> immer: *erst erklären, dann bauen* (CLAUDE.md §2).
+> **13.5c ist umgesetzt:** Kadenz-Boden im async-Lösch-Lebenszyklus —
+> `should_delete_continuous` löscht erst bei `budget · max(eigene Revisit,
+> langsamste Sensorperiode)`, `process_plots` schätzt die Sensor-Perioden. Damit
+> wird ein nur noch langsam (z. B. 12 s) abgedeckter Track nicht in der Lücke
+> weggelöscht und neu geboren. FR-TRK-026, Test
+> `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap`. **Messung
+> (13.5a+13.5c im Player-Pfad): Frankfurt 40 → 22 IDs.**
+> **Nächster Schritt: Häppchen 13.5b** — der verbleibende Rest ist der
+> **Kreuzungs-Tausch**: asynchrone Radare sehen die beiden Kreuzer zu
+> *verschiedenen* Zeiten, ihre Plots fallen also in *verschiedene*
+> Simultaneitäts-Fenster, sodass die Joint-Exklusivität (13.5a) nicht greift.
+> Erst untersuchen; falls eine Architektur-Weichenstellung nötig ist (kurzer
+> Mess-Puffer am Ausgabe-Tick vs. track-orientierte Assoziation), zuerst
+> abstimmen. **13.6/13.7-WIP** (azimut-Plot-Zeiten + Scene/Player-Cutover) liegt
+> in `stash@{0}` — gemessen, aber rot bis 13.5b. Neuer Häppchen-Plan
+> (**13.1–13.4, 13.5a/c, 13.5b, 13.6, 13.7**) im Abschnitt *„Umsetzungsstand /
+> Wiedereinstieg"* der ADR 0013. Vorgehen wie immer: *erst erklären, dann bauen*
+> (CLAUDE.md §2).
 
 - **Diese Sitzung (Aufräumen + Merge):**
   - Offener Branch endete mit unfertigem ADR-0013-WIP, der ein Qualitäts-Gate verletzte

@@ -1,6 +1,6 @@
 # ADR 0013 — Asynchrone Pro-Plot-Verarbeitung + Periodischer Ausgabetakt
 
-- **Status:** akzeptiert — **Umsetzung läuft** (13.1–13.4 + 13.5a umgesetzt; volle Async bestätigt, 13.5 in 13.5a–c re-dekomponiert; 13.5b/c, 13.6, 13.7 offen — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
+- **Status:** akzeptiert — **Umsetzung läuft** (13.1–13.4 + 13.5a + 13.5c umgesetzt; volle Async bestätigt, 13.5 in 13.5a–c re-dekomponiert; 13.5b, 13.6, 13.7 offen — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
 - **Datum:** 2026-06-12
 
 ## Kontext
@@ -285,10 +285,16 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   Frankfurt-8-ID-Zahl bewerten: bleibt nach 13.5a + Kadenz-Boden (13.5c) ein
   Geister-Rest aus zeitlich getrennten Multi-Radar-Plots (Lift-Bias vs.
   `init_gate`)? Falls ja, gezielt nachschärfen — sonst entfällt 13.5b.
-- [ ] **13.5c — Lösch-Kadenz mit Boden für gemischte Radarperioden (S4).**
-  Den zeit-kontinuierlichen Lebenszyklus (13.2) so robust machen, dass der
-  4/10/12-s-Mix keine Lösch-Churn erzeugt (Kadenz-Boden / Bootstrap-Schutz),
-  ohne den Einzel-Radar-Fall zu verschlechtern.
+- [x] **13.5c — Lösch-Kadenz mit Boden für gemischte Radarperioden (S4). ✅
+  umgesetzt.** `should_delete_continuous` löscht erst bei
+  `budget · max(eigene Revisit-Schätzung, langsamste beobachtete Sensorperiode)`;
+  `process_plots` schätzt die Sensor-Perioden und nimmt deren Maximum als Boden
+  (`0` bis bekannt → `NOMINAL_REVISIT_INTERVAL`-Rückfall greift weiter). Der
+  zeit-kontinuierliche Gegenpart zu ADR 0012s `coast_reference`; der Einzel-
+  Radar-/Bootstrap-Fall (13.2) bleibt unverändert. **FR-TRK-026**, Test
+  `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap`. Messung mit
+  13.5a+13.5c im Player-Pfad: Frankfurt 40 → 22 IDs (Rest = zeitlich getrennter
+  Kreuzungs-Tausch, 13.5b) — Endabnahme erst nach dem Cutover (13.7).
 - [ ] **13.6 — Simulator: azimut-abhängige Pro-Plot-Zeitstempel (S3).** Den
   Basis-WIP (`6a58a03`) wieder aufnehmen: `plot_time = scan_start + (azimut/2π)·
   scan_period`, volle Spreizung; `scan_offset` entfällt endgültig. Jetzt von der
@@ -322,7 +328,16 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
 - **13.5a erledigt:** gemeinsame Assoziation über nahezu gleichzeitige Plots
   (`process_plots`, `SIMULTANEITY_WINDOW`, geteilter `fuse_simultaneous_plots`),
   FR-TRK-025; `process_scan` verhaltensgleich extrahiert, alle Gates grün.
-- **Nächster Schritt:** Häppchen **13.6** (Simulator azimut-abhängige Pro-Plot-
-  Zeitstempel, `scan_offset` raus; Basis-WIP `6a58a03`) — danach 13.7-Cutover und
-  *dann* 13.5c (Lösch-Kadenz) / 13.5b (Rest-Geister) empirisch gegen die
-  Frankfurt-8-ID-Zahl.
+- **13.5c erledigt:** Kadenz-Boden im async-Lösch-Lebenszyklus
+  (`should_delete_continuous` floored by slowest sensor period; `process_plots`
+  schätzt Sensor-Perioden), FR-TRK-026; alle Gates grün. Messung (13.5a+13.5c im
+  Player): Frankfurt **40 → 22 IDs**.
+- **13.6/13.7 WIP liegt im Stash** (`stash@{0}`: azimut-Plot-Zeiten + Scene/Player
+  periodic Cutover) — gemessen, aber rot, bis 13.5b (Kreuzungs-Tausch) gelöst ist.
+- **Nächster Schritt:** **13.5b** untersuchen — der Kreuzungs-Tausch entsteht, weil
+  asynchrone Radare die beiden Kreuzer zu *verschiedenen* Zeiten sehen, ihre Plots
+  also in *verschiedene* Simultaneitäts-Fenster fallen und die Joint-Exklusivität
+  nicht greift. Falls die Lösung eine Architektur-Weichenstellung braucht (kurzer
+  Mess-Puffer am Ausgabe-Tick vs. track-orientierte Assoziation), zuerst mit dem
+  Verantwortlichen abstimmen. Danach 13.6/13.7-Cutover und Endabnahme (8 IDs +
+  Kreuzungs-Identität).
