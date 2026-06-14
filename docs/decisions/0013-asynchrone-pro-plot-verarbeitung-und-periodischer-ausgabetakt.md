@@ -1,6 +1,6 @@
 # ADR 0013 — Asynchrone Pro-Plot-Verarbeitung + Periodischer Ausgabetakt
 
-- **Status:** akzeptiert — **Umsetzung ausstehend** (Foundation begonnen und bewusst zurückgenommen, siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
+- **Status:** akzeptiert — **Umsetzung abgeschlossen** (13.1–13.7 inkl. 13.5d umgesetzt; 13.5b durch 13.6-Befund gegenstandslos — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
 - **Datum:** 2026-06-12
 
 ## Kontext
@@ -190,30 +190,159 @@ und die volle Umsetzung ein größerer, mehrstufiger Schritt ist (S4–S5, gehö
 
 Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
 
-- [ ] **13.1 — Tracker `process_plot` (Kern-Umbau, S5).** Neue API
-  `Tracker::process_plot(plot)` neben dem bestehenden `process_scan`. Jeder Aufruf
-  prädiziert alle Tracks auf die **Plot-Zeit** und gatet/assoziiert gegen die
-  Live-Schätzung (keine eingefrorene Scan-Start-Referenz, ADR 0011 entfällt hier).
-  `process_scan` zunächst als dünne Schleife über `process_plot` behalten →
-  bestehende Tests bleiben grün. *Erst erklären, dann bauen.*
-- [ ] **13.2 — Adaptiven Lebenszyklus auf Zeitkontinuität umstellen (S4).** Treffer/
-  Fehltreffer nach **tatsächlichen Zeitlücken** statt nach Scan-Aufrufen (ADR 0012
-  vereinfachen). Damit ist der Workaround-Anteil nicht mehr nötig.
-- [ ] **13.3 — `snapshot_at(t)` (S4).** `Tracker::snapshot_at(t: Timestamp) ->
-  Vec<SystemTrack>` prädiziert alle Tracks auf `t` (IMM + Dead-Reckoning) und
-  reportiert sie — ohne den Zustand zu verändern (read-only Projektion).
-- [ ] **13.4 — Periodischer Ausgabetakt im Player/Server (S4).** `Player::frames`
-  puffert Plots nach Datenzeit, arbeitet sie kontinuierlich in den Tracker und
-  emittiert Frames im festen Takt `T_out` (12-Factor: `FIREFLY_OUTPUT_PERIOD`,
-  Default = kleinste Sensorperiode). `pacing::due_at` bleibt unverändert.
-- [ ] **13.5 — Simulator-Foundation neu einspielen (S3).** Den WIP aus `6a58a03`
-  wieder aufnehmen (`git cherry-pick 6a58a03` als Ausgangspunkt) — jetzt *deckt*
-  ihn die Pro-Plot-Pipeline. `scan_offset` entfällt endgültig.
-- [ ] **13.6 — Frankfurt-Regression auf asynchrone Perioden anpassen (S3).** Test auf
-  8 stabile IDs bei echt asynchronen Radaren (0/4/8…, 0/10/20…, 0/12/24…). Neue
-  Regressions-Tests für periodischen Output.
-- [ ] **13.7 — CAT062-Adapter auf `snapshot_at` umstellen (S3).** Encoder speist sich
-  aus dem periodischen Snapshot statt aus „pro Scan".
+- [x] **13.1 — Tracker `process_plot` (Kern-Umbau, S5). ✅ umgesetzt
+  (Ansatz B — additiv).** Neue API `Tracker::process_plot(plot)` **neben** dem
+  bestehenden `process_scan`. Jeder Aufruf prädiziert alle Tracks auf die
+  **Plot-Zeit** und gatet/assoziiert gegen die **Live-Schätzung** (keine
+  eingefrorene Scan-Start-Referenz; ADR 0011 entfällt im async-Pfad, weil
+  zeitlich getrennte Plots durch die Prädiktions-Kovarianz wieder ins Tor
+  wachsen). Update per PDA über die eine Messung (JPDA-Exklusivität über Tracks)
+  bzw. Initiierung außerhalb jedes `init_gate`; danach zeit-skalierte
+  Bestätigung/Löschung. **FR-TRK-022**, Tests `tracker::process_plot_*`.
+
+  > **Abweichung von der ursprünglichen Planung (bewusst, freigegeben).** Der
+  > erste Entwurf sah vor, `process_scan` *sofort* als dünne Schleife über
+  > `process_plot` umzuschreiben. Bei der Umsetzung zeigte sich: die
+  > Same-Time-Batch-Semantik (eingefrorene Fusions-Referenz + Joint-Association,
+  > ADR 0011/FR-TRK-020) ist für die heutigen Tests **tragend**, solange Plots
+  > dieselbe Datenzeit teilen (was der Simulator bis 13.5 noch tut) — eine
+  > naive Pro-Plot-Schleife mit Live-Schätzung würde
+  > `two_sensors_seeing_one_aircraft_make_one_track` (Geist nach sequenzieller
+  > Tor-Verengung) und `jpda_keeps_two_close_parallel_tracks_distinct`
+  > (verlorene Joint-Exklusivität) brechen. Daher **Ansatz B**: `process_plot`
+  > wird additiv eingeführt, `process_scan` bleibt unverändert. Der Batch-Pfad
+  > treibt den Player weiter, bis die asynchrone Ausgabe-Pipeline (13.4/13.5)
+  > umschaltet; dort wird der Frankfurt-Batch-Test durch eine Async-Regression
+  > ersetzt und `process_scan` zurückgebaut. Vorteil: jedes Qualitäts-Gate
+  > bleibt in **jedem** Häppchen grün, kein Test-Churn vor der Zeit. Kosten:
+  > temporäre Logik-Duplikation zwischen beiden Pfaden, in 13.4/13.5
+  > zusammengeführt.
+- [x] **13.2 — Adaptiven Lebenszyklus auf Zeitkontinuität umstellen (S4). ✅
+  umgesetzt (Ansatz B — nur async-Pfad).** Im `process_plot`-Pfad skalieren
+  Bestätigung und Löschung allein über die **eigene** Revisit-Kadenz jedes
+  Tracks (`Track::expected_revisit(nominal)` = gemessenes `revisit_interval`,
+  sonst `NOMINAL_REVISIT_INTERVAL` = 5 s Bootstrap) — **keine** global
+  geschätzte Feed-Kadenz mehr (die `sensor_period`/`sensor_last_scan`-Buchhaltung
+  bleibt unberührt, nur für den Batch-`process_scan`). Löschung über
+  `should_delete_continuous`. **FR-TRK-023**, Tests
+  `track::expected_revisit_*`, `tracker::process_plot_deletes_unseen_tentative`,
+  `tracker::process_plot_two_async_sensors_make_one_track`.
+
+  > **Scoping (Ansatz B).** `coast_reference`/`should_delete` (global-cadence,
+  > Batch) bleiben unverändert, damit `process_scan` und die Frankfurt-Szene
+  > grün bleiben; die zeit-kontinuierliche Variante (`expected_revisit`,
+  > `should_delete_continuous`) wirkt nur im async-Pfad. Die beiden Pfade werden
+  > in 13.4/13.5 zusammengeführt, wenn der Player auf `process_plot` umschaltet;
+  > dann wird auch `NOMINAL_REVISIT_INTERVAL` zum 12-Factor-Knopf (13.4).
+- [x] **13.3 — `snapshot_at(t)` (S4). ✅ umgesetzt.**
+  `Tracker::snapshot_at(t: Timestamp) -> Vec<SystemTrack>` prädiziert **alle**
+  Tracks **auf einer Kopie** der IMM-Bank auf `t` (IMM + Dead-Reckoning, nur
+  `dt > 0`) und reportiert sie — **read-only**, der Tracker-Zustand bleibt
+  unangetastet (kein predict am echten Track, kein Treffer, keine Löschung).
+  Status zu `t`: `update_age = t − last_hit_time`, `coasting = t >
+  last_hit_time`. WGS84-Projektion mit `system_tracks` geteilt
+  (`system_track_from`). **FR-TRK-024**, Tests `tracker::snapshot_at_*`.
+- [x] **13.4 — Periodischer Ausgabetakt im Player (S4). ✅ umgesetzt (Player-Kern;
+  Server-Cutover in 13.7).** `Player::periodic_snapshots(t_out)` /
+  `periodic_frames(t_out)` arbeiten die Plots in Datenzeit-Reihenfolge einzeln
+  über `process_plot` ein und emittieren das Lagebild im festen Takt `t_out`
+  über `snapshot_at`. Default `t_out` = kleinste Sensorperiode
+  (`default_output_period`); `FIREFLY_OUTPUT_PERIOD`-Anbindung folgt beim
+  Server-Cutover (13.7). `periodic_frames` bündelt die Roh-Plots des
+  Ausgabe-Fensters. Bestehende `scans()`/`frames()` (Batch) unverändert
+  (Ansatz B); `pacing::due_at` unberührt. **FR-IO-005**, Tests
+  `firefly-player::{periodic_*, default_output_period_*, finer_heartbeat_*}`.
+  Bis 13.5 für Einzel-Radar validiert (der async-Pfad setzt zeitlich getrennte
+  Plots voraus).
+> **Re-Dekomposition 13.5–13.7 (nach Befund, freigegeben).** Ein erster
+> Versuch, 13.5 (azimut-abhängige Simulator-Zeiten) und 13.6 (Frankfurt-Cutover
+> auf den periodischen Pfad) in einem Zug umzusetzen, deckte eine **Architektur-
+> Regression** auf: der naive Pro-Plot-Pfad lieferte für die Frankfurt-Szene
+> 40 statt 8 IDs (18 mit deaktivierter Löschung) plus einen Identitäts-Tausch im
+> Kreuzungs-Test. Ursachen-Trennung: (a) ~22 IDs Lösch-Churn aus dem
+> zeit-kontinuierlichen Lebenszyklus (13.2) ohne Kadenz-Boden für den 4/10/12-s-
+> Mix; (b) ~10 Geister/Tausch, weil der Pro-Plot-Pfad bei *gleichzeitigen*
+> Multi-Radar-/Kreuzungs-Plots die ADR-0011-Geisterunterdrückung und die
+> Joint-JPDA-Exklusivität verlor. Entscheidung (mit Projektverantwortlichem):
+> **volle Async (diese ADR-Option), nicht** ein Batch-gespeister Ausgabe-
+> Kompromiss — denn genau so arbeiten reale SDPS (ARTAS & Co.: messungs-
+> getriebener Eingang, periodischer Ausgang), und der Batch-Pfad hängt an der
+> *unrealistischen* Annahme „alle Plots eines Scans zur selben Zeit". 13.5 wird
+> daher in **13.5a–c** zerlegt; 13.6/13.7 bleiben, werden aber gegen die
+> gehärtete Assoziation gemessen.
+
+- [x] **13.5a — Gemeinsame Assoziation über nahezu gleichzeitige Plots (S5). ✅
+  umgesetzt.** Simultaneitäts-Fenster (`SIMULTANEITY_WINDOW`, 0,5 s):
+  `Tracker::process_plots(plots)` gruppiert zeitlich koinzidente Plots zu *einer*
+  Mess-Gelegenheit und assoziiert sie **gemeinsam** gegen eine eingefrorene
+  Referenz — ADR-0011-Geisterunterdrückung + JPDA-Exklusivität, wie ein Scan.
+  Der Assoziations-Kern ist als `fuse_simultaneous_plots` aus `process_scan`
+  **extrahiert** und von beiden Pfaden geteilt (eine Fusions-Logik); `process_scan`
+  verhaltensgleich, `process_plot` = Ein-Plot-Bequemlichkeit über `process_plots`.
+  **FR-TRK-025**, Tests `tracker::process_plots_*`; alle Gates grün.
+- [x] **13.5b — entfällt (durch 13.6-Befund aufgeklärt).** Die Untersuchung
+  ergab: der vermeintliche Kreuzungs-Identitäts-Tausch war kein
+  Assoziationsproblem, sondern ein **Simulator-Bug** (siehe 13.6) — Plot-
+  Zeitstempel und Plot-Messwert beschrieben unterschiedliche Zeitpunkte, was
+  Geister-Tracks erzeugte. Nach dem 13.6-Fix ist Track-ID 1 korrekt
+  `arrival_north` (Kurs Süd), nicht der Kreuzer; kein Joint-Assoziations-Defekt
+  gefunden, 13.5a/13.5c bleiben unverändert ausreichend.
+- [x] **13.5c — Lösch-Kadenz mit Boden für gemischte Radarperioden (S4). ✅
+  umgesetzt.** `should_delete_continuous` löscht erst bei
+  `budget · max(eigene Revisit-Schätzung, langsamste beobachtete Sensorperiode)`;
+  `process_plots` schätzt die Sensor-Perioden und nimmt deren Maximum als Boden
+  (`0` bis bekannt → `NOMINAL_REVISIT_INTERVAL`-Rückfall greift weiter). Der
+  zeit-kontinuierliche Gegenpart zu ADR 0012s `coast_reference`; der Einzel-
+  Radar-/Bootstrap-Fall (13.2) bleibt unverändert. **FR-TRK-026**, Test
+  `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap`. Messung mit
+  13.5a+13.5c im Player-Pfad: Frankfurt 40 → 22 IDs (Rest = zeitlich getrennter
+  Kreuzungs-Tausch, 13.5b) — Endabnahme erst nach dem Cutover (13.7).
+- [x] **13.6 — Simulator: azimut-abhängige Pro-Plot-Zeitstempel (S3). ✅
+  umgesetzt.** `plot_time = scan_start + (azimut/2π)·scan_period`; `scan_offset`
+  entfällt endgültig. **Wichtige Korrektur ggü. dem ursprünglichen WIP:** die
+  Messung (Range/Azimut/Elevation, Mode-C-Höhe) wird **am `plot_time`**
+  erneut aus der Wahrheits-Trajektorie ausgewertet, nicht am `scan_start` —
+  sonst beschreiben Zeitstempel und Messwert zwei verschiedene Momente (bis zu
+  einer vollen Scan-Periode Versatz bei den langsamen Radaren). Das war die
+  eigentliche Ursache der vermeintlichen 13.5b-Regression. Messung: Frankfurt
+  Track-IDs **22 → 10** (Ziel 8).
+- [x] **13.7 — Szene-/CAT062-Cutover auf den periodischen Pfad (S3). ✅
+  umgesetzt.** Frankfurt/Demo auf `periodic_frames`/`periodic_snapshots`
+  (`player.default_output_period()`); `scan_times` beginnt einheitlich bei
+  `t = 0`. `firefly-player`-Tests grün (inkl. der durch 13.6 verschobenen
+  Tick-Zahl in `periodic_snapshots_emit_on_a_fixed_heartbeat`, 10 → 11, und
+  dem ebenfalls auf den Pro-Plot-Pfad umgestellten
+  `firefly-track/tests/metrics.rs`). **Restbefund (10 statt 8 IDs):** siehe
+  13.5d.
+- [x] **13.5d — Lösch-Kadenz-Kalibrierung unter asynchroner Multi-Sensor-
+  Verschachtelung (S3, Opus 4.8). ✅ umgesetzt (Option B).** Befund: sowohl
+  `Track::expected_revisit` (EWMA der Inter-Hit-Lücken, konvergiert für
+  `arrival_north` auf ~2,08 s statt der tatsächlichen 4-s-Periode seines
+  dominanten Sensors) als auch 13.5cs online geschätzter `sensor_period`
+  (`process_plots` misst `t - sensor_last_scan`, was unter 13.6s
+  azimut-abhängigen Plot-Zeiten Sub-Umlauf-Lücken zwischen Sensoren erfasst,
+  nicht den Umlauf eines Sensors selbst) waren durch 13.6 verfälscht — der
+  Kadenz-Boden kollabierte auf ~2 s, das Lösch-Budget
+  (`4 × 2,08 ≈ 8,3 s`) überlebte 1–2 zufällige Fehlmessungen des 4-s-Radars
+  nicht mehr → Track gelöscht und als „Geister"-Track wiedergeboren
+  (ID-Kette 1→9→10 für `arrival_north`). **Entscheidung (Option B, wie
+  ARTAS/Sensor-Deklarationsdaten):** die Antennenumlaufzeit ist eine
+  Deployment-Konfiguration, kein Laufzeit-Schätzwert. Jeder Sensor bekommt ein
+  konfiguriertes `SensorModel::scan_period`; `process_plots` bildet daraus
+  einmalig `cadence = max(scan_period über alle konfigurierten Sensoren)` als
+  Kadenz-Boden für `should_delete_continuous` — die 13.5c-Online-Schätzung
+  (`sensor_period`/`sensor_last_scan` im `process_plots`-Pfad) entfällt. Der
+  Batch-Pfad (`process_scan`/`should_delete`/ADR 0012 `coast_reference`,
+  inkl. seiner eigenen `sensor_period`/`sensor_last_scan`/`prev_scan_time`)
+  ist unverändert. **FR-TRK-026** (aktualisiert), Test
+  `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap` (jetzt mit
+  konfigurierten Perioden 2 s/12 s statt online geschätzter). **Messung:
+  Frankfurt 22 → 10 → 8 IDs** (Ziel erreicht);
+  `frankfurt_scene_keeps_one_identity_per_aircraft` und
+  `frankfurt_crossing_pair_keeps_identity_through_the_crossing` sind wieder
+  grün (ohne `#[ignore]`) — die Kreuzungs-Paar-IDs verschoben sich dabei von
+  1/2 auf 5/4 (Track-1 ist jetzt durchgehend `arrival_north`, kein
+  Geister-Artefakt mehr).
 
 ### Wiedereinstiegs-Anker (Kurzform)
 
@@ -222,4 +351,39 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
 - **Zurücknahme:** `git show 0959059` (Revert, damit `main` grün ist).
 - **Gebrochenes Symptom ohne Teile 2+3:** `frankfurt_scene_keeps_one_identity_per_aircraft`
   → 155 statt 8 IDs.
-- **Erster echter Schritt:** Häppchen **13.1** (`process_plot`), erklären → Go → bauen.
+- **13.1 erledigt:** `Tracker::process_plot` additiv (Ansatz B), FR-TRK-022, Tests
+  `tracker::process_plot_*`; `process_scan` unverändert, alle Gates grün.
+- **13.2 erledigt:** zeit-kontinuierlicher Lebenszyklus im async-Pfad
+  (`expected_revisit`, `should_delete_continuous`, `NOMINAL_REVISIT_INTERVAL`),
+  FR-TRK-023; Batch-Pfad + Frankfurt unverändert, alle Gates grün.
+- **13.3 erledigt:** `Tracker::snapshot_at(t)` (read-only Zeit-Projektion aller
+  Tracks, `system_track_from` geteilt mit `system_tracks`), FR-TRK-024; alle
+  Gates grün.
+- **13.4 erledigt:** periodischer Ausgabetakt im Player
+  (`periodic_snapshots`/`periodic_frames`, `default_output_period`), FR-IO-005;
+  Batch unverändert, alle Gates grün.
+- **13.5 re-dekomponiert (Befund):** naiver Pro-Plot-Pfad → Frankfurt 40 statt 8
+  IDs + Kreuzungs-Tausch; Entscheidung volle Async (siehe Re-Dekompositions-Box
+  oben). Zerlegt in 13.5a–c.
+- **13.5a erledigt:** gemeinsame Assoziation über nahezu gleichzeitige Plots
+  (`process_plots`, `SIMULTANEITY_WINDOW`, geteilter `fuse_simultaneous_plots`),
+  FR-TRK-025; `process_scan` verhaltensgleich extrahiert, alle Gates grün.
+- **13.5c erledigt:** Kadenz-Boden im async-Lösch-Lebenszyklus
+  (`should_delete_continuous` floored by slowest sensor period; `process_plots`
+  schätzt Sensor-Perioden), FR-TRK-026; alle Gates grün. Messung (13.5a+13.5c im
+  Player): Frankfurt **40 → 22 IDs**.
+- **13.5b entfällt:** Untersuchung (freigegeben: „Mache A, die Untersuchung")
+  ergab einen Simulator-Bug (Zeitstempel/Messwert-Inkonsistenz), nicht ein
+  Assoziationsproblem — siehe 13.6.
+- **13.6 erledigt:** azimut-abhängige Plot-Zeitstempel, Messung **am eigenen
+  `plot_time`** neu ausgewertet (nicht am `scan_start`); Frankfurt 22 → 10 IDs.
+- **13.7 erledigt:** Frankfurt/Demo auf periodischen Ausgabetakt umgestellt;
+  `firefly-player`- und `firefly-track::metrics`-Tests an den Pro-Plot-Pfad
+  angepasst und grün.
+- **13.5d erledigt:** Lösch-Kadenz-Boden auf **konfigurierte**
+  `SensorModel::scan_period` umgestellt (Option B, ARTAS-Sensor-Deklarations-
+  Stil) statt der durch 13.6 verfälschten Online-Schätzung; `process_plots`
+  bildet `cadence = max(scan_period über alle konfigurierten Sensoren)`.
+  Frankfurt **22 → 10 → 8 IDs**; beide zuvor `#[ignore]`-markierten
+  Frankfurt-Tests sind wieder grün (Kreuzungs-Paar jetzt IDs 5/4 statt 1/2).
+  Damit ist ADR 0013 (13.1–13.7) vollständig umgesetzt.

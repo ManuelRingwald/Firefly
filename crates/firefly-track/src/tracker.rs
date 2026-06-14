@@ -37,6 +37,33 @@ use crate::track::{Track, TrackStatus};
 /// at least one plot in its gate (a hit) rather than coasting.
 const NO_DETECTION_EPSILON: f64 = 1e-9;
 
+/// Assumed revisit interval (seconds) for a track that has not yet established
+/// its own from a second hit — the bootstrap of the asynchronous,
+/// time-continuous lifecycle (ADR 0013, Häppchen 13.2). A freshly born track is
+/// protected for a few of these nominal revisits before it can be deleted (the
+/// time-continuous analog of ADR 0012's cadence bootstrap). It is deliberately
+/// a single, local constant for now; it becomes a 12-factor config knob when the
+/// periodic output stage lands (Häppchen 13.4).
+const NOMINAL_REVISIT_INTERVAL: f64 = 5.0;
+
+/// Plots whose data times fall within this window (seconds) are treated as one
+/// **simultaneous measurement opportunity** on the asynchronous path (ADR 0013,
+/// Häppchen 13.5): they are associated *jointly* against one reference frozen at
+/// the window's time — ADR 0011 ghost suppression plus JPDA exclusivity
+/// (FR-TRK-018/019/020) — instead of one plot at a time. It is short enough that
+/// the kinematic spread within the window is negligible (≤0.5 s ⇒ ≲100 m at jet
+/// speed, within measurement noise), yet long enough to bind genuinely
+/// coincident plots: two crossing targets a single radar reports at nearly the
+/// same azimuth (so nearly the same time), or two radars that happen to paint a
+/// target at the same instant. Plots further apart in time are separate
+/// opportunities, each gated against the track predicted forward to it — there
+/// the time gap itself regrows the covariance, so no frozen reference is needed.
+///
+/// This generalises the batch path's exact-equal-time scan (`process_scan`,
+/// where the window is effectively zero) to the realistic case of
+/// azimuth-spread plot times (Häppchen 13.6).
+const SIMULTANEITY_WINDOW: f64 = 0.5;
+
 /// Where one sensor sits and how noisy the tracker believes it is.
 ///
 /// Central measurement fusion (ADR 0010) needs both per sensor: the [`LocalFrame`]
@@ -48,6 +75,17 @@ pub struct SensorModel {
     pub frame: LocalFrame,
     /// The tracker's assumed measurement noise for this sensor.
     pub error: SensorErrorModel,
+    /// This sensor's antenna revolution period (scan period), seconds.
+    ///
+    /// A real radar's revolution period is a known operational parameter, not
+    /// something to be discovered at runtime (ARTAS and comparable multi-sensor
+    /// trackers carry it in their sensor declaration data). The asynchronous
+    /// lifecycle ([`should_delete_continuous`]) uses the slowest configured
+    /// period across all registered sensors as its **cadence floor** (ADR 0013,
+    /// Häppchen 13.5d) — replacing the online estimate from 13.5c, which a
+    /// rotating radar's azimuth-spread plot times (Häppchen 13.6) made too
+    /// short (it captured sub-revolution plot gaps, not the revolution itself).
+    pub scan_period: f64,
 }
 
 /// Tunable parameters of the tracker plus the sensor geometry it fuses.
@@ -120,17 +158,36 @@ impl TrackerConfig {
         }
     }
 
-    /// Register one sensor (its frame and assumed noise). Chainable.
-    pub fn with_sensor(mut self, id: SensorId, frame: LocalFrame, error: SensorErrorModel) -> Self {
-        self.sensors.insert(id, SensorModel { frame, error });
+    /// Register one sensor (its frame, assumed noise, and scan period).
+    /// Chainable.
+    pub fn with_sensor(
+        mut self,
+        id: SensorId,
+        frame: LocalFrame,
+        error: SensorErrorModel,
+        scan_period: f64,
+    ) -> Self {
+        self.sensors.insert(
+            id,
+            SensorModel {
+                frame,
+                error,
+                scan_period,
+            },
+        );
         self
     }
 
     /// Single-sensor convenience: the tracking frame *is* the sensor's own frame
     /// (so the lift into the common frame is the identity). This reproduces the
     /// pre-M4 single-radar behaviour.
-    pub fn single_sensor(id: SensorId, frame: LocalFrame, error: SensorErrorModel) -> Self {
-        Self::new(frame).with_sensor(id, frame, error)
+    pub fn single_sensor(
+        id: SensorId,
+        frame: LocalFrame,
+        error: SensorErrorModel,
+        scan_period: f64,
+    ) -> Self {
+        Self::new(frame).with_sensor(id, frame, error, scan_period)
     }
 }
 
@@ -201,25 +258,54 @@ impl Tracker {
         self.tracks
             .iter()
             .map(|track| {
-                let p = track.position();
-                let v = track.velocity();
-                // The 2-D estimate sits on the tracking plane (up = 0), i.e. at
-                // the tracking-frame origin's ellipsoidal height.
-                let position = frame.enu_to_geodetic(&Enu::new(p[0], p[1], 0.0));
-                SystemTrack {
-                    id: track.id(),
-                    time: Timestamp(track.last_time),
-                    position,
-                    v_east: v[0],
-                    v_north: v[1],
-                    confirmed: track.is_confirmed(),
-                    coasting: track.is_coasting(),
-                    update_age: track.update_age(),
-                    position_uncertainty: track.estimate().position_uncertainty(),
-                    mode_3a: track.mode_3a(),
-                    icao_address: track.icao_address(),
-                    contributing_sensors: track.contributing_sensors().iter().copied().collect(),
-                }
+                system_track_from(
+                    track,
+                    &track.estimate(),
+                    track.last_time,
+                    track.is_coasting(),
+                    track.update_age(),
+                    frame,
+                )
+            })
+            .collect()
+    }
+
+    /// Project **all** tracks onto a single common output time `t`, **without
+    /// mutating the tracker** — the read-only counterpart to
+    /// [`system_tracks`](Self::system_tracks).
+    ///
+    /// For the periodic output stage (ADR 0013, Häppchen 13.3 → 13.4) the air
+    /// picture must carry one consistent time stamp regardless of when each
+    /// track was last updated. Each track's IMM bank is therefore predicted **on
+    /// a clone** to `t` (IMM mixing + dead reckoning), so the tracker's own
+    /// state is untouched: `snapshot_at` never advances a track, books a hit, or
+    /// deletes anything. This is what later lets the output run on a fixed
+    /// heartbeat decoupled from the asynchronous input.
+    ///
+    /// A track already at or after `t` is reported as-is (no backward
+    /// prediction). Status is evaluated at `t`: `update_age = t − last_hit_time`,
+    /// and the track is `coasting` once `t` is past its last hit.
+    ///
+    /// REQ: NFR-INT-001, NFR-INT-002, FR-TRK-024
+    pub fn snapshot_at(&self, t: Timestamp) -> Vec<SystemTrack> {
+        let frame = &self.config.tracking_frame;
+        let process_noise = self.config.process_noise;
+        let t = t.as_secs();
+        self.tracks
+            .iter()
+            .map(|track| {
+                // Predict to `t` on a clone so the live track is not advanced.
+                let dt = t - track.last_time;
+                let estimate = if dt > 0.0 {
+                    let mut imm = track.imm.clone();
+                    imm.predict(dt, &process_noise);
+                    imm.combined_estimate()
+                } else {
+                    track.estimate()
+                };
+                let update_age = (t - track.last_hit_time).max(0.0);
+                let coasting = t > track.last_hit_time;
+                system_track_from(track, &estimate, t, coasting, update_age, frame)
             })
             .collect()
     }
@@ -245,16 +331,11 @@ impl Tracker {
         // Copy the cheap scalar tuning out so the rest can mutate `self.tracks`
         // without holding a borrow on `self.config` (which now owns a map).
         let process_noise = self.config.process_noise;
-        let gate = self.config.gate;
-        let init_gate = self.config.init_gate;
         let confirm_m = self.config.confirm_m;
         let confirm_n = self.config.confirm_n;
-        let initial_velocity_std = self.config.initial_velocity_std;
         let delete_tentative = self.config.delete_misses_tentative;
         let delete_confirmed = self.config.delete_misses_confirmed;
         let tracking_frame = self.config.tracking_frame;
-        let imm_config = self.config.imm.clone();
-        let clutter = self.config.clutter;
         let t = time.as_secs();
 
         // 1. Predict every existing track's IMM forward to the scan time (mixing
@@ -348,15 +429,229 @@ impl Tracker {
         //    refreshes its revisit-interval estimate; the lifecycle (steps 4–5)
         //    then reads those times. There is no per-scan miss booking — a miss
         //    is simply the absence of a hit, measured by the update age.
+        // Fuse this scan's plots into the tracks against one reference frozen
+        // here, with ADR 0011 ghost suppression and JPDA exclusivity. Every
+        // track was predicted to `t` and had its provenance reset above, so the
+        // shared core can be used verbatim by the asynchronous path too (see
+        // [`fuse_simultaneous_plots`]).
+        self.fuse_simultaneous_plots(t, &by_sensor);
+
+        // 4. Confirm tentative tracks that have collected `confirm_m` hits within
+        //    the last `confirm_n` revisit intervals (ADR 0012). The window is a
+        //    *time* span scaled by each track's own cadence, so confirmation is
+        //    robust whether one radar revisits every few seconds or several
+        //    asynchronous radars deliver hits far more often.
+        for track in &mut self.tracks {
+            if track.status() == TrackStatus::Tentative {
+                let window = confirm_n as f64 * track.coast_reference(cadence);
+                if track.hits_within(window, t) >= confirm_m {
+                    track.confirm();
+                }
+            }
+        }
+
+        // 5. Delete tracks that have coasted past their allowed number of missed
+        //    revisits (ADR 0012): `update_age > budget · max(revisit, scan dt)`.
+        //    Measuring the budget in *revisit intervals* (not raw seconds) keeps
+        //    deletion governed by how many updates were missed, independent of
+        //    the feed's absolute pace (NFR-CLOUD-004), while tolerating the
+        //    interleaved misses an asynchronous multi-radar feed produces.
+        self.tracks
+            .retain(|track| !should_delete(track, delete_tentative, delete_confirmed, cadence));
+    }
+
+    /// Process a **single plot at its own data time** — the asynchronous,
+    /// per-plot counterpart to [`process_scan`](Self::process_scan) (ADR 0013,
+    /// Häppchen 13.1). A thin convenience over
+    /// [`process_plots`](Self::process_plots) for a one-element batch.
+    ///
+    /// REQ: FR-TRK-001, FR-TRK-006, FR-TRK-010, FR-TRK-022, FR-TRK-023
+    pub fn process_plot(&mut self, plot: &Plot) {
+        self.process_plots(std::slice::from_ref(plot));
+    }
+
+    /// Process a batch of asynchronous plots, each carrying its **own** data
+    /// time (ADR 0013, Häppchen 13.5) — the asynchronous input port that the
+    /// periodic output stage drives.
+    ///
+    /// Unlike [`process_scan`](Self::process_scan), the plots do **not** share a
+    /// time: a real rotating radar spreads its detections across the antenna
+    /// revolution by azimuth (Häppchen 13.6), and several radars are
+    /// unsynchronised. Processing each plot strictly one at a time, however,
+    /// loses the joint reasoning that keeps the air picture clean when plots
+    /// *are* near-coincident — two crossing targets one radar reports at almost
+    /// the same azimuth, or two radars painting a target at the same instant.
+    ///
+    /// So the batch is split into **simultaneous measurement opportunities**:
+    /// plots whose times fall within [`SIMULTANEITY_WINDOW`] of the group's
+    /// start are fused *jointly* against one reference frozen at the group's
+    /// time (ADR 0011 ghost suppression + JPDA exclusivity, FR-TRK-018/019/020),
+    /// exactly as a scan is — this is the shared [`fuse_simultaneous_plots`].
+    /// Groups further apart in time are independent opportunities; the elapsed
+    /// gap regrows each track's covariance by prediction, so a later sensor's
+    /// plot of the same aircraft still folds into the existing track rather than
+    /// spawning a ghost, with no frozen reference needed across the gap.
+    ///
+    /// For each opportunity the steps mirror the batch path: **predict** every
+    /// track to the group's time, **fuse** the plots, then run the
+    /// **time-continuous** confirm/delete lifecycle (Häppchen 13.2) — governed
+    /// by each track's own measured revisit interval, floored by the slowest
+    /// **configured** sensor scan period (Häppchen 13.5d, see
+    /// [`should_delete_continuous`]).
+    ///
+    /// Determinism (ADR 0003): the plots are processed in a total order (data
+    /// time, then sensor id) independent of their input order, so the same set
+    /// of plots always yields the same state — no wall clock, no I/O.
+    ///
+    /// REQ: FR-TRK-001, FR-TRK-006, FR-TRK-010, FR-TRK-022, FR-TRK-023,
+    /// FR-TRK-025
+    pub fn process_plots(&mut self, plots: &[Plot]) {
+        if plots.is_empty() {
+            return;
+        }
+        let process_noise = self.config.process_noise;
+        let confirm_m = self.config.confirm_m;
+        let confirm_n = self.config.confirm_n;
+        let delete_tentative = self.config.delete_misses_tentative;
+        let delete_confirmed = self.config.delete_misses_confirmed;
+        let tracking_frame = self.config.tracking_frame;
+
+        // Deletion **cadence floor** (ADR 0013, Häppchen 13.5d): the slowest
+        // configured sensor scan period across the whole feed. A track is never
+        // deleted faster than the slowest radar would revisit it, no matter how
+        // briefly a faster radar's azimuth-spread plots make its own revisit
+        // estimate look. Configured rather than estimated (13.5c estimated it
+        // from inter-plot gaps, which 13.6's azimuth spreading made too short).
+        let cadence = self
+            .config
+            .sensors
+            .values()
+            .map(|s| s.scan_period)
+            .fold(0.0, f64::max);
+
+        // Total, input-order-independent processing order: by data time, ties
+        // broken by sensor id (determinism, ADR 0003).
+        let mut order: Vec<usize> = (0..plots.len()).collect();
+        order.sort_by(|&a, &b| {
+            plots[a]
+                .time
+                .as_secs()
+                .partial_cmp(&plots[b].time.as_secs())
+                .unwrap()
+                .then(plots[a].sensor.0.cmp(&plots[b].sensor.0))
+        });
+
+        let mut gi = 0;
+        while gi < order.len() {
+            // Grow a simultaneity group: consecutive plots within the window of
+            // the group's first (earliest) plot.
+            let group_start = plots[order[gi]].time.as_secs();
+            let mut gj = gi + 1;
+            while gj < order.len()
+                && plots[order[gj]].time.as_secs() - group_start <= SIMULTANEITY_WINDOW + 1e-9
+            {
+                gj += 1;
+            }
+            // Represent the opportunity at its latest instant — predicting a
+            // track forward (never backward) to the freshest plot in the group.
+            let t = plots[order[gj - 1]].time.as_secs();
+
+            // Convert each plot to a Cartesian measurement in the common frame
+            // and group by sensor (deterministic order); drop plots from an
+            // unregistered sensor, which cannot be geolocated.
+            let mut by_sensor: BTreeMap<SensorId, Vec<(&Plot, CartesianMeasurement)>> =
+                BTreeMap::new();
+            for &idx in &order[gi..gj] {
+                let p = &plots[idx];
+                if let Some(model) = self.config.sensors.get(&p.sensor) {
+                    let local = convert_plot(&p.measurement, &model.error);
+                    let height = p.measurement.range * p.measurement.elevation.sin();
+                    let (z, r) =
+                        tracking_frame.horizontal_from(&model.frame, local.z, height, local.r);
+                    by_sensor
+                        .entry(p.sensor)
+                        .or_default()
+                        .push((p, CartesianMeasurement { z, r }));
+                }
+            }
+
+            // 1. Predict every track to this opportunity's time; refresh the
+            //    per-opportunity sensor provenance.
+            for track in &mut self.tracks {
+                let dt = t - track.last_time;
+                if dt > 0.0 {
+                    track.imm.predict(dt, &process_noise);
+                    track.last_time = t;
+                }
+                track.reset_contributing_sensors();
+            }
+
+            // 2./3. Fuse with ADR 0011 ghost suppression + JPDA exclusivity.
+            self.fuse_simultaneous_plots(t, &by_sensor);
+
+            // 4. Confirm via the time-continuous M-of-N window.
+            for track in &mut self.tracks {
+                if track.status() == TrackStatus::Tentative {
+                    let window =
+                        confirm_n as f64 * track.expected_revisit(NOMINAL_REVISIT_INTERVAL);
+                    if track.hits_within(window, t) >= confirm_m {
+                        track.confirm();
+                    }
+                }
+            }
+
+            // 5. Delete via the time-continuous missed-revisit budget, floored
+            //    by the slowest observed sensor cadence (Häppchen 13.5c).
+            self.tracks.retain(|track| {
+                !should_delete_continuous(track, delete_tentative, delete_confirmed, cadence)
+            });
+
+            gi = gj;
+        }
+    }
+
+    /// Fold a batch of plots taken at (near-)one instant `time` into the current
+    /// tracks, with ADR 0011 ghost suppression and JPDA exclusivity
+    /// (FR-TRK-018/019/020). The **shared association core** of the batch path
+    /// ([`process_scan`](Self::process_scan)) and the asynchronous path
+    /// ([`process_plots`](Self::process_plots)), so the safety-critical fusion
+    /// logic exists exactly once.
+    ///
+    /// Pre-conditions the caller must establish: every track is already
+    /// predicted to `time` and has had its contributing-sensor set reset.
+    ///
+    /// Sensors are fused in deterministic id order against one reference
+    /// **frozen here**: folding a plot tightens a track's covariance, so gating
+    /// the next sensor against the tightened estimate would push a second
+    /// radar's plot of the same aircraft out of gate and let initiation spawn a
+    /// ghost; freezing the reference removes that sequential tightening, while
+    /// state fusion stays sequential (the same joint posterior for independent
+    /// measurements). New tentative tracks are appended only after each sensor's
+    /// block, so they veto the *next* sensor's plots (one aircraft, two radars →
+    /// one track) but not their own siblings from the same sensor. A track is
+    /// recorded as hit when at least one plot fell in its gate (`β_0 < 1`); the
+    /// gated plot with the largest `β` carries the identity bookkeeping. The
+    /// caller owns the lifecycle (confirm/delete) and any cadence bookkeeping.
+    fn fuse_simultaneous_plots(
+        &mut self,
+        time: f64,
+        by_sensor: &BTreeMap<SensorId, Vec<(&Plot, CartesianMeasurement)>>,
+    ) {
+        let gate = self.config.gate;
+        let init_gate = self.config.init_gate;
+        let initial_velocity_std = self.config.initial_velocity_std;
+        let imm_config = self.config.imm.clone();
+        let clutter = self.config.clutter;
+        let t = time;
+
         // `reference[k]` is the gating/association estimate for `self.tracks[k]`:
-        // the scan-start prediction for tracks that existed then (frozen for the
-        // whole scan), or the fresh estimate of a track initiated *during* this
-        // scan — appended so a later sensor associates to it instead of starting
-        // its own (one aircraft, one track). It stays index-aligned with
-        // `self.tracks`, both growing together as tracks are born.
+        // the prediction frozen at `time` for tracks that existed then, or the
+        // fresh estimate of a track initiated *during* this opportunity —
+        // appended so a later sensor associates to it instead of starting its
+        // own. It stays index-aligned with `self.tracks`, both growing together.
         let mut reference: Vec<LinearKalman> = self.tracks.iter().map(|tr| tr.estimate()).collect();
 
-        for (&sensor, items) in &by_sensor {
+        for (&sensor, items) in by_sensor {
             let measurements: Vec<CartesianMeasurement> = items.iter().map(|(_, m)| *m).collect();
             let betas = joint_association_probabilities(&reference, &measurements, &gate, &clutter);
 
@@ -394,11 +689,10 @@ impl Tracker {
             // Initiate a new tentative track from each plot that fell in *no*
             // reference track's gate. The veto uses `reference` as frozen at the
             // *start* of this sensor's block, so two close-but-distinct plots
-            // from the *same* sensor (a sensor reports each target at most once
-            // per scan) do not veto one another — they are different targets and
-            // must each seed a track. The new tracks are appended only *after*
-            // the loop, so they veto the *next* sensor's plots (one aircraft seen
-            // by two radars → one track), not their own siblings.
+            // from the *same* sensor do not veto one another — they are
+            // different targets and must each seed a track. New tracks are
+            // appended only *after* the loop, so they veto the *next* sensor's
+            // plots, not their own siblings.
             let mut newborn = Vec::new();
             for (mi, m) in measurements.iter().enumerate() {
                 // Suppress initiation with the wider `init_gate`: a plot near an
@@ -423,29 +717,40 @@ impl Tracker {
             }
             reference.extend(newborn);
         }
+    }
+}
 
-        // 4. Confirm tentative tracks that have collected `confirm_m` hits within
-        //    the last `confirm_n` revisit intervals (ADR 0012). The window is a
-        //    *time* span scaled by each track's own cadence, so confirmation is
-        //    robust whether one radar revisits every few seconds or several
-        //    asynchronous radars deliver hits far more often.
-        for track in &mut self.tracks {
-            if track.status() == TrackStatus::Tentative {
-                let window = confirm_n as f64 * track.coast_reference(cadence);
-                if track.hits_within(window, t) >= confirm_m {
-                    track.confirm();
-                }
-            }
-        }
-
-        // 5. Delete tracks that have coasted past their allowed number of missed
-        //    revisits (ADR 0012): `update_age > budget · max(revisit, scan dt)`.
-        //    Measuring the budget in *revisit intervals* (not raw seconds) keeps
-        //    deletion governed by how many updates were missed, independent of
-        //    the feed's absolute pace (NFR-CLOUD-004), while tolerating the
-        //    interleaved misses an asynchronous multi-radar feed produces.
-        self.tracks
-            .retain(|track| !should_delete(track, delete_tentative, delete_confirmed, cadence));
+/// Assemble a neutral [`SystemTrack`] from a track and a (possibly predicted)
+/// estimate, lifting the position back to WGS84 through `frame`. Shared by
+/// [`Tracker::system_tracks`] (current estimate, per-track last time) and
+/// [`Tracker::snapshot_at`] (estimate predicted to a common output time), so the
+/// two output ports cannot drift apart. The 2-D estimate sits on the tracking
+/// plane (up = 0), i.e. at the tracking-frame origin's ellipsoidal height (the
+/// tracker carries no independent vertical estimate yet).
+fn system_track_from(
+    track: &Track,
+    estimate: &LinearKalman,
+    time: f64,
+    coasting: bool,
+    update_age: f64,
+    frame: &LocalFrame,
+) -> SystemTrack {
+    let p = estimate.position();
+    let v = estimate.velocity();
+    let position = frame.enu_to_geodetic(&Enu::new(p[0], p[1], 0.0));
+    SystemTrack {
+        id: track.id(),
+        time: Timestamp(time),
+        position,
+        v_east: v[0],
+        v_north: v[1],
+        confirmed: track.is_confirmed(),
+        coasting,
+        update_age,
+        position_uncertainty: estimate.position_uncertainty(),
+        mode_3a: track.mode_3a(),
+        icao_address: track.icao_address(),
+        contributing_sensors: track.contributing_sensors().iter().copied().collect(),
     }
 }
 
@@ -468,6 +773,38 @@ fn should_delete(
     age > 0.0 && age >= budget * track.coast_reference(cadence)
 }
 
+/// Whether a track should be deleted on the **asynchronous** path (ADR 0013,
+/// Häppchen 13.2 + 13.5d). The missed-revisit budget counts the track's **own**
+/// revisit intervals ([`Track::expected_revisit`]), floored by the slowest
+/// **configured** sensor scan period `cadence`: a track lives or dies by how
+/// overdue *its* next update is, but is never deleted faster than the feed's
+/// slowest radar would revisit it. This is the time-continuous analog of
+/// [`should_delete`]'s `coast_reference` — it stops a track that a fast sensor
+/// saw briefly (short own-revisit estimate) from being churned away across the
+/// longer gap until a slow radar revisits it. Häppchen 13.5c floored this by an
+/// *online-estimated* sensor period, which 13.6's azimuth-spread plot times made
+/// too short (it picked up sub-revolution gaps between sensors instead of a
+/// sensor's own revolution); 13.5d floors it by the *configured*
+/// [`SensorModel::scan_period`] instead. A track that has not yet measured its
+/// own cadence falls back to [`NOMINAL_REVISIT_INTERVAL`]; a freshly hit track
+/// (`update_age == 0`) is never deleted.
+fn should_delete_continuous(
+    track: &Track,
+    budget_tentative: u32,
+    budget_confirmed: u32,
+    cadence: f64,
+) -> bool {
+    let budget = match track.status() {
+        TrackStatus::Tentative => budget_tentative,
+        TrackStatus::Confirmed => budget_confirmed,
+    } as f64;
+    let age = track.update_age();
+    let interval = track
+        .expected_revisit(NOMINAL_REVISIT_INTERVAL)
+        .max(cadence);
+    age > 0.0 && age >= budget * interval
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,6 +821,7 @@ mod tests {
             SensorId(1),
             frame(),
             SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08),
+            4.0,
         )
     }
 
@@ -737,8 +1075,8 @@ mod tests {
         let frame_b = LocalFrame::new(Wgs84::from_degrees(47.7, 11.6, 0.0)); // ~55 km SE
         let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
         let cfg = TrackerConfig::new(tracking)
-            .with_sensor(SensorId(1), frame_a, error)
-            .with_sensor(SensorId(2), frame_b, error);
+            .with_sensor(SensorId(1), frame_a, error, 4.0)
+            .with_sensor(SensorId(2), frame_b, error, 4.0);
         let mut tracker = Tracker::new(cfg);
 
         let target = Wgs84::from_degrees(48.1, 11.3, 0.0);
@@ -786,8 +1124,8 @@ mod tests {
         let frame_b = LocalFrame::new(Wgs84::from_degrees(47.7, 11.6, 0.0));
         let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
         let cfg = TrackerConfig::new(tracking)
-            .with_sensor(SensorId(1), frame_a, error)
-            .with_sensor(SensorId(2), frame_b, error);
+            .with_sensor(SensorId(1), frame_a, error, 4.0)
+            .with_sensor(SensorId(2), frame_b, error, 4.0);
         let mut tracker = Tracker::new(cfg);
 
         let target = Wgs84::from_degrees(48.1, 11.3, 0.0);
@@ -1006,5 +1344,455 @@ mod tests {
             0,
             "unregistered plot must be ignored"
         );
+    }
+
+    // --- ADR 0013, Häppchen 13.1: the asynchronous per-plot path ------------
+
+    /// A single plot births a tentative track; feeding the same target a few
+    /// more times confirms it — the per-plot path drives the M-of-N lifecycle
+    /// just like the batch path. REQ: FR-TRK-001, FR-TRK-006, FR-TRK-022
+    #[test]
+    fn process_plot_births_then_confirms() {
+        let mut tracker = Tracker::new(config());
+
+        tracker.process_plot(&plot(0.0, 50_000.0, 0.0));
+        assert_eq!(tracker.tracks().len(), 1);
+        assert_eq!(tracker.tracks()[0].status(), TrackStatus::Tentative);
+
+        tracker.process_plot(&plot(4.0, 50_000.0, 0.0));
+        tracker.process_plot(&plot(8.0, 50_000.0, 0.0));
+        assert_eq!(tracker.tracks().len(), 1, "still one track");
+        assert_eq!(tracker.confirmed_count(), 1, "confirmed after 3 hits");
+    }
+
+    /// Two well-separated plots at the same instant seed two distinct tracks:
+    /// the second plot is outside the first track's initiation gate, so it is a
+    /// new aircraft, not that track's own detection. REQ: FR-TRK-001
+    #[test]
+    fn process_plot_separated_plots_make_two_tracks() {
+        let mut tracker = Tracker::new(config());
+        tracker.process_plot(&plot(0.0, 50_000.0, 0.0));
+        tracker.process_plot(&plot(0.0, 50_000.0, 1.0));
+        assert_eq!(tracker.tracks().len(), 2);
+    }
+
+    /// Each plot is processed at *its own* data time: a track updated by an
+    /// off-grid plot reports that plot's time, proving the predict step runs to
+    /// the plot time rather than a quantised scan time. REQ: FR-TRK-022
+    #[test]
+    fn process_plot_honours_each_plots_own_time() {
+        let mut tracker = Tracker::new(config());
+        tracker.process_plot(&plot(0.0, 50_000.0, 0.0));
+        tracker.process_plot(&plot(2.5, 50_000.0, 0.0));
+
+        let sts = tracker.system_tracks();
+        assert_eq!(sts.len(), 1);
+        assert!(
+            (sts[0].time.as_secs() - 2.5).abs() < 1e-9,
+            "track time should follow the plot's own time, got {}",
+            sts[0].time.as_secs()
+        );
+    }
+
+    /// A track that no later plot updates coasts: a subsequent (far-away) plot
+    /// advances data time, the unseen track is predicted forward, and it reports
+    /// `coasting` with an update age equal to the elapsed gap. REQ: FR-TRK-006,
+    /// FR-TRK-008, FR-TRK-022
+    #[test]
+    fn process_plot_track_coasts_when_unseen() {
+        let mut tracker = Tracker::new(config());
+        // Confirm track A (id 1) due north at 50 km.
+        for t in [0.0, 4.0, 8.0] {
+            tracker.process_plot(&plot(t, 50_000.0, 0.0));
+        }
+        assert_eq!(tracker.confirmed_count(), 1);
+
+        // A far-away plot (due east) at t = 12 advances time and seeds track B;
+        // A is unseen this instant and must coast.
+        tracker.process_plot(&plot(12.0, 30_000.0, std::f64::consts::FRAC_PI_2));
+
+        let mut sts = tracker.system_tracks();
+        sts.sort_by_key(|s| s.id.0);
+        assert!(sts[0].coasting, "track A coasts when no plot updates it");
+        assert!(
+            (sts[0].update_age - 4.0).abs() < 1e-9,
+            "age = gap since its last hit (12 - 8)"
+        );
+    }
+
+    /// An SSR identity absorbed via the per-plot path reaches the `SystemTrack`
+    /// and stays sticky across a later primary-only plot. REQ: FR-TRK-009
+    #[test]
+    fn process_plot_absorbs_and_keeps_identity() {
+        let mut tracker = Tracker::new(config());
+        for t in [0.0, 4.0, 8.0] {
+            tracker.process_plot(&plot_with_identity(t, 50_000.0, 0.0, 0o2613, 0x0040_0123));
+        }
+        let sts = tracker.system_tracks();
+        assert_eq!(sts[0].mode_3a, Some(0o2613));
+        assert_eq!(sts[0].icao_address, Some(0x0040_0123));
+
+        // A primary-only hit must not erase the known identity.
+        tracker.process_plot(&plot(12.0, 50_000.0, 0.0));
+        let sts = tracker.system_tracks();
+        assert_eq!(sts[0].mode_3a, Some(0o2613), "identity stays sticky");
+        assert_eq!(
+            sts[0].icao_address,
+            Some(0x0040_0123),
+            "identity stays sticky"
+        );
+    }
+
+    /// A lone tentative track (e.g. a clutter plot) that is never seen again is
+    /// deleted once it is overdue by its budget of *nominal* revisits. The
+    /// time-continuous lifecycle (Häppchen 13.2) scales deletion by the track's
+    /// own expected revisit — here the nominal fallback, since it was never
+    /// re-hit — not by the cadence of whichever other sensor drives time
+    /// forward. REQ: FR-TRK-006, FR-TRK-022, FR-TRK-023
+    #[test]
+    fn process_plot_deletes_unseen_tentative() {
+        let mut tracker = Tracker::new(config());
+        // A lone tentative track (id 1) due north, born at t = 0.
+        tracker.process_plot(&plot(0.0, 50_000.0, 0.0));
+
+        // A different, far-away target (due east) drives time forward; the north
+        // track is never seen again. delete_misses_tentative = 2 and the nominal
+        // revisit is 5 s, so it survives until ~10 s overdue.
+        let east = |t: f64| plot(t, 30_000.0, std::f64::consts::FRAC_PI_2);
+        tracker.process_plot(&east(4.0));
+        tracker.process_plot(&east(8.0)); // north age 8 s < 2 × 5 s: still alive
+        assert!(
+            tracker.tracks().iter().any(|tr| tr.id().0 == 1),
+            "north track is still within its nominal-revisit budget at t = 8 s"
+        );
+
+        tracker.process_plot(&east(12.0)); // north age 12 s ≥ 2 × 5 s: deleted
+        assert_eq!(tracker.tracks().len(), 1, "the unseen tentative is deleted");
+        assert_eq!(
+            tracker.tracks()[0].id().0,
+            2,
+            "the surviving track is the east one (id 2), not the deleted north one"
+        );
+    }
+
+    /// A plot from an unregistered sensor cannot be geolocated and is dropped by
+    /// the per-plot path too. REQ: FR-TRK-010
+    #[test]
+    fn process_plot_from_unregistered_sensor_is_dropped() {
+        let mut tracker = Tracker::new(config()); // only SensorId(1) is registered
+        let stray = Plot::primary(SensorId(99), Timestamp(0.0), Polar::new(40_000.0, 0.5, 0.0));
+        tracker.process_plot(&stray);
+        assert_eq!(
+            tracker.tracks().len(),
+            0,
+            "unregistered plot must be ignored"
+        );
+    }
+
+    /// Two co-located sensors report the *same* aircraft at interleaved times.
+    /// Because the plots are separated in time, each is gated against the track
+    /// predicted to that instant, so the second sensor's plot folds into the
+    /// same track instead of spawning a ghost — the asynchronous path needs no
+    /// frozen scan-start reference (ADR 0011). The interleaved hits keep one
+    /// confirmed identity, exercising the time-continuous lifecycle across two
+    /// sensors. REQ: FR-TRK-010, FR-TRK-022, FR-TRK-023
+    #[test]
+    fn process_plot_two_async_sensors_make_one_track() {
+        let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
+        let cfg = TrackerConfig::new(frame())
+            .with_sensor(SensorId(1), frame(), error, 4.0)
+            .with_sensor(SensorId(2), frame(), error, 4.0);
+        let mut tracker = Tracker::new(cfg);
+
+        // One stationary target 50 km due north; the two sensors alternate every
+        // 2 s (each revisiting every 4 s, offset by 2 s).
+        for k in 0..6 {
+            let t = k as f64 * 2.0;
+            let sensor = if k % 2 == 0 { SensorId(1) } else { SensorId(2) };
+            tracker.process_plot(&Plot::primary(
+                sensor,
+                Timestamp(t),
+                Polar::new(50_000.0, 0.0, 0.0),
+            ));
+        }
+
+        assert_eq!(
+            tracker.tracks().len(),
+            1,
+            "two async sensors seeing one aircraft must fuse into one track"
+        );
+        assert_eq!(tracker.confirmed_count(), 1, "and it confirms");
+    }
+
+    // --- ADR 0013, Häppchen 13.5: joint association over near-simultaneous --
+    //     plots on the asynchronous path -----------------------------------
+
+    /// Two radars at different sites paint the *same* aircraft at the *same*
+    /// instant, fed as one simultaneous opportunity through `process_plots`.
+    /// The simultaneity window binds them into one joint association against a
+    /// frozen reference (ADR 0011), so they fuse into a single track instead of
+    /// the second radar's plot spawning a ghost — the asynchronous counterpart
+    /// to `two_sensors_seeing_one_aircraft_make_one_track`. REQ: FR-TRK-010,
+    /// FR-TRK-025
+    #[test]
+    fn process_plots_fuse_simultaneous_two_radars_into_one_track() {
+        let tracking = LocalFrame::new(Wgs84::from_degrees(48.0, 11.0, 0.0));
+        let frame_a = LocalFrame::new(Wgs84::from_degrees(48.0, 11.0, 0.0));
+        let frame_b = LocalFrame::new(Wgs84::from_degrees(47.7, 11.6, 0.0)); // ~55 km SE
+        let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
+        let cfg = TrackerConfig::new(tracking)
+            .with_sensor(SensorId(1), frame_a, error, 4.0)
+            .with_sensor(SensorId(2), frame_b, error, 4.0);
+        let mut tracker = Tracker::new(cfg);
+
+        let target = Wgs84::from_degrees(48.1, 11.3, 0.0);
+        for k in 0..4 {
+            let t = k as f64 * 4.0;
+            tracker.process_plots(&[
+                plot_seen_by(SensorId(1), &frame_a, t, &target),
+                plot_seen_by(SensorId(2), &frame_b, t, &target),
+            ]);
+        }
+
+        assert_eq!(
+            tracker.tracks().len(),
+            1,
+            "two simultaneous radars must fuse into one track, not a ghost"
+        );
+        assert_eq!(tracker.confirmed_count(), 1);
+    }
+
+    /// Two targets cross in azimuth as a single radar reports them at nearly the
+    /// same instant. Processed one plot at a time their shared, overlapping
+    /// gates would let either track grab either plot and the identities could
+    /// swap or coalesce; the simultaneity window instead associates the pair
+    /// *jointly* with exclusivity (FR-TRK-018/019/020), so each track keeps its
+    /// own target — verified by both the surviving velocity directions and the
+    /// SSR identities not swapping. REQ: FR-TRK-018, FR-TRK-019, FR-TRK-020,
+    /// FR-TRK-025
+    #[test]
+    fn process_plots_keep_crossing_targets_distinct() {
+        let mut tracker = Tracker::new(config());
+
+        // One radar at the origin. Target A starts west of due-north and flies
+        // east (squawk 0o1111); target B starts east and flies west (0o2222),
+        // 120 m further north so they pass close but never collide. Each round
+        // both are reported at the same instant.
+        let crossing_plot = |t: f64, east: f64, north: f64, squawk: u16| Plot {
+            sensor: SensorId(1),
+            time: Timestamp(t),
+            measurement: firefly_geo::Enu::new(east, north, 0.0).to_polar(),
+            kind: DetectionKind::Combined,
+            mode_ac: ModeAC {
+                mode_3a: Some(squawk),
+                flight_level_ft: Some(35_000.0),
+                icao_address: None,
+            },
+        };
+
+        let speed = 150.0; // m/s
+        let dt = 3.0;
+        for k in 0..12 {
+            let t = k as f64 * dt;
+            let a = crossing_plot(t, -2500.0 + speed * t, 50_000.0, 0o1111);
+            let b = crossing_plot(t, 2500.0 - speed * t, 50_120.0, 0o2222);
+            tracker.process_plots(&[a, b]);
+        }
+
+        assert_eq!(tracker.tracks().len(), 2, "two distinct tracks survive");
+        assert_eq!(tracker.confirmed_count(), 2, "both confirmed");
+
+        // One track ends moving east, the other west — they did not coalesce or
+        // both follow the same target.
+        let mut tracks: Vec<&Track> = tracker.tracks().iter().collect();
+        tracks.sort_by(|x, y| x.velocity()[0].partial_cmp(&y.velocity()[0]).unwrap());
+        let westbound = tracks[0];
+        let eastbound = tracks[1];
+        assert!(
+            westbound.velocity()[0] < 0.0 && eastbound.velocity()[0] > 0.0,
+            "tracks keep opposite east-velocities: {} and {}",
+            westbound.velocity()[0],
+            eastbound.velocity()[0]
+        );
+
+        // And identity did not swap: the eastbound target was A (0o1111), the
+        // westbound was B (0o2222).
+        assert_eq!(
+            eastbound.mode_3a(),
+            Some(0o1111),
+            "eastbound keeps A's squawk"
+        );
+        assert_eq!(
+            westbound.mode_3a(),
+            Some(0o2222),
+            "westbound keeps B's squawk"
+        );
+    }
+
+    /// A track briefly seen by a fast sensor settles a short own-revisit
+    /// estimate; once the fast sensor drops out, only a slow (12 s) sensor still
+    /// covers it. The **cadence floor** (Häppchen 13.5d, configured sensor scan
+    /// periods) keeps it alive across the long gap instead of churning it
+    /// away — without the floor the short revisit estimate (≈2 s, confirmed
+    /// budget 4) would delete it after ≈8 s of coast. REQ: FR-TRK-023,
+    /// FR-TRK-026
+    #[test]
+    fn process_plots_cadence_floor_survives_a_slow_sensor_gap() {
+        let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
+        let cfg = TrackerConfig::new(frame())
+            .with_sensor(SensorId(1), frame(), error, 2.0) // fast sensor
+            .with_sensor(SensorId(2), frame(), error, 12.0); // slow sensor
+        let mut tracker = Tracker::new(cfg);
+
+        let fast =
+            |t: f64| Plot::primary(SensorId(1), Timestamp(t), Polar::new(50_000.0, 0.0, 0.0));
+        let slow =
+            |t: f64| Plot::primary(SensorId(2), Timestamp(t), Polar::new(50_000.0, 0.0, 0.0));
+
+        // Both sensors register a first observation at t = 0.
+        tracker.process_plots(&[fast(0.0), slow(0.0)]);
+        // Fast sensor hits every 2 s up to t = 12 (own revisit settles ≈2 s);
+        // the slow sensor re-hits at t = 12, establishing its 12 s period — so
+        // the cadence floor becomes 12 s.
+        for k in 1..=6 {
+            tracker.process_plots(&[fast(k as f64 * 2.0)]);
+        }
+        tracker.process_plots(&[slow(12.0)]);
+        assert_eq!(tracker.confirmed_count(), 1);
+        let id = tracker.tracks()[0].id();
+
+        // Fast sensor drops out. A far-away plot at t = 20 advances data time by
+        // 8 s without touching the north track, which now coasts with age = 8 s —
+        // past budget × own-revisit (4 × 2 s) but well inside budget × cadence
+        // floor (4 × 12 s), so the floor must keep it alive.
+        let decoy = Plot::primary(
+            SensorId(1),
+            Timestamp(20.0),
+            Polar::new(30_000.0, std::f64::consts::FRAC_PI_2, 0.0),
+        );
+        tracker.process_plots(&[decoy]);
+
+        assert!(
+            tracker
+                .tracks()
+                .iter()
+                .any(|tr| tr.id() == id && tr.is_confirmed()),
+            "the slowly-revisited track must survive the gap via the cadence floor"
+        );
+    }
+
+    /// When plots are well separated in time (more than the simultaneity
+    /// window), `process_plots` must behave exactly like feeding them one at a
+    /// time through `process_plot`: micro-batching only binds genuinely
+    /// coincident plots, and the result is independent of how the stream is
+    /// chunked (determinism, ADR 0003). REQ: FR-TRK-025
+    #[test]
+    fn process_plots_equals_repeated_process_plot_when_well_separated() {
+        let plots: Vec<Plot> = (0..6)
+            .map(|k| plot(k as f64 * 4.0, 50_000.0, 0.0))
+            .collect();
+
+        let mut one_at_a_time = Tracker::new(config());
+        for p in &plots {
+            one_at_a_time.process_plot(p);
+        }
+
+        let mut in_one_call = Tracker::new(config());
+        in_one_call.process_plots(&plots);
+
+        assert_eq!(
+            one_at_a_time, in_one_call,
+            "chunking a time-separated stream must not change the tracker state"
+        );
+        assert_eq!(in_one_call.confirmed_count(), 1);
+    }
+
+    // --- ADR 0013, Häppchen 13.3: read-only time snapshot ------------------
+
+    /// `snapshot_at` predicts every track forward to a common output time and
+    /// must leave the tracker's own state untouched: a far-future snapshot
+    /// neither advances nor deletes the live track, and repeating a snapshot
+    /// yields the same result. REQ: FR-TRK-024
+    #[test]
+    fn snapshot_at_predicts_forward_and_is_read_only() {
+        let mut tracker = Tracker::new(config());
+        // A target moving due east at 200 m/s, seen every 4 s.
+        let speed = 200.0;
+        for k in 0..5 {
+            let t = k as f64 * 4.0;
+            let polar = firefly_geo::Enu::new(speed * t, 50_000.0, 0.0).to_polar();
+            tracker.process_plot(&Plot::primary(SensorId(1), Timestamp(t), polar));
+        }
+        assert_eq!(tracker.confirmed_count(), 1);
+
+        // Current estimate (at last update t = 16) and the state we must not touch.
+        let east_now = frame()
+            .geodetic_to_enu(&tracker.system_tracks()[0].position)
+            .east;
+        let pos_before = tracker.tracks()[0].position();
+        let n_before = tracker.tracks().len();
+
+        // Snapshot 4 s into the future: the track is predicted along its velocity
+        // and sits well ahead of its last update.
+        let snap = tracker.snapshot_at(Timestamp(20.0));
+        assert_eq!(snap.len(), 1);
+        let east_future = frame().geodetic_to_enu(&snap[0].position).east;
+        assert!(
+            east_future > east_now + 400.0,
+            "predicted east {east_future} should be ahead of {east_now}"
+        );
+        assert!(
+            (snap[0].time.as_secs() - 20.0).abs() < 1e-9,
+            "snapshot carries t"
+        );
+
+        // Read-only: even a far-future snapshot must not delete or mutate the
+        // live track, and a repeated snapshot is identical.
+        let _ = tracker.snapshot_at(Timestamp(10_000.0));
+        assert_eq!(tracker.tracks().len(), n_before, "snapshot must not delete");
+        assert_eq!(
+            tracker.tracks()[0].position(),
+            pos_before,
+            "snapshot must not mutate the live estimate"
+        );
+        let east_again = frame()
+            .geodetic_to_enu(&tracker.snapshot_at(Timestamp(20.0))[0].position)
+            .east;
+        assert!(
+            (east_again - east_future).abs() < 1e-9,
+            "snapshot is deterministic"
+        );
+    }
+
+    /// `snapshot_at` evaluates the safety status at the *output* time, not the
+    /// last update time: a track fresh at its last hit shows up coasting with a
+    /// matching update age when projected into the future. REQ: FR-TRK-024
+    #[test]
+    fn snapshot_at_reports_age_and_coasting_at_output_time() {
+        let mut tracker = Tracker::new(config());
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_plot(&plot(t, 50_000.0, 0.0));
+        }
+        // At the last update (t = 8) the track is fresh.
+        let now = tracker.system_tracks();
+        assert!(!now[0].coasting);
+        assert!(now[0].update_age.abs() < 1e-9);
+
+        // Projected 4 s later it coasts, with a 4 s update age — no plot needed.
+        let snap = tracker.snapshot_at(Timestamp(12.0));
+        assert!(snap[0].coasting, "past the last hit → coasting");
+        assert!(
+            (snap[0].update_age - 4.0).abs() < 1e-9,
+            "update age = t − last hit"
+        );
+        assert!((snap[0].time.as_secs() - 12.0).abs() < 1e-9);
+    }
+
+    /// An empty tracker snapshots to an empty air picture.
+    #[test]
+    fn snapshot_at_on_empty_tracker_is_empty() {
+        let tracker = Tracker::new(config());
+        assert!(tracker.snapshot_at(Timestamp(5.0)).is_empty());
     }
 }

@@ -170,7 +170,7 @@ stehen in `docs/STATUS.md`.
 | **Multicast-Feed-Sicherheit** | Authentizität/Netz-Isolation des CAT062-Eingangspfads (ehem. Issue #7, transformiert) | ⏳ geplant |
 | **Konfigurierbarer System-Referenzpunkt** | I062/100-Referenzpunkt jenseits des Demo-Ursprungs (ADR 0006, offen) | ⏳ geplant |
 | **CAT062-ICD** | Versionierte Schnittstellen-Doku für Wayfinder (`docs/ICD-CAT062.md`) | ✅ v1.0.0 erstellt |
-| **ADR 0013** | Asynchrone Pro-Plot-Verarbeitung + periodischer Ausgabetakt (13.1–13.7) | ⏳ angenommen, Umsetzung offen |
+| **ADR 0013** | Asynchrone Pro-Plot-Verarbeitung + periodischer Ausgabetakt (13.1–13.7) | ✅ erledigt |
 | **Betriebs-Härtung** | Observability-Ausbau, Lastfestigkeit, Deployment | ⏳ |
 
 Innerhalb jedes Vorhabens wird in kleinen Schritten nach Abschnitt 2 gearbeitet.

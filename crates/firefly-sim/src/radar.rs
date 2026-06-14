@@ -12,9 +12,6 @@ use crate::target::Target;
 pub struct RadarParams {
     /// Antenna revolution period, seconds (time between scans).
     pub scan_period: f64,
-    /// Phase offset of the first scan, seconds. Lets several radars be
-    /// deliberately un-synchronised.
-    pub scan_offset: f64,
     /// Probability of detection for a target inside coverage, per scan.
     pub prob_detection: f64,
     /// Range measurement noise (1σ), metres.
@@ -36,7 +33,6 @@ impl Default for RadarParams {
         // A plausible medium-range en-route surveillance radar.
         Self {
             scan_period: 4.0,
-            scan_offset: 0.0,
             prob_detection: 0.9,
             sigma_range: 50.0,
             sigma_azimuth: 0.08_f64.to_radians(),
@@ -68,19 +64,50 @@ impl Radar {
         local.to_polar()
     }
 
-    /// Attempt to detect a target at a true scenario-frame position, returning a
-    /// noisy plot if the target is in coverage and the detection roll succeeds.
+    /// Attempt to detect a target over one antenna revolution starting at
+    /// `scan_start`, returning a noisy plot if the target is in coverage and
+    /// the detection roll succeeds.
+    ///
+    /// `position_at(t)` looks up the target's true scenario-frame position at
+    /// scenario time `t` (or `None` once its script has ended).
+    ///
+    /// The plot's **data time is azimuth-dependent** (ADR 0013, Häppchen 13.6):
+    /// the antenna sweeps through bearing over one revolution, so a target at
+    /// true bearing θ (as seen at `scan_start`) is timestamped
+    /// `scan_start + (θ / 2π) · scan_period`. The measurement itself is then
+    /// re-derived from the target's position **at that data time**, not at
+    /// `scan_start` — otherwise a plot's timestamp and its kinematic content
+    /// would describe two different instants, up to one scan period apart for
+    /// the slower radars. Every plot thus carries its own internally
+    /// consistent time within the scan — the realistic asynchrony the
+    /// per-plot tracker ([`firefly_track::Tracker::process_plots`]) consumes
+    /// directly, and what time-separates two radars' views of one aircraft so
+    /// they fuse instead of spawning a ghost.
     pub fn try_detect(
         &self,
         scenario_frame: &LocalFrame,
-        position: Enu,
+        position_at: impl Fn(f64) -> Option<Enu>,
         target: &Target,
-        time: Timestamp,
+        scan_start: f64,
         rng: &mut Pcg32,
     ) -> Option<Plot> {
-        let truth = self.true_polar(scenario_frame, position);
+        // The bearing at scan_start fixes where in the revolution this target
+        // falls, and thus this plot's data time.
+        let scan_start_position = position_at(scan_start)?;
+        let scan_start_truth = self.true_polar(scenario_frame, scan_start_position);
+        if scan_start_truth.range > self.params.max_range
+            || scan_start_truth.elevation < self.params.min_elevation
+        {
+            return None;
+        }
+        let az = scan_start_truth.azimuth.rem_euclid(std::f64::consts::TAU);
+        let plot_time = scan_start + (az / std::f64::consts::TAU) * self.params.scan_period;
 
-        // Coverage gating: out of range or below the lowest beam → no detection.
+        // Re-evaluate the truth at the plot's own data time: the target may
+        // have moved on (or its script may have ended) between scan_start and
+        // plot_time.
+        let position = position_at(plot_time)?;
+        let truth = self.true_polar(scenario_frame, position);
         if truth.range > self.params.max_range || truth.elevation < self.params.min_elevation {
             return None;
         }
@@ -119,24 +146,22 @@ impl Radar {
 
         Some(Plot {
             sensor: self.sensor.id,
-            time,
+            time: Timestamp(plot_time),
             measurement,
             kind,
             mode_ac,
         })
     }
 
-    /// The scan times of this radar within `[0, duration]`.
+    /// The scan **start** times of this radar within `[0, duration]`. All radars
+    /// start at t = 0 (ADR 0013, Häppchen 13.6): asynchrony now comes from the
+    /// per-plot azimuth timing (see [`try_detect`](Self::try_detect)) and the
+    /// differing scan periods, not from a phase offset.
     pub fn scan_times(&self, duration: f64) -> Vec<f64> {
         let mut times = Vec::new();
-        let mut t = self.params.scan_offset;
-        if t < 0.0 {
-            t = 0.0;
-        }
+        let mut t = 0.0;
         while t <= duration + 1e-9 {
-            if t >= 0.0 {
-                times.push(t);
-            }
+            times.push(t);
             t += self.params.scan_period;
         }
         times

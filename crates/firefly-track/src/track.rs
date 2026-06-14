@@ -170,6 +170,21 @@ impl Track {
         self.revisit_interval.max(cadence)
     }
 
+    /// The revisit interval the **time-continuous** lifecycle scales by (ADR
+    /// 0013, Häppchen 13.2): the track's own measured [`revisit_interval`] once
+    /// it exists, else the `nominal` fallback for a freshly born track not yet
+    /// seen a second time. Unlike [`coast_reference`](Self::coast_reference) it
+    /// does **not** depend on a globally-estimated feed cadence — the
+    /// asynchronous per-plot path governs a track purely by how often it is
+    /// actually updated.
+    pub(crate) fn expected_revisit(&self, nominal: f64) -> f64 {
+        if self.revisit_interval > 0.0 {
+            self.revisit_interval
+        } else {
+            nominal
+        }
+    }
+
     /// How many recent hits fall within the last `window` seconds (up to `now`).
     pub(crate) fn hits_within(&self, window: f64, now: f64) -> usize {
         let cutoff = now - window;
@@ -303,5 +318,25 @@ mod tests {
         });
 
         assert_eq!(track.mode_3a(), Some(0o7000));
+    }
+
+    /// The time-continuous lifecycle interval (Häppchen 13.2) falls back to the
+    /// nominal until a second hit establishes the track's own revisit, then
+    /// follows the measured cadence. REQ: FR-TRK-023
+    #[test]
+    fn expected_revisit_falls_back_to_nominal_until_established() {
+        let mut track = fresh_track(); // one founding hit at t = 0, no gap yet
+        assert_eq!(
+            track.expected_revisit(5.0),
+            5.0,
+            "no second hit yet → nominal fallback"
+        );
+
+        track.mark_hit(4.0); // first inter-hit gap = 4 s → revisit established
+        assert_eq!(
+            track.expected_revisit(5.0),
+            4.0,
+            "own measured revisit takes over once known"
+        );
     }
 }

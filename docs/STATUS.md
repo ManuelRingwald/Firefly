@@ -4,17 +4,35 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/serene-heisenberg-xq4rla`:
-  Issue #9 geschlossen — Wayfinder M1 (CAT062-Pipeline + Live-Karte) ist
-  abgeschlossen und hat den Vertrag (ICD v1.0.0) Ende-zu-Ende gegen den
-  Referenz-Dump verifiziert)
-- **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
-  Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
-  I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches
-  `claude/branch-merge-main-cqzdwk`, `claude/next-steps-ft3t3n` und
-  `claude/pr-main-merge-oggshe` sind bereits in `main` enthalten und können
-  remote gelöscht werden (Branch-Löschung war in dieser Sitzung wegen
-  fehlender Berechtigung nicht möglich).
+- **Zuletzt aktualisiert:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
+  **ADR 0013 vollständig umgesetzt (13.1–13.7 inkl. 13.5d).**
+  `Tracker::process_plot` (async Pro-Plot-Verarbeitung) additiv,
+  zeit-kontinuierlicher Lebenszyklus, `Tracker::snapshot_at(t)` (read-only
+  Zeit-Projektion), der **periodische Ausgabetakt** im Player
+  (`periodic_snapshots`/`periodic_frames`), **13.5a: gemeinsame Assoziation
+  über nahezu gleichzeitige Plots** (`process_plots` + Simultaneitäts-Fenster +
+  geteilter `fuse_simultaneous_plots`, FR-TRK-025), **13.5c: Kadenz-Boden im
+  async-Lösch-Lebenszyklus** (FR-TRK-026), **13.6: azimut-abhängige
+  Pro-Plot-Zeitstempel im Simulator** — Messung wird jetzt am eigenen
+  `plot_time` (nicht am `scan_start`) neu ausgewertet, was den vermeintlichen
+  13.5b-Kreuzungs-Tausch als Simulator-Bug auflöste (13.5b entfällt) —,
+  **13.7: Frankfurt/Demo-Szene + Player auf den periodischen Ausgabetakt
+  umgestellt** und **13.5d: Lösch-Kadenz-Boden auf konfigurierte
+  `SensorModel::scan_period` umgestellt** (Option B, ARTAS-Sensor-
+  Deklarations-Stil) statt der durch 13.6 verfälschten Online-Schätzung —
+  `process_plots`/`should_delete_continuous` only, Batch-Pfad unverändert.
+  `process_scan`/Batch verhaltensgleich, alle Gates grün.
+  **Frankfurt Track-IDs 22 → 10 → 8 (Ziel erreicht).** Beide zuvor
+  `#[ignore]`-markierten Frankfurt-Tests
+  (`frankfurt_scene_keeps_one_identity_per_aircraft`,
+  `frankfurt_crossing_pair_keeps_identity_through_the_crossing`) sind wieder
+  grün; das Kreuzungs-Paar trägt jetzt die IDs 5/4 (statt 1/2 — Track-1 ist
+  durchgehend `arrival_north`, kein Geister-Artefakt mehr).
+- **Branch:** `claude/serene-heisenberg-xq4rla` wird per PR nach `main`
+  gemergt (ADR 0013 13.1–13.7 inkl. 13.5d). Danach enthält `main` den
+  vollständigen Stand (M1–M6 + Produktions-Phase bis ADR 0013); alle anderen
+  Branches sind entweder bereits remote gelöscht oder können nach diesem
+  Merge gelöscht werden — `main` ist die einzige verbleibende Branch.
 
 > 🔁 **ADR 0014 (Pivot Produktion, Wayfinder konsumiert CAT062/UDP) — akzeptiert.**
 > `CLAUDE.md` ist auf Produktionsbetrieb umgestellt (Modell-Angabe pro Schritt
@@ -28,16 +46,64 @@
 > Schnittstellen-Probleme. Das ADR-0013-Vorhaben (siehe nächster Absatz)
 > bleibt der fachlich nächste Schritt.
 
-> 🔭 **NÄCHSTE WOCHE — ADR 0013 (asynchrone Pro-Plot-Verarbeitung) umsetzen.**
-> Die Architektur-Entscheidung ist **angenommen** (`docs/decisions/0013-…md`), die
-> Umsetzung steht noch aus. Ein erster Foundation-Schritt (Simulator: azimut-abhängige
-> Pro-Plot-Zeitstempel, `scan_offset` entfernt) wurde begonnen — Commit **`6a58a03`** —
-> und bewusst wieder **zurückgenommen** (Revert **`0959059`**), weil ohne die Tracker-
-> und Server-Teile der Frankfurt-Test rot wird (155 statt 8 Track-IDs). `main` ist
-> deshalb wieder grün. **Wiedereinstieg:** der Abschnitt *„Umsetzungsstand /
-> Wiedereinstieg"* in ADR 0013 enthält den vollständigen Häppchen-Plan
-> (**13.1 – 13.7**, beginnend mit `Tracker::process_plot`). Vorgehen wie immer:
-> *erst erklären, dann bauen* (CLAUDE.md §2).
+> 🔭 **ADR 0013 (asynchrone Pro-Plot-Verarbeitung) — Umsetzung abgeschlossen.**
+> Die Architektur-Entscheidung ist **angenommen** (`docs/decisions/0013-…md`).
+> **13.1 + 13.2 sind umgesetzt:** `Tracker::process_plot` verarbeitet einen
+> einzelnen Plot zu seiner eigenen Datenzeit (prädizieren → gegen Live-Schätzung
+> gaten/assoziieren → updaten/initiieren → **zeit-kontinuierliche**
+> Bestätigung/Löschung nach der *eigenen* Revisit-Kadenz jedes Tracks,
+> `expected_revisit`/`should_delete_continuous`, ohne global geschätzte
+> Feed-Kadenz), **additiv** neben `process_scan` (**Ansatz B**, mit dem
+> Verantwortlichen abgestimmt). Grund für additiv statt sofortiger dünner
+> Schleife: die Same-Time-Batch-Semantik (frozen reference + Joint-Association,
+> ADR 0011) ist für die heutigen Tests tragend, solange der Simulator
+> gleichzeitige Plots liefert (bis 13.5). FR-TRK-022/023, Tests
+> `tracker::process_plot_*`, `track::expected_revisit_*`.
+> **13.3 + 13.4 sind umgesetzt:** `Tracker::snapshot_at(t)` projiziert read-only
+> **alle** Tracks auf eine gemeinsame Ausgabezeit `t`; darauf bauen
+> `Player::periodic_snapshots`/`periodic_frames` den **festen Ausgabe-Herzschlag**
+> (`t_out`, Default = kleinste Sensorperiode) — entkoppelt vom unregelmäßigen
+> Eingang. FR-TRK-024 / FR-IO-005, Tests `tracker::snapshot_at_*`,
+> `firefly-player::periodic_*`.
+> **13.5 wurde re-dekomponiert (nach Befund).** Ein erster kombinierter Versuch
+> (azimut-Zeiten + Frankfurt-Cutover) zeigte eine Architektur-Regression: naiver
+> Pro-Plot-Pfad → Frankfurt **40 statt 8 IDs** + Kreuzungs-Identitäts-Tausch
+> (Ursachen: Lösch-Churn ohne Kadenz-Boden **und** verlorene Geister-/Joint-JPDA-
+> Logik bei *gleichzeitigen* Plots). Mit dem Verantwortlichen abgestimmt: **volle
+> Async** (diese ADR-Option), weil reale SDPS (ARTAS & Co.) genau so arbeiten und
+> der Batch-Pfad an der unrealistischen „alle Plots gleichzeitig"-Annahme hängt.
+> **13.5a ist umgesetzt:** Simultaneitäts-Fenster (`SIMULTANEITY_WINDOW`, 0,5 s),
+> `Tracker::process_plots` fasst koinzidente Plots zu *einer* Mess-Gelegenheit
+> zusammen und assoziiert sie gemeinsam gegen eine eingefrorene Referenz
+> (ADR-0011-Geisterunterdrückung + JPDA-Exklusivität, wie ein Scan); der Kern
+> `fuse_simultaneous_plots` ist aus `process_scan` extrahiert und geteilt
+> (`process_scan` verhaltensgleich, `process_plot` = Ein-Plot-Bequemlichkeit).
+> FR-TRK-025, Tests `tracker::process_plots_*`.
+> **13.5c ist umgesetzt:** Kadenz-Boden im async-Lösch-Lebenszyklus —
+> `should_delete_continuous` löscht erst bei `budget · max(eigene Revisit,
+> langsamste Sensorperiode)`, `process_plots` schätzt die Sensor-Perioden. Damit
+> wird ein nur noch langsam (z. B. 12 s) abgedeckter Track nicht in der Lücke
+> weggelöscht und neu geboren. FR-TRK-026, Test
+> `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap`. **Messung
+> (13.5a+13.5c im Player-Pfad): Frankfurt 40 → 22 IDs.**
+> **13.5b entfällt** (Untersuchung ergab den 13.6-Simulator-Bug, kein
+> Assoziationsproblem). **13.6 ist umgesetzt:** azimut-abhängige
+> Pro-Plot-Zeitstempel im Simulator, Messung am eigenen `plot_time` neu
+> ausgewertet; Frankfurt 22 → 10 IDs. **13.7 ist umgesetzt:** Frankfurt/Demo +
+> Player auf `periodic_frames`/`periodic_snapshots` umgestellt.
+> **13.5d ist umgesetzt:** der Kadenz-Boden in `should_delete_continuous`
+> verwendet jetzt das **konfigurierte** `SensorModel::scan_period` (Maximum
+> über alle Sensoren) statt der durch 13.6 verfälschten Online-Schätzung aus
+> 13.5c (Option B, ARTAS-Sensor-Deklarations-Stil — abgestimmt mit dem
+> Verantwortlichen). FR-TRK-026 aktualisiert, Test
+> `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap` jetzt mit
+> konfigurierten Perioden (2 s/12 s). **Messung: Frankfurt 22 → 10 → 8 IDs**
+> (Ziel erreicht) — beide zuvor `#[ignore]`-markierten Frankfurt-Tests sind
+> wieder grün. Damit ist ADR 0013 (13.1–13.7) vollständig umgesetzt. Details im
+> Abschnitt *„Umsetzungsstand / Wiedereinstieg"* der ADR 0013. Nächster
+> fachlicher Schritt: Betriebs-Härtung (§7 Charter) oder
+> Multicast-Feed-Sicherheit — neuer Schritt wie immer erst abstimmen, dann
+> bauen (CLAUDE.md §2).
 
 - **Diese Sitzung (Aufräumen + Merge):**
   - Offener Branch endete mit unfertigem ADR-0013-WIP, der ein Qualitäts-Gate verletzte

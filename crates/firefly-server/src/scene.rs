@@ -24,6 +24,7 @@ pub const DEMO_ORIGIN: (f64, f64) = (48.0, 11.0);
 fn demo_player() -> Player {
     let origin = Wgs84::from_degrees(DEMO_ORIGIN.0, DEMO_ORIGIN.1, 0.0);
     let radar = Radar::new(Sensor::new(SensorId(1), origin), RadarParams::default());
+    let scan_period = radar.params.scan_period;
 
     let scenario = Scenario::new(origin)
         .with_duration(180.0)
@@ -45,20 +46,30 @@ fn demo_player() -> Player {
         SensorId(1),
         LocalFrame::new(origin),
         SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0),
+        scan_period,
     );
     tracker.process_noise = ProcessNoise::new(60.0);
     Player::new(&scenario, tracker)
 }
 
 /// Build the demo frame stream (JSON adapter, for the web map).
+///
+/// Emitted on the **decoupled periodic heartbeat** (ADR 0013, Häppchen 13.4–13.6):
+/// plots are worked in per-plot through the tracker and the picture is reported
+/// at a fixed `t_out` (the fastest radar's scan period), not once per input scan.
 pub fn demo_frames() -> Vec<Frame> {
-    demo_player().frames()
+    let player = demo_player();
+    let t_out = player.default_output_period();
+    player.periodic_frames(t_out)
 }
 
-/// Build the demo scan stream (raw `SystemTrack`s per scan, for the CAT062
-/// multicast adapter). Same deterministic player as [`demo_frames`].
+/// Build the demo snapshot stream (raw `SystemTrack`s per output tick, for the
+/// CAT062 multicast adapter). Same deterministic player and heartbeat as
+/// [`demo_frames`].
 pub fn demo_scans() -> Vec<(Timestamp, Vec<SystemTrack>)> {
-    demo_player().scans()
+    let player = demo_player();
+    let t_out = player.default_output_period();
+    player.periodic_snapshots(t_out)
 }
 
 /// An aircraft entering from the south-west, cruising due east.
@@ -126,7 +137,6 @@ fn frankfurt_player() -> Player {
         RadarParams {
             max_range: 120_000.0,
             scan_period: 4.0,
-            scan_offset: 0.0,
             ..RadarParams::default()
         },
     );
@@ -135,7 +145,6 @@ fn frankfurt_player() -> Player {
         RadarParams {
             max_range: 100_000.0,
             scan_period: 10.0,
-            scan_offset: 1.3,
             ..RadarParams::default()
         },
     );
@@ -144,7 +153,6 @@ fn frankfurt_player() -> Player {
         RadarParams {
             max_range: 100_000.0,
             scan_period: 12.0,
-            scan_offset: 2.6,
             ..RadarParams::default()
         },
     );
@@ -165,9 +173,9 @@ fn frankfurt_player() -> Player {
 
     let error = SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0);
     let mut tracker = TrackerConfig::new(LocalFrame::new(origin))
-        .with_sensor(SensorId(1), LocalFrame::new(site_center), error)
-        .with_sensor(SensorId(2), LocalFrame::new(site_west), error)
-        .with_sensor(SensorId(3), LocalFrame::new(site_northeast), error);
+        .with_sensor(SensorId(1), LocalFrame::new(site_center), error, 4.0)
+        .with_sensor(SensorId(2), LocalFrame::new(site_west), error, 10.0)
+        .with_sensor(SensorId(3), LocalFrame::new(site_northeast), error, 12.0);
     tracker.process_noise = ProcessNoise::new(60.0);
     // The default association gate (P_G = 0.99) now suffices: multi-radar
     // "ghost" tracks are prevented at the source by the scan-start fusion
@@ -178,15 +186,24 @@ fn frankfurt_player() -> Player {
 }
 
 /// Build the Frankfurt frame stream (JSON adapter, for the web map).
+///
+/// Emitted on the **decoupled periodic heartbeat** (ADR 0013, Häppchen 13.4–13.6):
+/// the three asynchronous radars (4 / 10 / 12 s) feed the tracker per-plot, and
+/// the picture is reported at a fixed `t_out` (the fastest radar's 4 s period),
+/// independent of the irregular multi-radar input cadence.
 pub fn frankfurt_frames() -> Vec<Frame> {
-    frankfurt_player().frames()
+    let player = frankfurt_player();
+    let t_out = player.default_output_period();
+    player.periodic_frames(t_out)
 }
 
-/// Build the Frankfurt scan stream (raw `SystemTrack`s per scan, for the
-/// CAT062 multicast adapter). Same deterministic player as
+/// Build the Frankfurt snapshot stream (raw `SystemTrack`s per output tick, for
+/// the CAT062 multicast adapter). Same deterministic player and heartbeat as
 /// [`frankfurt_frames`].
 pub fn frankfurt_scans() -> Vec<(Timestamp, Vec<SystemTrack>)> {
-    frankfurt_player().scans()
+    let player = frankfurt_player();
+    let t_out = player.default_output_period();
+    player.periodic_snapshots(t_out)
 }
 
 /// JPDA crossing showcase, aircraft A: flies north-east, crossing the path of
@@ -445,7 +462,7 @@ mod tests {
     }
 
     /// The JPDA crossing showcase ([`crossing_northeast`]/[`crossing_southeast`],
-    /// track ids 1 and 2) is the scene's deliberate data-association stress
+    /// track ids 5 and 4) is the scene's deliberate data-association stress
     /// test: the two aircraft meet at one point at one time, so for a scan or
     /// two their plots are ambiguous. JPDA must carry each track through the
     /// crossing on its own velocity and **not swap the two identities** — the
@@ -475,16 +492,16 @@ mod tests {
             // The two crossers head into disjoint course quadrants and must
             // stay there — never swapping across the 90° divide.
             for t in f.tracks.iter().filter(|t| t.confirmed) {
-                if t.id.0 == 1 {
+                if t.id.0 == 5 {
                     assert!(
                         t.track_angle_deg < 90.0,
-                        "north-east crosser (id 1) veered to {:.0}° — identity swapped?",
+                        "north-east crosser (id 5) veered to {:.0}° — identity swapped?",
                         t.track_angle_deg
                     );
-                } else if t.id.0 == 2 {
+                } else if t.id.0 == 4 {
                     assert!(
                         t.track_angle_deg > 90.0,
-                        "south-east crosser (id 2) veered to {:.0}° — identity swapped?",
+                        "south-east crosser (id 4) veered to {:.0}° — identity swapped?",
                         t.track_angle_deg
                     );
                 }
@@ -493,7 +510,7 @@ mod tests {
             let mut positions = f
                 .tracks
                 .iter()
-                .filter(|t| t.id.0 == 1 || t.id.0 == 2)
+                .filter(|t| t.id.0 == 5 || t.id.0 == 4)
                 .map(|t| {
                     frame.geodetic_to_enu(&Wgs84::from_degrees(t.lat_deg, t.lon_deg, t.height_m))
                 });
