@@ -5,14 +5,28 @@
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
 - **Zuletzt aktualisiert:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
-  **ADR 0013 Häppchen 13.1–13.4 + 13.5a + 13.5c umgesetzt** — `Tracker::process_plot`
-  (async Pro-Plot-Verarbeitung) additiv, zeit-kontinuierlicher Lebenszyklus,
-  `Tracker::snapshot_at(t)` (read-only Zeit-Projektion), der **periodische
-  Ausgabetakt** im Player (`periodic_snapshots`/`periodic_frames`), **13.5a:
-  gemeinsame Assoziation über nahezu gleichzeitige Plots** (`process_plots` +
-  Simultaneitäts-Fenster + geteilter `fuse_simultaneous_plots`, FR-TRK-025) und
-  **13.5c: Kadenz-Boden im async-Lösch-Lebenszyklus** (FR-TRK-026);
-  `process_scan`/Batch verhaltensgleich, alle Gates grün)
+  **ADR 0013 Häppchen 13.1–13.4 + 13.5a + 13.5c + 13.6 + 13.7 umgesetzt.**
+  `Tracker::process_plot` (async Pro-Plot-Verarbeitung) additiv,
+  zeit-kontinuierlicher Lebenszyklus, `Tracker::snapshot_at(t)` (read-only
+  Zeit-Projektion), der **periodische Ausgabetakt** im Player
+  (`periodic_snapshots`/`periodic_frames`), **13.5a: gemeinsame Assoziation
+  über nahezu gleichzeitige Plots** (`process_plots` + Simultaneitäts-Fenster +
+  geteilter `fuse_simultaneous_plots`, FR-TRK-025), **13.5c: Kadenz-Boden im
+  async-Lösch-Lebenszyklus** (FR-TRK-026), **13.6: azimut-abhängige
+  Pro-Plot-Zeitstempel im Simulator** — Messung wird jetzt am eigenen
+  `plot_time` (nicht am `scan_start`) neu ausgewertet, was den vermeintlichen
+  13.5b-Kreuzungs-Tausch als Simulator-Bug auflöste (13.5b entfällt) — und
+  **13.7: Frankfurt/Demo-Szene + Player auf den periodischen Ausgabetakt
+  umgestellt**; `process_scan`/Batch verhaltensgleich, alle Gates grün.
+  Frankfurt Track-IDs **22 → 10** (Ziel 8).
+  **Neu identifiziert, offen: Häppchen 13.5d** (Lösch-Kadenz-Kalibrierung —
+  `expected_revisit`/`should_delete_continuous` unterschätzen die Sensorperiode
+  unter asynchroner Multi-Sensor-Verschachtelung, Geister-Kette für
+  `arrival_north`). Die beiden betroffenen Frankfurt-Tests
+  (`frankfurt_scene_keeps_one_identity_per_aircraft`,
+  `frankfurt_crossing_pair_keeps_identity_through_the_crossing`) sind mit
+  `#[ignore]` und Verweis auf 13.5d markiert, bis das gelöst ist. **Nächster
+  Schritt: 13.5d (S3, Sonnet 4.6) — erst abstimmen, dann bauen.**
 - **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
   Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
   I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches

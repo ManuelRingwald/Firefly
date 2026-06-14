@@ -152,19 +152,20 @@ impl Player {
     /// picture on a **fixed output heartbeat** of `t_out` seconds (ADR 0013,
     /// Häppchen 13.4) — the periodic counterpart to [`scans`](Player::scans).
     ///
-    /// Plots are fed one at a time, in data-time order, through
-    /// [`Tracker::process_plot`]; at each tick `k · t_out` the tracks are
-    /// reported via [`Tracker::snapshot_at`] (a read-only projection to that
-    /// instant). The result is a regular, predictable stream independent of the
-    /// irregular input cadence — what a real SDPS emits — while staying a pure,
-    /// deterministic function of the scenario (NFR-CLOUD-002, NFR-REPRO-001).
-    /// Ticks with no fresh plots still produce a snapshot (coasting tracks),
-    /// which is exactly the stable heartbeat the ASD wants.
+    /// Each output window's plots are fed in data-time order through
+    /// [`Tracker::process_plots`], which groups genuinely coincident plots into
+    /// joint measurement opportunities (ADR 0011 ghost suppression + JPDA
+    /// exclusivity, Häppchen 13.5a) while keeping time-separated plots as their
+    /// own opportunities; at each tick `k · t_out` the tracks are reported via
+    /// [`Tracker::snapshot_at`] (a read-only projection to that instant). The
+    /// result is a regular, predictable stream independent of the irregular
+    /// multi-radar input cadence — what a real SDPS emits — while staying a
+    /// pure, deterministic function of the scenario (NFR-CLOUD-002,
+    /// NFR-REPRO-001). Ticks with no fresh plots still produce a snapshot
+    /// (coasting tracks), which is exactly the stable heartbeat the ASD wants.
     ///
     /// This is the shared periodic core both output adapters build on; the
-    /// server/CAT062 cut-over to it is Häppchen 13.7. Until the simulator emits
-    /// per-plot (azimuth-dependent) timestamps (Häppchen 13.5), feed it
-    /// single-radar scenarios — the per-plot path assumes time-separated plots.
+    /// server/CAT062 cut-over to it is Häppchen 13.7.
     pub fn periodic_snapshots(mut self, t_out: f64) -> Vec<(Timestamp, Vec<SystemTrack>)> {
         let mut out = Vec::new();
         if t_out <= 0.0 || self.plots.is_empty() {
@@ -174,11 +175,13 @@ impl Player {
         let mut i = 0;
         let mut tick = t_out;
         while tick <= horizon + 1e-9 {
-            // Work in every plot whose data time is at or before this tick.
+            // Feed every plot up to this tick as one batch, so coincident plots
+            // are associated jointly (Häppchen 13.5a).
+            let start = i;
             while i < self.plots.len() && self.plots[i].time.as_secs() <= tick + 1e-9 {
-                self.tracker.process_plot(&self.plots[i]);
                 i += 1;
             }
+            self.tracker.process_plots(&self.plots[start..i]);
             let ts = Timestamp(tick);
             out.push((ts, self.tracker.snapshot_at(ts)));
             tick += t_out;
@@ -205,9 +208,9 @@ impl Player {
         while tick <= horizon + 1e-9 {
             let start = i;
             while i < self.plots.len() && self.plots[i].time.as_secs() <= tick + 1e-9 {
-                self.tracker.process_plot(&self.plots[i]);
                 i += 1;
             }
+            self.tracker.process_plots(&self.plots[start..i]);
             let frame_plots: Vec<FramePlot> = self.plots[start..i]
                 .iter()
                 .filter_map(|p| {
@@ -358,8 +361,10 @@ mod tests {
     #[test]
     fn periodic_snapshots_emit_on_a_fixed_heartbeat() {
         let snaps = Player::new(&scenario(), config()).periodic_snapshots(4.0);
-        // duration 40 s, perfect radar → last plot at t = 40 ⇒ ticks 4 … 40.
-        assert_eq!(snaps.len(), 10);
+        // duration 40 s, perfect radar → scans at t = 0..40, but each plot's
+        // data time is azimuth-shifted by +1 s (Häppchen 13.6) for this
+        // due-north target, so the last plot lands at t = 41 ⇒ ticks 4 … 44.
+        assert_eq!(snaps.len(), 11);
         for (k, (time, _)) in snaps.iter().enumerate() {
             let expected = (k as f64 + 1.0) * 4.0;
             assert!(

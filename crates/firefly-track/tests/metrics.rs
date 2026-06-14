@@ -8,7 +8,7 @@
 //!
 //! REQ: FR-TRK-007
 
-use firefly_core::{Sensor, SensorId, TargetId, Timestamp};
+use firefly_core::{Sensor, SensorId, TargetId};
 use firefly_geo::{Enu, LocalFrame, Wgs84};
 use firefly_sim::{Leg, Radar, RadarParams, Scenario, State, Target};
 use firefly_track::{Rmse, SensorErrorModel, TrackContinuity, Tracker, TrackerConfig};
@@ -71,22 +71,13 @@ fn single_target_quality_meets_thresholds() {
     let mut rmse = Rmse::new();
     let mut continuity = TrackContinuity::new();
 
-    // Walk the scenario scan by scan (one radar, Pd = 1 → one plot per scan
-    // while the target is alive). Group plots by their scan time.
-    let mut k = 0;
-    loop {
-        let t = k as f64 * scan_period;
-        if t > duration + 1e-9 {
-            break;
-        }
-        let scan: Vec<_> = plots
-            .iter()
-            .filter(|p| (p.time.as_secs() - t).abs() < 1e-6)
-            .cloned()
-            .collect();
-        tracker.process_scan(Timestamp(t), &scan);
+    // Walk the plots one at a time, each at its own azimuth-dependent data
+    // time (ADR 0013, Häppchen 13.6) — the asynchronous per-plot path.
+    for p in &plots {
+        tracker.process_plot(p);
 
         // Truth at this instant: constant-velocity, due north from `east0`.
+        let t = p.time.as_secs();
         let truth_e = east0;
         let truth_n = speed * t;
 
@@ -106,7 +97,6 @@ fn single_target_quality_meets_thresholds() {
             }
             None => continuity.observe(None),
         }
-        k += 1;
     }
 
     let position_rmse = rmse.value().expect("the target should be tracked");

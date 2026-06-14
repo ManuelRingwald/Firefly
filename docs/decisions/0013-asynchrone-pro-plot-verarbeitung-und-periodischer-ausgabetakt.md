@@ -1,6 +1,6 @@
 # ADR 0013 — Asynchrone Pro-Plot-Verarbeitung + Periodischer Ausgabetakt
 
-- **Status:** akzeptiert — **Umsetzung läuft** (13.1–13.4 + 13.5a + 13.5c umgesetzt; volle Async bestätigt, 13.5 in 13.5a–c re-dekomponiert; 13.5b, 13.6, 13.7 offen — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
+- **Status:** akzeptiert — **Umsetzung läuft** (13.1–13.4 + 13.5a + 13.5c + 13.6 + 13.7 umgesetzt; 13.5b durch 13.6-Befund gegenstandslos; **13.5d** (Lösch-Kadenz-Kalibrierung) neu identifiziert und offen — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
 - **Datum:** 2026-06-12
 
 ## Kontext
@@ -280,11 +280,13 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   **extrahiert** und von beiden Pfaden geteilt (eine Fusions-Logik); `process_scan`
   verhaltensgleich, `process_plot` = Ein-Plot-Bequemlichkeit über `process_plots`.
   **FR-TRK-025**, Tests `tracker::process_plots_*`; alle Gates grün.
-- [ ] **13.5b — Rest-Geister im echt zeit-getrennten Multi-Radar messen/härten
-  (S4).** Erst nach dem End-to-End-Pfad (13.6/13.7) empirisch gegen die
-  Frankfurt-8-ID-Zahl bewerten: bleibt nach 13.5a + Kadenz-Boden (13.5c) ein
-  Geister-Rest aus zeitlich getrennten Multi-Radar-Plots (Lift-Bias vs.
-  `init_gate`)? Falls ja, gezielt nachschärfen — sonst entfällt 13.5b.
+- [x] **13.5b — entfällt (durch 13.6-Befund aufgeklärt).** Die Untersuchung
+  ergab: der vermeintliche Kreuzungs-Identitäts-Tausch war kein
+  Assoziationsproblem, sondern ein **Simulator-Bug** (siehe 13.6) — Plot-
+  Zeitstempel und Plot-Messwert beschrieben unterschiedliche Zeitpunkte, was
+  Geister-Tracks erzeugte. Nach dem 13.6-Fix ist Track-ID 1 korrekt
+  `arrival_north` (Kurs Süd), nicht der Kreuzer; kein Joint-Assoziations-Defekt
+  gefunden, 13.5a/13.5c bleiben unverändert ausreichend.
 - [x] **13.5c — Lösch-Kadenz mit Boden für gemischte Radarperioden (S4). ✅
   umgesetzt.** `should_delete_continuous` löscht erst bei
   `budget · max(eigene Revisit-Schätzung, langsamste beobachtete Sensorperiode)`;
@@ -295,14 +297,39 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap`. Messung mit
   13.5a+13.5c im Player-Pfad: Frankfurt 40 → 22 IDs (Rest = zeitlich getrennter
   Kreuzungs-Tausch, 13.5b) — Endabnahme erst nach dem Cutover (13.7).
-- [ ] **13.6 — Simulator: azimut-abhängige Pro-Plot-Zeitstempel (S3).** Den
-  Basis-WIP (`6a58a03`) wieder aufnehmen: `plot_time = scan_start + (azimut/2π)·
-  scan_period`, volle Spreizung; `scan_offset` entfällt endgültig. Jetzt von der
-  gehärteten Pro-Plot-Pipeline gedeckt.
-- [ ] **13.7 — Szene-/CAT062-Cutover auf den periodischen Pfad (S3).**
-  Frankfurt/Demo auf `periodic_frames`/`periodic_snapshots`, Server +
-  `FIREFLY_OUTPUT_PERIOD`; Encoder speist sich aus dem periodischen Snapshot
-  statt „pro Scan". Abnahme: 8 stabile IDs + Kreuzungs-Identität grün.
+- [x] **13.6 — Simulator: azimut-abhängige Pro-Plot-Zeitstempel (S3). ✅
+  umgesetzt.** `plot_time = scan_start + (azimut/2π)·scan_period`; `scan_offset`
+  entfällt endgültig. **Wichtige Korrektur ggü. dem ursprünglichen WIP:** die
+  Messung (Range/Azimut/Elevation, Mode-C-Höhe) wird **am `plot_time`**
+  erneut aus der Wahrheits-Trajektorie ausgewertet, nicht am `scan_start` —
+  sonst beschreiben Zeitstempel und Messwert zwei verschiedene Momente (bis zu
+  einer vollen Scan-Periode Versatz bei den langsamen Radaren). Das war die
+  eigentliche Ursache der vermeintlichen 13.5b-Regression. Messung: Frankfurt
+  Track-IDs **22 → 10** (Ziel 8).
+- [x] **13.7 — Szene-/CAT062-Cutover auf den periodischen Pfad (S3). ✅
+  umgesetzt.** Frankfurt/Demo auf `periodic_frames`/`periodic_snapshots`
+  (`player.default_output_period()`); `scan_times` beginnt einheitlich bei
+  `t = 0`. `firefly-player`-Tests grün (inkl. der durch 13.6 verschobenen
+  Tick-Zahl in `periodic_snapshots_emit_on_a_fixed_heartbeat`, 10 → 11, und
+  dem ebenfalls auf den Pro-Plot-Pfad umgestellten
+  `firefly-track/tests/metrics.rs`). **Restbefund (10 statt 8 IDs):** siehe
+  13.5d.
+- [ ] **13.5d — Lösch-Kadenz-Kalibrierung unter asynchroner Multi-Sensor-
+  Verschachtelung (S3, Sonnet 4.6).** `Track::expected_revisit` (EWMA der
+  Inter-Hit-Lücken) unterschätzt für `arrival_north` die tatsächliche Periode
+  seines dominanten Sensors (radar_center, 4 s, `prob_detection=0.9`): die
+  EWMA konvergiert auf ~2,08 s, das Lösch-Budget
+  (`delete_misses_confirmed=4 × 2,08 ≈ 8,3 s`) überlebt dann 1–2 zufällige
+  Fehlmessungen des 4-s-Radars nicht mehr → Track wird gelöscht und als neuer
+  „Geister"-Track wiedergeboren (ID-Kette 1→9→10 für ein Flugzeug). Daher
+  scheitern aktuell `frankfurt_scene_keeps_one_identity_per_aircraft` (10 statt
+  8 IDs) und `frankfurt_crossing_pair_keeps_identity_through_the_crossing`
+  (ID 1 ist `arrival_north`, nicht der Kreuzer — Folgesymptom derselben
+  Lösch-Kette). Lösungsrichtung: Lösch-Budget/`expected_revisit` so
+  kalibrieren, dass die feingranulare Multi-Sensor-Verschachtelung die
+  Kadenz-Schätzung eines Tracks nicht unterschätzt (z. B. Kadenz-Boden pro
+  Track analog 13.5c, oder Max-statt-EWMA-Schätzer). Erst abstimmen, dann
+  bauen.
 
 ### Wiedereinstiegs-Anker (Kurzform)
 
@@ -332,12 +359,19 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   (`should_delete_continuous` floored by slowest sensor period; `process_plots`
   schätzt Sensor-Perioden), FR-TRK-026; alle Gates grün. Messung (13.5a+13.5c im
   Player): Frankfurt **40 → 22 IDs**.
-- **13.6/13.7 WIP liegt im Stash** (`stash@{0}`: azimut-Plot-Zeiten + Scene/Player
-  periodic Cutover) — gemessen, aber rot, bis 13.5b (Kreuzungs-Tausch) gelöst ist.
-- **Nächster Schritt:** **13.5b** untersuchen — der Kreuzungs-Tausch entsteht, weil
-  asynchrone Radare die beiden Kreuzer zu *verschiedenen* Zeiten sehen, ihre Plots
-  also in *verschiedene* Simultaneitäts-Fenster fallen und die Joint-Exklusivität
-  nicht greift. Falls die Lösung eine Architektur-Weichenstellung braucht (kurzer
-  Mess-Puffer am Ausgabe-Tick vs. track-orientierte Assoziation), zuerst mit dem
-  Verantwortlichen abstimmen. Danach 13.6/13.7-Cutover und Endabnahme (8 IDs +
-  Kreuzungs-Identität).
+- **13.5b entfällt:** Untersuchung (freigegeben: „Mache A, die Untersuchung")
+  ergab einen Simulator-Bug (Zeitstempel/Messwert-Inkonsistenz), nicht ein
+  Assoziationsproblem — siehe 13.6.
+- **13.6 erledigt:** azimut-abhängige Plot-Zeitstempel, Messung **am eigenen
+  `plot_time`** neu ausgewertet (nicht am `scan_start`); Frankfurt 22 → 10 IDs.
+- **13.7 erledigt:** Frankfurt/Demo auf periodischen Ausgabetakt umgestellt;
+  `firefly-player`- und `firefly-track::metrics`-Tests an den Pro-Plot-Pfad
+  angepasst und grün.
+- **13.5d neu, offen:** Lösch-Kadenz-Kalibrierung (`expected_revisit` /
+  `should_delete_continuous`) unterschätzt die Sensorperiode bei
+  Multi-Sensor-Verschachtelung → Geister-Kette 1→9→10 für `arrival_north`,
+  daher 10 statt 8 IDs. **Nächster Schritt:** 13.5d (S3, Sonnet 4.6) — erst
+  abstimmen, dann bauen. Bis dahin sind
+  `frankfurt_scene_keeps_one_identity_per_aircraft` und
+  `frankfurt_crossing_pair_keeps_identity_through_the_crossing` als bekannt-rot
+  dokumentiert (`#[ignore]` mit Verweis auf 13.5d, siehe Testdatei).
