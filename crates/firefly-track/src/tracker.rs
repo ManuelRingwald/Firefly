@@ -75,6 +75,17 @@ pub struct SensorModel {
     pub frame: LocalFrame,
     /// The tracker's assumed measurement noise for this sensor.
     pub error: SensorErrorModel,
+    /// This sensor's antenna revolution period (scan period), seconds.
+    ///
+    /// A real radar's revolution period is a known operational parameter, not
+    /// something to be discovered at runtime (ARTAS and comparable multi-sensor
+    /// trackers carry it in their sensor declaration data). The asynchronous
+    /// lifecycle ([`should_delete_continuous`]) uses the slowest configured
+    /// period across all registered sensors as its **cadence floor** (ADR 0013,
+    /// Häppchen 13.5d) — replacing the online estimate from 13.5c, which a
+    /// rotating radar's azimuth-spread plot times (Häppchen 13.6) made too
+    /// short (it captured sub-revolution plot gaps, not the revolution itself).
+    pub scan_period: f64,
 }
 
 /// Tunable parameters of the tracker plus the sensor geometry it fuses.
@@ -147,17 +158,36 @@ impl TrackerConfig {
         }
     }
 
-    /// Register one sensor (its frame and assumed noise). Chainable.
-    pub fn with_sensor(mut self, id: SensorId, frame: LocalFrame, error: SensorErrorModel) -> Self {
-        self.sensors.insert(id, SensorModel { frame, error });
+    /// Register one sensor (its frame, assumed noise, and scan period).
+    /// Chainable.
+    pub fn with_sensor(
+        mut self,
+        id: SensorId,
+        frame: LocalFrame,
+        error: SensorErrorModel,
+        scan_period: f64,
+    ) -> Self {
+        self.sensors.insert(
+            id,
+            SensorModel {
+                frame,
+                error,
+                scan_period,
+            },
+        );
         self
     }
 
     /// Single-sensor convenience: the tracking frame *is* the sensor's own frame
     /// (so the lift into the common frame is the identity). This reproduces the
     /// pre-M4 single-radar behaviour.
-    pub fn single_sensor(id: SensorId, frame: LocalFrame, error: SensorErrorModel) -> Self {
-        Self::new(frame).with_sensor(id, frame, error)
+    pub fn single_sensor(
+        id: SensorId,
+        frame: LocalFrame,
+        error: SensorErrorModel,
+        scan_period: f64,
+    ) -> Self {
+        Self::new(frame).with_sensor(id, frame, error, scan_period)
     }
 }
 
@@ -465,8 +495,9 @@ impl Tracker {
     /// For each opportunity the steps mirror the batch path: **predict** every
     /// track to the group's time, **fuse** the plots, then run the
     /// **time-continuous** confirm/delete lifecycle (Häppchen 13.2) — governed
-    /// by each track's own measured revisit interval, not a globally-estimated
-    /// feed cadence (see [`should_delete_continuous`]).
+    /// by each track's own measured revisit interval, floored by the slowest
+    /// **configured** sensor scan period (Häppchen 13.5d, see
+    /// [`should_delete_continuous`]).
     ///
     /// Determinism (ADR 0003): the plots are processed in a total order (data
     /// time, then sensor id) independent of their input order, so the same set
@@ -484,6 +515,19 @@ impl Tracker {
         let delete_tentative = self.config.delete_misses_tentative;
         let delete_confirmed = self.config.delete_misses_confirmed;
         let tracking_frame = self.config.tracking_frame;
+
+        // Deletion **cadence floor** (ADR 0013, Häppchen 13.5d): the slowest
+        // configured sensor scan period across the whole feed. A track is never
+        // deleted faster than the slowest radar would revisit it, no matter how
+        // briefly a faster radar's azimuth-spread plots make its own revisit
+        // estimate look. Configured rather than estimated (13.5c estimated it
+        // from inter-plot gaps, which 13.6's azimuth spreading made too short).
+        let cadence = self
+            .config
+            .sensors
+            .values()
+            .map(|s| s.scan_period)
+            .fold(0.0, f64::max);
 
         // Total, input-order-independent processing order: by data time, ties
         // broken by sensor id (determinism, ADR 0003).
@@ -530,26 +574,6 @@ impl Tracker {
                         .push((p, CartesianMeasurement { z, r }));
                 }
             }
-
-            // Refresh the per-sensor scan-period estimate from this opportunity,
-            // then take the slowest known period as the deletion **cadence
-            // floor** (ADR 0013, Häppchen 13.5c — the time-continuous analog of
-            // ADR 0012's `coast_reference`). Without it a track hit briefly by a
-            // fast sensor settles a short revisit estimate and is then churned
-            // away during the longer gap until a slow radar revisits it; flooring
-            // by the slowest observed sensor period keeps it alive. `0` until any
-            // sensor has been seen twice, so a fresh track still falls back to the
-            // nominal revisit (the 13.2 behaviour).
-            for &sensor in by_sensor.keys() {
-                if let Some(&last) = self.sensor_last_scan.get(&sensor) {
-                    let period = t - last;
-                    if period > 0.0 {
-                        self.sensor_period.insert(sensor, period);
-                    }
-                }
-                self.sensor_last_scan.insert(sensor, t);
-            }
-            let cadence = self.sensor_period.values().copied().fold(0.0, f64::max);
 
             // 1. Predict every track to this opportunity's time; refresh the
             //    per-opportunity sensor provenance.
@@ -750,17 +774,20 @@ fn should_delete(
 }
 
 /// Whether a track should be deleted on the **asynchronous** path (ADR 0013,
-/// Häppchen 13.2 + 13.5c). The missed-revisit budget counts the track's **own**
+/// Häppchen 13.2 + 13.5d). The missed-revisit budget counts the track's **own**
 /// revisit intervals ([`Track::expected_revisit`]), floored by the slowest
-/// observed sensor `cadence`: a track lives or dies by how overdue *its* next
-/// update is, but is never deleted faster than the feed's slowest radar would
-/// revisit it. This is the time-continuous analog of [`should_delete`]'s
-/// `coast_reference` — it stops a track that a fast sensor saw briefly (short
-/// own-revisit estimate) from being churned away across the longer gap until a
-/// slow radar revisits it (Häppchen 13.5c). A track that has not yet measured
-/// its own cadence and sees no sensor period yet falls back to
-/// [`NOMINAL_REVISIT_INTERVAL`]; a freshly hit track (`update_age == 0`) is
-/// never deleted.
+/// **configured** sensor scan period `cadence`: a track lives or dies by how
+/// overdue *its* next update is, but is never deleted faster than the feed's
+/// slowest radar would revisit it. This is the time-continuous analog of
+/// [`should_delete`]'s `coast_reference` — it stops a track that a fast sensor
+/// saw briefly (short own-revisit estimate) from being churned away across the
+/// longer gap until a slow radar revisits it. Häppchen 13.5c floored this by an
+/// *online-estimated* sensor period, which 13.6's azimuth-spread plot times made
+/// too short (it picked up sub-revolution gaps between sensors instead of a
+/// sensor's own revolution); 13.5d floors it by the *configured*
+/// [`SensorModel::scan_period`] instead. A track that has not yet measured its
+/// own cadence falls back to [`NOMINAL_REVISIT_INTERVAL`]; a freshly hit track
+/// (`update_age == 0`) is never deleted.
 fn should_delete_continuous(
     track: &Track,
     budget_tentative: u32,
@@ -794,6 +821,7 @@ mod tests {
             SensorId(1),
             frame(),
             SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08),
+            4.0,
         )
     }
 
@@ -1047,8 +1075,8 @@ mod tests {
         let frame_b = LocalFrame::new(Wgs84::from_degrees(47.7, 11.6, 0.0)); // ~55 km SE
         let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
         let cfg = TrackerConfig::new(tracking)
-            .with_sensor(SensorId(1), frame_a, error)
-            .with_sensor(SensorId(2), frame_b, error);
+            .with_sensor(SensorId(1), frame_a, error, 4.0)
+            .with_sensor(SensorId(2), frame_b, error, 4.0);
         let mut tracker = Tracker::new(cfg);
 
         let target = Wgs84::from_degrees(48.1, 11.3, 0.0);
@@ -1096,8 +1124,8 @@ mod tests {
         let frame_b = LocalFrame::new(Wgs84::from_degrees(47.7, 11.6, 0.0));
         let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
         let cfg = TrackerConfig::new(tracking)
-            .with_sensor(SensorId(1), frame_a, error)
-            .with_sensor(SensorId(2), frame_b, error);
+            .with_sensor(SensorId(1), frame_a, error, 4.0)
+            .with_sensor(SensorId(2), frame_b, error, 4.0);
         let mut tracker = Tracker::new(cfg);
 
         let target = Wgs84::from_degrees(48.1, 11.3, 0.0);
@@ -1472,8 +1500,8 @@ mod tests {
     fn process_plot_two_async_sensors_make_one_track() {
         let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
         let cfg = TrackerConfig::new(frame())
-            .with_sensor(SensorId(1), frame(), error)
-            .with_sensor(SensorId(2), frame(), error);
+            .with_sensor(SensorId(1), frame(), error, 4.0)
+            .with_sensor(SensorId(2), frame(), error, 4.0);
         let mut tracker = Tracker::new(cfg);
 
         // One stationary target 50 km due north; the two sensors alternate every
@@ -1513,8 +1541,8 @@ mod tests {
         let frame_b = LocalFrame::new(Wgs84::from_degrees(47.7, 11.6, 0.0)); // ~55 km SE
         let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
         let cfg = TrackerConfig::new(tracking)
-            .with_sensor(SensorId(1), frame_a, error)
-            .with_sensor(SensorId(2), frame_b, error);
+            .with_sensor(SensorId(1), frame_a, error, 4.0)
+            .with_sensor(SensorId(2), frame_b, error, 4.0);
         let mut tracker = Tracker::new(cfg);
 
         let target = Wgs84::from_degrees(48.1, 11.3, 0.0);
@@ -1603,16 +1631,17 @@ mod tests {
 
     /// A track briefly seen by a fast sensor settles a short own-revisit
     /// estimate; once the fast sensor drops out, only a slow (12 s) sensor still
-    /// covers it. The **cadence floor** (Häppchen 13.5c) keeps it alive across
-    /// the long gap instead of churning it away — without the floor the short
-    /// revisit estimate (≈2 s, confirmed budget 4) would delete it after ≈8 s of
-    /// coast. REQ: FR-TRK-023, FR-TRK-026
+    /// covers it. The **cadence floor** (Häppchen 13.5d, configured sensor scan
+    /// periods) keeps it alive across the long gap instead of churning it
+    /// away — without the floor the short revisit estimate (≈2 s, confirmed
+    /// budget 4) would delete it after ≈8 s of coast. REQ: FR-TRK-023,
+    /// FR-TRK-026
     #[test]
     fn process_plots_cadence_floor_survives_a_slow_sensor_gap() {
         let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
         let cfg = TrackerConfig::new(frame())
-            .with_sensor(SensorId(1), frame(), error) // fast sensor
-            .with_sensor(SensorId(2), frame(), error); // slow sensor
+            .with_sensor(SensorId(1), frame(), error, 2.0) // fast sensor
+            .with_sensor(SensorId(2), frame(), error, 12.0); // slow sensor
         let mut tracker = Tracker::new(cfg);
 
         let fast =

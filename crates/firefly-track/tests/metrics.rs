@@ -66,6 +66,7 @@ fn single_target_quality_meets_thresholds() {
         SensorId(1),
         LocalFrame::new(origin),
         SensorErrorModel::from_range_and_azimuth_deg(sigma_range, sigma_azimuth_deg),
+        scan_period,
     ));
 
     let mut rmse = Rmse::new();

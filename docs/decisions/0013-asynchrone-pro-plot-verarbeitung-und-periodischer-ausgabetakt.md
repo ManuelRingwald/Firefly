@@ -1,6 +1,6 @@
 # ADR 0013 — Asynchrone Pro-Plot-Verarbeitung + Periodischer Ausgabetakt
 
-- **Status:** akzeptiert — **Umsetzung läuft** (13.1–13.4 + 13.5a + 13.5c + 13.6 + 13.7 umgesetzt; 13.5b durch 13.6-Befund gegenstandslos; **13.5d** (Lösch-Kadenz-Kalibrierung) neu identifiziert und offen — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
+- **Status:** akzeptiert — **Umsetzung abgeschlossen** (13.1–13.7 inkl. 13.5d umgesetzt; 13.5b durch 13.6-Befund gegenstandslos — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
 - **Datum:** 2026-06-12
 
 ## Kontext
@@ -314,22 +314,35 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   dem ebenfalls auf den Pro-Plot-Pfad umgestellten
   `firefly-track/tests/metrics.rs`). **Restbefund (10 statt 8 IDs):** siehe
   13.5d.
-- [ ] **13.5d — Lösch-Kadenz-Kalibrierung unter asynchroner Multi-Sensor-
-  Verschachtelung (S3, Sonnet 4.6).** `Track::expected_revisit` (EWMA der
-  Inter-Hit-Lücken) unterschätzt für `arrival_north` die tatsächliche Periode
-  seines dominanten Sensors (radar_center, 4 s, `prob_detection=0.9`): die
-  EWMA konvergiert auf ~2,08 s, das Lösch-Budget
-  (`delete_misses_confirmed=4 × 2,08 ≈ 8,3 s`) überlebt dann 1–2 zufällige
-  Fehlmessungen des 4-s-Radars nicht mehr → Track wird gelöscht und als neuer
-  „Geister"-Track wiedergeboren (ID-Kette 1→9→10 für ein Flugzeug). Daher
-  scheitern aktuell `frankfurt_scene_keeps_one_identity_per_aircraft` (10 statt
-  8 IDs) und `frankfurt_crossing_pair_keeps_identity_through_the_crossing`
-  (ID 1 ist `arrival_north`, nicht der Kreuzer — Folgesymptom derselben
-  Lösch-Kette). Lösungsrichtung: Lösch-Budget/`expected_revisit` so
-  kalibrieren, dass die feingranulare Multi-Sensor-Verschachtelung die
-  Kadenz-Schätzung eines Tracks nicht unterschätzt (z. B. Kadenz-Boden pro
-  Track analog 13.5c, oder Max-statt-EWMA-Schätzer). Erst abstimmen, dann
-  bauen.
+- [x] **13.5d — Lösch-Kadenz-Kalibrierung unter asynchroner Multi-Sensor-
+  Verschachtelung (S3, Opus 4.8). ✅ umgesetzt (Option B).** Befund: sowohl
+  `Track::expected_revisit` (EWMA der Inter-Hit-Lücken, konvergiert für
+  `arrival_north` auf ~2,08 s statt der tatsächlichen 4-s-Periode seines
+  dominanten Sensors) als auch 13.5cs online geschätzter `sensor_period`
+  (`process_plots` misst `t - sensor_last_scan`, was unter 13.6s
+  azimut-abhängigen Plot-Zeiten Sub-Umlauf-Lücken zwischen Sensoren erfasst,
+  nicht den Umlauf eines Sensors selbst) waren durch 13.6 verfälscht — der
+  Kadenz-Boden kollabierte auf ~2 s, das Lösch-Budget
+  (`4 × 2,08 ≈ 8,3 s`) überlebte 1–2 zufällige Fehlmessungen des 4-s-Radars
+  nicht mehr → Track gelöscht und als „Geister"-Track wiedergeboren
+  (ID-Kette 1→9→10 für `arrival_north`). **Entscheidung (Option B, wie
+  ARTAS/Sensor-Deklarationsdaten):** die Antennenumlaufzeit ist eine
+  Deployment-Konfiguration, kein Laufzeit-Schätzwert. Jeder Sensor bekommt ein
+  konfiguriertes `SensorModel::scan_period`; `process_plots` bildet daraus
+  einmalig `cadence = max(scan_period über alle konfigurierten Sensoren)` als
+  Kadenz-Boden für `should_delete_continuous` — die 13.5c-Online-Schätzung
+  (`sensor_period`/`sensor_last_scan` im `process_plots`-Pfad) entfällt. Der
+  Batch-Pfad (`process_scan`/`should_delete`/ADR 0012 `coast_reference`,
+  inkl. seiner eigenen `sensor_period`/`sensor_last_scan`/`prev_scan_time`)
+  ist unverändert. **FR-TRK-026** (aktualisiert), Test
+  `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap` (jetzt mit
+  konfigurierten Perioden 2 s/12 s statt online geschätzter). **Messung:
+  Frankfurt 22 → 10 → 8 IDs** (Ziel erreicht);
+  `frankfurt_scene_keeps_one_identity_per_aircraft` und
+  `frankfurt_crossing_pair_keeps_identity_through_the_crossing` sind wieder
+  grün (ohne `#[ignore]`) — die Kreuzungs-Paar-IDs verschoben sich dabei von
+  1/2 auf 5/4 (Track-1 ist jetzt durchgehend `arrival_north`, kein
+  Geister-Artefakt mehr).
 
 ### Wiedereinstiegs-Anker (Kurzform)
 
@@ -367,11 +380,10 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
 - **13.7 erledigt:** Frankfurt/Demo auf periodischen Ausgabetakt umgestellt;
   `firefly-player`- und `firefly-track::metrics`-Tests an den Pro-Plot-Pfad
   angepasst und grün.
-- **13.5d neu, offen:** Lösch-Kadenz-Kalibrierung (`expected_revisit` /
-  `should_delete_continuous`) unterschätzt die Sensorperiode bei
-  Multi-Sensor-Verschachtelung → Geister-Kette 1→9→10 für `arrival_north`,
-  daher 10 statt 8 IDs. **Nächster Schritt:** 13.5d (S3, Sonnet 4.6) — erst
-  abstimmen, dann bauen. Bis dahin sind
-  `frankfurt_scene_keeps_one_identity_per_aircraft` und
-  `frankfurt_crossing_pair_keeps_identity_through_the_crossing` als bekannt-rot
-  dokumentiert (`#[ignore]` mit Verweis auf 13.5d, siehe Testdatei).
+- **13.5d erledigt:** Lösch-Kadenz-Boden auf **konfigurierte**
+  `SensorModel::scan_period` umgestellt (Option B, ARTAS-Sensor-Deklarations-
+  Stil) statt der durch 13.6 verfälschten Online-Schätzung; `process_plots`
+  bildet `cadence = max(scan_period über alle konfigurierten Sensoren)`.
+  Frankfurt **22 → 10 → 8 IDs**; beide zuvor `#[ignore]`-markierten
+  Frankfurt-Tests sind wieder grün (Kreuzungs-Paar jetzt IDs 5/4 statt 1/2).
+  Damit ist ADR 0013 (13.1–13.7) vollständig umgesetzt.

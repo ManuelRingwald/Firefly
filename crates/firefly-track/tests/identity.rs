@@ -69,6 +69,7 @@ fn tracker_config() -> TrackerConfig {
         SensorId(1),
         frame,
         SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0),
+        4.0,
     );
     cfg.process_noise = ProcessNoise::new(60.0);
     cfg

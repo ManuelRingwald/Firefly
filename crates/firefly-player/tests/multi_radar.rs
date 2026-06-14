@@ -62,8 +62,8 @@ fn two_radars_one_aircraft_yield_one_stable_track() {
 
     let error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
     let config = TrackerConfig::new(LocalFrame::new(origin))
-        .with_sensor(SensorId(1), LocalFrame::new(origin), error)
-        .with_sensor(SensorId(2), LocalFrame::new(site_b), error);
+        .with_sensor(SensorId(1), LocalFrame::new(origin), error, 4.0)
+        .with_sensor(SensorId(2), LocalFrame::new(site_b), error, 4.0);
 
     let frames = Player::new(&scenario, config).frames();
 

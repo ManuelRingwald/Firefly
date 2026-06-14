@@ -73,6 +73,7 @@ fn new_tracker() -> Tracker {
         SensorId(1),
         frame,
         SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08),
+        4.0,
     ))
 }
 

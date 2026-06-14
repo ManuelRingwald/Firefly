@@ -5,7 +5,7 @@
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
 - **Zuletzt aktualisiert:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
-  **ADR 0013 Häppchen 13.1–13.4 + 13.5a + 13.5c + 13.6 + 13.7 umgesetzt.**
+  **ADR 0013 vollständig umgesetzt (13.1–13.7 inkl. 13.5d).**
   `Tracker::process_plot` (async Pro-Plot-Verarbeitung) additiv,
   zeit-kontinuierlicher Lebenszyklus, `Tracker::snapshot_at(t)` (read-only
   Zeit-Projektion), der **periodische Ausgabetakt** im Player
@@ -15,18 +15,19 @@
   async-Lösch-Lebenszyklus** (FR-TRK-026), **13.6: azimut-abhängige
   Pro-Plot-Zeitstempel im Simulator** — Messung wird jetzt am eigenen
   `plot_time` (nicht am `scan_start`) neu ausgewertet, was den vermeintlichen
-  13.5b-Kreuzungs-Tausch als Simulator-Bug auflöste (13.5b entfällt) — und
+  13.5b-Kreuzungs-Tausch als Simulator-Bug auflöste (13.5b entfällt) —,
   **13.7: Frankfurt/Demo-Szene + Player auf den periodischen Ausgabetakt
-  umgestellt**; `process_scan`/Batch verhaltensgleich, alle Gates grün.
-  Frankfurt Track-IDs **22 → 10** (Ziel 8).
-  **Neu identifiziert, offen: Häppchen 13.5d** (Lösch-Kadenz-Kalibrierung —
-  `expected_revisit`/`should_delete_continuous` unterschätzen die Sensorperiode
-  unter asynchroner Multi-Sensor-Verschachtelung, Geister-Kette für
-  `arrival_north`). Die beiden betroffenen Frankfurt-Tests
+  umgestellt** und **13.5d: Lösch-Kadenz-Boden auf konfigurierte
+  `SensorModel::scan_period` umgestellt** (Option B, ARTAS-Sensor-
+  Deklarations-Stil) statt der durch 13.6 verfälschten Online-Schätzung —
+  `process_plots`/`should_delete_continuous` only, Batch-Pfad unverändert.
+  `process_scan`/Batch verhaltensgleich, alle Gates grün.
+  **Frankfurt Track-IDs 22 → 10 → 8 (Ziel erreicht).** Beide zuvor
+  `#[ignore]`-markierten Frankfurt-Tests
   (`frankfurt_scene_keeps_one_identity_per_aircraft`,
-  `frankfurt_crossing_pair_keeps_identity_through_the_crossing`) sind mit
-  `#[ignore]` und Verweis auf 13.5d markiert, bis das gelöst ist. **Nächster
-  Schritt: 13.5d (S3, Sonnet 4.6) — erst abstimmen, dann bauen.**
+  `frankfurt_crossing_pair_keeps_identity_through_the_crossing`) sind wieder
+  grün; das Kreuzungs-Paar trägt jetzt die IDs 5/4 (statt 1/2 — Track-1 ist
+  durchgehend `arrival_north`, kein Geister-Artefakt mehr).
 - **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
   Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
   I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches
@@ -47,7 +48,7 @@
 > Schnittstellen-Probleme. Das ADR-0013-Vorhaben (siehe nächster Absatz)
 > bleibt der fachlich nächste Schritt.
 
-> 🔭 **ADR 0013 (asynchrone Pro-Plot-Verarbeitung) — Umsetzung läuft.**
+> 🔭 **ADR 0013 (asynchrone Pro-Plot-Verarbeitung) — Umsetzung abgeschlossen.**
 > Die Architektur-Entscheidung ist **angenommen** (`docs/decisions/0013-…md`).
 > **13.1 + 13.2 sind umgesetzt:** `Tracker::process_plot` verarbeitet einen
 > einzelnen Plot zu seiner eigenen Datenzeit (prädizieren → gegen Live-Schätzung
@@ -87,17 +88,24 @@
 > weggelöscht und neu geboren. FR-TRK-026, Test
 > `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap`. **Messung
 > (13.5a+13.5c im Player-Pfad): Frankfurt 40 → 22 IDs.**
-> **Nächster Schritt: Häppchen 13.5b** — der verbleibende Rest ist der
-> **Kreuzungs-Tausch**: asynchrone Radare sehen die beiden Kreuzer zu
-> *verschiedenen* Zeiten, ihre Plots fallen also in *verschiedene*
-> Simultaneitäts-Fenster, sodass die Joint-Exklusivität (13.5a) nicht greift.
-> Erst untersuchen; falls eine Architektur-Weichenstellung nötig ist (kurzer
-> Mess-Puffer am Ausgabe-Tick vs. track-orientierte Assoziation), zuerst
-> abstimmen. **13.6/13.7-WIP** (azimut-Plot-Zeiten + Scene/Player-Cutover) liegt
-> in `stash@{0}` — gemessen, aber rot bis 13.5b. Neuer Häppchen-Plan
-> (**13.1–13.4, 13.5a/c, 13.5b, 13.6, 13.7**) im Abschnitt *„Umsetzungsstand /
-> Wiedereinstieg"* der ADR 0013. Vorgehen wie immer: *erst erklären, dann bauen*
-> (CLAUDE.md §2).
+> **13.5b entfällt** (Untersuchung ergab den 13.6-Simulator-Bug, kein
+> Assoziationsproblem). **13.6 ist umgesetzt:** azimut-abhängige
+> Pro-Plot-Zeitstempel im Simulator, Messung am eigenen `plot_time` neu
+> ausgewertet; Frankfurt 22 → 10 IDs. **13.7 ist umgesetzt:** Frankfurt/Demo +
+> Player auf `periodic_frames`/`periodic_snapshots` umgestellt.
+> **13.5d ist umgesetzt:** der Kadenz-Boden in `should_delete_continuous`
+> verwendet jetzt das **konfigurierte** `SensorModel::scan_period` (Maximum
+> über alle Sensoren) statt der durch 13.6 verfälschten Online-Schätzung aus
+> 13.5c (Option B, ARTAS-Sensor-Deklarations-Stil — abgestimmt mit dem
+> Verantwortlichen). FR-TRK-026 aktualisiert, Test
+> `tracker::process_plots_cadence_floor_survives_a_slow_sensor_gap` jetzt mit
+> konfigurierten Perioden (2 s/12 s). **Messung: Frankfurt 22 → 10 → 8 IDs**
+> (Ziel erreicht) — beide zuvor `#[ignore]`-markierten Frankfurt-Tests sind
+> wieder grün. Damit ist ADR 0013 (13.1–13.7) vollständig umgesetzt. Details im
+> Abschnitt *„Umsetzungsstand / Wiedereinstieg"* der ADR 0013. Nächster
+> fachlicher Schritt: Betriebs-Härtung (§7 Charter) oder
+> Multicast-Feed-Sicherheit — neuer Schritt wie immer erst abstimmen, dann
+> bauen (CLAUDE.md §2).
 
 - **Diese Sitzung (Aufräumen + Merge):**
   - Offener Branch endete mit unfertigem ADR-0013-WIP, der ein Qualitäts-Gate verletzte

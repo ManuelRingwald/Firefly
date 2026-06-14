@@ -24,6 +24,7 @@ pub const DEMO_ORIGIN: (f64, f64) = (48.0, 11.0);
 fn demo_player() -> Player {
     let origin = Wgs84::from_degrees(DEMO_ORIGIN.0, DEMO_ORIGIN.1, 0.0);
     let radar = Radar::new(Sensor::new(SensorId(1), origin), RadarParams::default());
+    let scan_period = radar.params.scan_period;
 
     let scenario = Scenario::new(origin)
         .with_duration(180.0)
@@ -45,6 +46,7 @@ fn demo_player() -> Player {
         SensorId(1),
         LocalFrame::new(origin),
         SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0),
+        scan_period,
     );
     tracker.process_noise = ProcessNoise::new(60.0);
     Player::new(&scenario, tracker)
@@ -171,9 +173,9 @@ fn frankfurt_player() -> Player {
 
     let error = SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0);
     let mut tracker = TrackerConfig::new(LocalFrame::new(origin))
-        .with_sensor(SensorId(1), LocalFrame::new(site_center), error)
-        .with_sensor(SensorId(2), LocalFrame::new(site_west), error)
-        .with_sensor(SensorId(3), LocalFrame::new(site_northeast), error);
+        .with_sensor(SensorId(1), LocalFrame::new(site_center), error, 4.0)
+        .with_sensor(SensorId(2), LocalFrame::new(site_west), error, 10.0)
+        .with_sensor(SensorId(3), LocalFrame::new(site_northeast), error, 12.0);
     tracker.process_noise = ProcessNoise::new(60.0);
     // The default association gate (P_G = 0.99) now suffices: multi-radar
     // "ghost" tracks are prevented at the source by the scan-start fusion
@@ -435,12 +437,7 @@ mod tests {
     /// stable track id over the run — including the close JPDA pair, which
     /// must not coalesce into one id or swap identities.
     /// REQ: FR-TRK-002, FR-TRK-006, FR-TRK-010, FR-TRK-018, FR-TRK-019, FR-UI-001
-    ///
-    /// Known-red pending ADR 0013 Häppchen 13.5d (track-lifecycle/deletion-budget
-    /// calibration under async multi-sensor interleaving): currently yields 10
-    /// ids instead of 8 (a ghost-respawn chain for `arrival_north`).
     #[test]
-    #[ignore = "ADR 0013 Häppchen 13.5d: 10 vs 8 ids, ghost-respawn chain"]
     fn frankfurt_scene_keeps_one_identity_per_aircraft() {
         let frames = frankfurt_frames();
 
@@ -465,7 +462,7 @@ mod tests {
     }
 
     /// The JPDA crossing showcase ([`crossing_northeast`]/[`crossing_southeast`],
-    /// track ids 1 and 2) is the scene's deliberate data-association stress
+    /// track ids 5 and 4) is the scene's deliberate data-association stress
     /// test: the two aircraft meet at one point at one time, so for a scan or
     /// two their plots are ambiguous. JPDA must carry each track through the
     /// crossing on its own velocity and **not swap the two identities** — the
@@ -480,12 +477,7 @@ mod tests {
     ///    always `> 90°`. A swapped identity at the crossing would flip these.
     ///
     /// REQ: FR-TRK-018, FR-TRK-019
-    ///
-    /// Known-red pending ADR 0013 Häppchen 13.5d (see
-    /// [`frankfurt_scene_keeps_one_identity_per_aircraft`]): track id 1 is
-    /// currently `arrival_north` (a ghost-respawn artifact), not a crosser.
     #[test]
-    #[ignore = "ADR 0013 Häppchen 13.5d: id 1 is a ghost-respawn artifact, not a crosser"]
     fn frankfurt_crossing_pair_keeps_identity_through_the_crossing() {
         let frames = frankfurt_frames();
         let frame = LocalFrame::new(Wgs84::from_degrees(
@@ -500,16 +492,16 @@ mod tests {
             // The two crossers head into disjoint course quadrants and must
             // stay there — never swapping across the 90° divide.
             for t in f.tracks.iter().filter(|t| t.confirmed) {
-                if t.id.0 == 1 {
+                if t.id.0 == 5 {
                     assert!(
                         t.track_angle_deg < 90.0,
-                        "north-east crosser (id 1) veered to {:.0}° — identity swapped?",
+                        "north-east crosser (id 5) veered to {:.0}° — identity swapped?",
                         t.track_angle_deg
                     );
-                } else if t.id.0 == 2 {
+                } else if t.id.0 == 4 {
                     assert!(
                         t.track_angle_deg > 90.0,
-                        "south-east crosser (id 2) veered to {:.0}° — identity swapped?",
+                        "south-east crosser (id 4) veered to {:.0}° — identity swapped?",
                         t.track_angle_deg
                     );
                 }
@@ -518,7 +510,7 @@ mod tests {
             let mut positions = f
                 .tracks
                 .iter()
-                .filter(|t| t.id.0 == 1 || t.id.0 == 2)
+                .filter(|t| t.id.0 == 5 || t.id.0 == 4)
                 .map(|t| {
                     frame.geodetic_to_enu(&Wgs84::from_degrees(t.lat_deg, t.lon_deg, t.height_m))
                 });
