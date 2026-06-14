@@ -30,6 +30,7 @@ fn track(id: u32) -> SystemTrack {
         position_uncertainty: 100.0,
         mode_3a: Some(0o1000),
         icao_address: Some(0x3C_00_01),
+        flight_level_ft: Some(35_000.0),
         contributing_sensors: Vec::new(),
     }
 }

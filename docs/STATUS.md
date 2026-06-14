@@ -5,7 +5,22 @@
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
 - **Zuletzt aktualisiert:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
-  **ADR 0013 vollständig umgesetzt (13.1–13.7 inkl. 13.5d).**
+  **AP1 — CAT062 Vertikallage I062/136 + UAP-Standardtreue, ADR 0015.**)
+  Neues optionales Item **I062/136** (Measured Flight Level, FRN 17, signed
+  i16, LSB 1/4 FL = 25 ft) als **Pass-through** der zuletzt gemessenen
+  Mode-C-Höhe (`SystemTrack.flight_level_ft`, sticky wie Identität, kein
+  vertikaler Filter; FR-TRK-027). Zugleich **I062/500 von FRN 16 → FRN 27**
+  (echter EUROCONTROL-UAP-Slot; FRN 16 = I062/295 reserviert) → die Firefly-UAP
+  ist jetzt ein **konformes Subset** der echten CAT062-UAP, lesbar von einem
+  konformen Fremd-Decoder. **Breaking Wire-Change** (FSPEC 3→4 Oktette):
+  **ICD → 2.0.0**, ADR 0015, Referenz-Dump neu berechnet
+  (`[0x9F,0x0F,0x01,0x04]`, LEN 40). Encoder **und** Decoder in
+  `firefly-asterix` umgesetzt; live gegen den Demo-Stream verifiziert (FRN 17 +
+  27 gesetzt, FL374 dekodiert). **Wayfinder-Decoder muss in lockstep nachziehen
+  (AP2)** — Cross-Project-Issue `from-firefly` offen. Alle Gates grün.
+  ---
+  **Frühere Arbeit dieser Sitzung (bereits in `main`): ADR 0013 vollständig
+  umgesetzt (13.1–13.7 inkl. 13.5d).**
   `Tracker::process_plot` (async Pro-Plot-Verarbeitung) additiv,
   zeit-kontinuierlicher Lebenszyklus, `Tracker::snapshot_at(t)` (read-only
   Zeit-Projektion), der **periodische Ausgabetakt** im Player

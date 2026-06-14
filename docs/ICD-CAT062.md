@@ -21,12 +21,14 @@
 
 ## Version
 
-**1.1.1** (2026-06-14) — Doku-Politur: Spec-Edition, Update-Rate, ToD-Rollover.
+**2.0.0** (2026-06-14) — **Breaking:** Vertikallage I062/136 + I062/500 auf
+standardkonformen FRN 27 (ADR 0015).
 
 ### Changelog
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 2.0.0 | 2026-06-14 | **BREAKING (ADR 0015).** (1) Neues optionales Item **I062/136** (Measured Flight Level, FRN 17, signed i16, LSB 1/4 FL = 25 ft) — nur wenn der Track eine Mode-C-Flugfläche trägt. (2) **I062/500** (Estimated Accuracies) wandert von **FRN 16 → FRN 27**, dem echten EUROCONTROL-UAP-Slot; FRN 16 (I062/295) bleibt reserviert/ungenutzt. Die Standard-Record-FSPEC wächst dadurch von 3 auf 4 Oktette. Decoder **muss** beide Änderungen nachziehen. |
 | 1.1.1 | 2026-06-14 | **Doku-Politur (kein Wire-Format-Change).** Normative Spec-Edition referenziert (Abschnitt 0), Update-Rate/Scan-Period dokumentiert (Abschnitt 1), Mitternachts-Rollover von I062/070 präzisiert (Abschnitt 6), Stand zum I062/100-Referenzpunkt verlinkt (Abschnitt 5). |
 | 1.1.0 | 2026-06-13 | **UTC Time-of-Day in I062/070.** I062/070 wird jetzt als echte ASTERIX-Time-of-Day kodiert (Sekunden seit UTC-Mitternacht des Simulationstags), nicht relativ zur Szenario-Start-Zeit. `Scenario` trägt `simulation_start_time_of_day: f64` (Default 0 = Mitternacht); `Timestamp` bleibt intern deterministisch (Offset seit Szenario-Start). `Cat062Encoder` nimmt die Startzeit im Konstruktor entgegen. |
 | 1.0.0 | 2026-06-13 | Erstfassung, extrahiert aus `firefly-asterix::cat062` und Wayfinders `CLAUDE.md` Abschnitt 2. |
@@ -99,11 +101,20 @@ zusätzlichen FSPEC-Bits — unbekannte Items werden anhand ihrer Längen-Regeln
 | 12 | I062/040 | Track Number | 2 Oktette | u16 BE |
 | 13 | I062/080 | Track Status | variabel mit FX | siehe 4.1 |
 | 14 | I062/290 | System Track Update Ages | variabel | siehe 4.2 |
-| 16 | I062/500 | Estimated Accuracies | variabel | siehe 4.3 |
+| 17 | I062/136 | Measured Flight Level (nur wenn vorhanden) | 2 Oktette | signed i16 BE, LSB = 1/4 FL = 25 ft; siehe 4.4 |
+| 27 | I062/500 | Estimated Accuracies | variabel | siehe 4.3 |
+
+> **UAP-Standardtreue (ADR 0015).** Die FRNs folgen der echten EUROCONTROL-
+> CAT062-UAP (SUR.ET1.ST05.2000-STD-09-01). Die Lücken sind die nicht
+> emittierten Standard-Items: FRN 2 (Spare), 3 (I062/015), 8 (I062/210), 10
+> (I062/245), 15 (I062/200), **16 (I062/295 — reserviert, ungenutzt)**, 18–20
+> (I062/130/135/220). Ein konformer Fremd-Decoder liest den Strom ohne privates
+> Profil. Weil I062/500 auf FRN 27 (4. FSPEC-Oktett) liegt, hat ein Record
+> mindestens **4 FSPEC-Oktette**.
 
 Items werden **nur kodiert, wenn der Wert vorhanden ist** — I062/060 und
-I062/380 erscheinen nur, wenn der Track eine Mode-3/A- bzw. ICAO-Identität
-trägt; das FSPEC spiegelt das automatisch.
+I062/380 erscheinen nur bei vorhandener Mode-3/A- bzw. ICAO-Identität, I062/136
+nur bei vorhandener Mode-C-Flugfläche; das FSPEC spiegelt das automatisch.
 
 ### 4.1 I062/080 — Track Status
 
@@ -135,6 +146,19 @@ Compound Item: Primary Subfield (1 Oktett) + Subfelder je gesetztem Bit.
 
 Aktuell wird nur APC kodiert, aus `SystemTrack.position_uncertainty` (1σ,
 isotrop — gleicher Wert für X und Y).
+
+### 4.4 I062/136 — Measured Flight Level
+
+Zwei Oktette, signed 16-Bit (Zweierkomplement), big-endian; LSB = 1/4 FL =
+25 ft. Der kodierte Wert ist `round(flight_level_ft / 25)`. Negative
+Flugflächen (unter dem 1013,25-hPa-Datum) sind regulär per Zweierkomplement
+abgebildet.
+
+Quelle ist die **zuletzt gemessene Mode-C-Höhe** (`SystemTrack.flight_level_ft`,
+in Fuß). Es ist eine *gemessene* Größe, kein geglätteter vertikaler
+Track-Zustand — Firefly führt (noch) keinen vertikalen Schätzer (ADR 0015).
+Das Item erscheint nur, wenn der Track jemals eine Mode-C-Antwort getragen hat
+(sticky wie die Identität).
 
 ## 5. Koordinaten
 

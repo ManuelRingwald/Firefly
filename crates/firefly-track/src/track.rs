@@ -69,6 +69,13 @@ pub struct Track {
     /// Most recently reported Mode S 24-bit ICAO address, if any SSR-equipped
     /// plot has ever associated with this track. Sticky, like `mode_3a`.
     icao_address: Option<u32>,
+    /// Most recently reported barometric flight level (Mode C pressure
+    /// altitude, feet), if any SSR-equipped plot has ever associated with this
+    /// track. Sticky, like `mode_3a`: a primary-only detection (no Mode C
+    /// reply) does not clear the last known level. Unlike identity it does
+    /// change over time as the aircraft climbs/descends — we simply keep the
+    /// latest reported value (no vertical tracking filter yet).
+    flight_level_ft: Option<f64>,
     /// Sensors that contributed a hit (founded or updated this track) in the
     /// **most recent scan** (ADR 0010). Replaced wholesale each scan — unlike
     /// `mode_3a`/`icao_address` this is not sticky, since it answers "who sees
@@ -89,6 +96,7 @@ impl Track {
             revisit_interval: 0.0,
             mode_3a: None,
             icao_address: None,
+            flight_level_ft: None,
             contributing_sensors: BTreeSet::new(),
         }
     }
@@ -206,6 +214,11 @@ impl Track {
         self.icao_address
     }
 
+    /// Most recently reported barometric flight level (feet), if known.
+    pub fn flight_level_ft(&self) -> Option<f64> {
+        self.flight_level_ft
+    }
+
     /// Sensors that contributed a hit in the most recent scan.
     pub fn contributing_sensors(&self) -> &BTreeSet<SensorId> {
         &self.contributing_sensors
@@ -224,17 +237,23 @@ impl Track {
         self.contributing_sensors.insert(sensor);
     }
 
-    /// Absorb the SSR identity (if any) of an associated plot.
+    /// Absorb the SSR-derived attributes (if any) of an associated plot: the
+    /// identity (Mode 3/A, Mode S address) and the measured flight level.
     ///
     /// Sticky: a present value overwrites the stored one, but a `None` (e.g.
-    /// from a primary-only detection) leaves the last known identity in
-    /// place — losing one SSR reply should not erase what we already know.
+    /// from a primary-only detection) leaves the last known value in place —
+    /// losing one SSR reply should not erase what we already know. (The flight
+    /// level is "sticky" in the same sense; it still tracks climbs/descents
+    /// because every Mode C reply overwrites it.)
     pub(crate) fn update_identity(&mut self, mode_ac: &ModeAC) {
         if mode_ac.mode_3a.is_some() {
             self.mode_3a = mode_ac.mode_3a;
         }
         if mode_ac.icao_address.is_some() {
             self.icao_address = mode_ac.icao_address;
+        }
+        if mode_ac.flight_level_ft.is_some() {
+            self.flight_level_ft = mode_ac.flight_level_ft;
         }
     }
 }
