@@ -4,12 +4,14 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-13 (Branch `claude/serene-heisenberg-xq4rla`:
-  **ADR 0013 Häppchen 13.1–13.4 umgesetzt** — `Tracker::process_plot` (async
-  Pro-Plot-Verarbeitung) additiv, zeit-kontinuierlicher Lebenszyklus,
-  `Tracker::snapshot_at(t)` (read-only Zeit-Projektion) und der **periodische
-  Ausgabetakt** im Player (`periodic_snapshots`/`periodic_frames`), Ansatz B;
-  `process_scan`/Batch unverändert, alle Gates grün)
+- **Zuletzt aktualisiert:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
+  **ADR 0013 Häppchen 13.1–13.4 + 13.5a umgesetzt** — `Tracker::process_plot`
+  (async Pro-Plot-Verarbeitung) additiv, zeit-kontinuierlicher Lebenszyklus,
+  `Tracker::snapshot_at(t)` (read-only Zeit-Projektion), der **periodische
+  Ausgabetakt** im Player (`periodic_snapshots`/`periodic_frames`) und nun
+  **13.5a: gemeinsame Assoziation über nahezu gleichzeitige Plots**
+  (`process_plots` + Simultaneitäts-Fenster + geteilter `fuse_simultaneous_plots`,
+  FR-TRK-025); `process_scan`/Batch verhaltensgleich, alle Gates grün)
 - **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
   Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
   I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches
@@ -49,13 +51,26 @@
 > (`t_out`, Default = kleinste Sensorperiode) — entkoppelt vom unregelmäßigen
 > Eingang. FR-TRK-024 / FR-IO-005, Tests `tracker::snapshot_at_*`,
 > `firefly-player::periodic_*`.
-> **Nächster Schritt: Häppchen 13.5** (Simulator-Foundation neu einspielen, S3).
-> Der Foundation-WIP des Simulators
-> (azimut-abhängige Zeitstempel, `scan_offset` entfernt) liegt weiter in Commit
-> **`6a58a03`** (zurückgenommen via **`0959059`**) und wird in 13.5 wieder
-> eingespielt. Vollständiger Häppchen-Plan (**13.1–13.7**) im Abschnitt
-> *„Umsetzungsstand / Wiedereinstieg"* der ADR 0013. Vorgehen wie immer:
-> *erst erklären, dann bauen* (CLAUDE.md §2).
+> **13.5 wurde re-dekomponiert (nach Befund).** Ein erster kombinierter Versuch
+> (azimut-Zeiten + Frankfurt-Cutover) zeigte eine Architektur-Regression: naiver
+> Pro-Plot-Pfad → Frankfurt **40 statt 8 IDs** + Kreuzungs-Identitäts-Tausch
+> (Ursachen: Lösch-Churn ohne Kadenz-Boden **und** verlorene Geister-/Joint-JPDA-
+> Logik bei *gleichzeitigen* Plots). Mit dem Verantwortlichen abgestimmt: **volle
+> Async** (diese ADR-Option), weil reale SDPS (ARTAS & Co.) genau so arbeiten und
+> der Batch-Pfad an der unrealistischen „alle Plots gleichzeitig"-Annahme hängt.
+> **13.5a ist umgesetzt:** Simultaneitäts-Fenster (`SIMULTANEITY_WINDOW`, 0,5 s),
+> `Tracker::process_plots` fasst koinzidente Plots zu *einer* Mess-Gelegenheit
+> zusammen und assoziiert sie gemeinsam gegen eine eingefrorene Referenz
+> (ADR-0011-Geisterunterdrückung + JPDA-Exklusivität, wie ein Scan); der Kern
+> `fuse_simultaneous_plots` ist aus `process_scan` extrahiert und geteilt
+> (`process_scan` verhaltensgleich, `process_plot` = Ein-Plot-Bequemlichkeit).
+> FR-TRK-025, Tests `tracker::process_plots_*`.
+> **Nächster Schritt: Häppchen 13.6** (Simulator azimut-abhängige Pro-Plot-
+> Zeitstempel, `scan_offset` raus; Basis-WIP `6a58a03`) → dann 13.7-Cutover und
+> *danach* 13.5c (Lösch-Kadenz-Boden) / 13.5b (Rest-Geister) empirisch gegen die
+> Frankfurt-8-ID-Zahl. Neuer Häppchen-Plan (**13.1–13.4, 13.5a–c, 13.6, 13.7**)
+> im Abschnitt *„Umsetzungsstand / Wiedereinstieg"* der ADR 0013. Vorgehen wie
+> immer: *erst erklären, dann bauen* (CLAUDE.md §2).
 
 - **Diese Sitzung (Aufräumen + Merge):**
   - Offener Branch endete mit unfertigem ADR-0013-WIP, der ein Qualitäts-Gate verletzte

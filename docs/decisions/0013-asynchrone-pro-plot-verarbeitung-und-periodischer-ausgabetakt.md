@@ -1,6 +1,6 @@
 # ADR 0013 — Asynchrone Pro-Plot-Verarbeitung + Periodischer Ausgabetakt
 
-- **Status:** akzeptiert — **Umsetzung läuft** (13.1 `process_plot` umgesetzt, Ansatz B/additiv; 13.2–13.7 offen — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
+- **Status:** akzeptiert — **Umsetzung läuft** (13.1–13.4 + 13.5a umgesetzt; volle Async bestätigt, 13.5 in 13.5a–c re-dekomponiert; 13.5b/c, 13.6, 13.7 offen — siehe Abschnitt „Umsetzungsstand / Wiedereinstieg")
 - **Datum:** 2026-06-12
 
 ## Kontext
@@ -254,14 +254,49 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
   `firefly-player::{periodic_*, default_output_period_*, finer_heartbeat_*}`.
   Bis 13.5 für Einzel-Radar validiert (der async-Pfad setzt zeitlich getrennte
   Plots voraus).
-- [ ] **13.5 — Simulator-Foundation neu einspielen (S3).** Den WIP aus `6a58a03`
-  wieder aufnehmen (`git cherry-pick 6a58a03` als Ausgangspunkt) — jetzt *deckt*
-  ihn die Pro-Plot-Pipeline. `scan_offset` entfällt endgültig.
-- [ ] **13.6 — Frankfurt-Regression auf asynchrone Perioden anpassen (S3).** Test auf
-  8 stabile IDs bei echt asynchronen Radaren (0/4/8…, 0/10/20…, 0/12/24…). Neue
-  Regressions-Tests für periodischen Output.
-- [ ] **13.7 — CAT062-Adapter auf `snapshot_at` umstellen (S3).** Encoder speist sich
-  aus dem periodischen Snapshot statt aus „pro Scan".
+> **Re-Dekomposition 13.5–13.7 (nach Befund, freigegeben).** Ein erster
+> Versuch, 13.5 (azimut-abhängige Simulator-Zeiten) und 13.6 (Frankfurt-Cutover
+> auf den periodischen Pfad) in einem Zug umzusetzen, deckte eine **Architektur-
+> Regression** auf: der naive Pro-Plot-Pfad lieferte für die Frankfurt-Szene
+> 40 statt 8 IDs (18 mit deaktivierter Löschung) plus einen Identitäts-Tausch im
+> Kreuzungs-Test. Ursachen-Trennung: (a) ~22 IDs Lösch-Churn aus dem
+> zeit-kontinuierlichen Lebenszyklus (13.2) ohne Kadenz-Boden für den 4/10/12-s-
+> Mix; (b) ~10 Geister/Tausch, weil der Pro-Plot-Pfad bei *gleichzeitigen*
+> Multi-Radar-/Kreuzungs-Plots die ADR-0011-Geisterunterdrückung und die
+> Joint-JPDA-Exklusivität verlor. Entscheidung (mit Projektverantwortlichem):
+> **volle Async (diese ADR-Option), nicht** ein Batch-gespeister Ausgabe-
+> Kompromiss — denn genau so arbeiten reale SDPS (ARTAS & Co.: messungs-
+> getriebener Eingang, periodischer Ausgang), und der Batch-Pfad hängt an der
+> *unrealistischen* Annahme „alle Plots eines Scans zur selben Zeit". 13.5 wird
+> daher in **13.5a–c** zerlegt; 13.6/13.7 bleiben, werden aber gegen die
+> gehärtete Assoziation gemessen.
+
+- [x] **13.5a — Gemeinsame Assoziation über nahezu gleichzeitige Plots (S5). ✅
+  umgesetzt.** Simultaneitäts-Fenster (`SIMULTANEITY_WINDOW`, 0,5 s):
+  `Tracker::process_plots(plots)` gruppiert zeitlich koinzidente Plots zu *einer*
+  Mess-Gelegenheit und assoziiert sie **gemeinsam** gegen eine eingefrorene
+  Referenz — ADR-0011-Geisterunterdrückung + JPDA-Exklusivität, wie ein Scan.
+  Der Assoziations-Kern ist als `fuse_simultaneous_plots` aus `process_scan`
+  **extrahiert** und von beiden Pfaden geteilt (eine Fusions-Logik); `process_scan`
+  verhaltensgleich, `process_plot` = Ein-Plot-Bequemlichkeit über `process_plots`.
+  **FR-TRK-025**, Tests `tracker::process_plots_*`; alle Gates grün.
+- [ ] **13.5b — Rest-Geister im echt zeit-getrennten Multi-Radar messen/härten
+  (S4).** Erst nach dem End-to-End-Pfad (13.6/13.7) empirisch gegen die
+  Frankfurt-8-ID-Zahl bewerten: bleibt nach 13.5a + Kadenz-Boden (13.5c) ein
+  Geister-Rest aus zeitlich getrennten Multi-Radar-Plots (Lift-Bias vs.
+  `init_gate`)? Falls ja, gezielt nachschärfen — sonst entfällt 13.5b.
+- [ ] **13.5c — Lösch-Kadenz mit Boden für gemischte Radarperioden (S4).**
+  Den zeit-kontinuierlichen Lebenszyklus (13.2) so robust machen, dass der
+  4/10/12-s-Mix keine Lösch-Churn erzeugt (Kadenz-Boden / Bootstrap-Schutz),
+  ohne den Einzel-Radar-Fall zu verschlechtern.
+- [ ] **13.6 — Simulator: azimut-abhängige Pro-Plot-Zeitstempel (S3).** Den
+  Basis-WIP (`6a58a03`) wieder aufnehmen: `plot_time = scan_start + (azimut/2π)·
+  scan_period`, volle Spreizung; `scan_offset` entfällt endgültig. Jetzt von der
+  gehärteten Pro-Plot-Pipeline gedeckt.
+- [ ] **13.7 — Szene-/CAT062-Cutover auf den periodischen Pfad (S3).**
+  Frankfurt/Demo auf `periodic_frames`/`periodic_snapshots`, Server +
+  `FIREFLY_OUTPUT_PERIOD`; Encoder speist sich aus dem periodischen Snapshot
+  statt „pro Scan". Abnahme: 8 stabile IDs + Kreuzungs-Identität grün.
 
 ### Wiedereinstiegs-Anker (Kurzform)
 
@@ -281,6 +316,13 @@ Reihenfolge so gewählt, dass **nach jedem Häppchen die Tests grün** bleiben:
 - **13.4 erledigt:** periodischer Ausgabetakt im Player
   (`periodic_snapshots`/`periodic_frames`, `default_output_period`), FR-IO-005;
   Batch unverändert, alle Gates grün.
-- **Nächster Schritt:** Häppchen **13.5** (Simulator-Foundation neu einspielen —
-  azimut-abhängige Pro-Plot-Zeitstempel, `scan_offset` entfernen; Basis-WIP in
-  Commit `6a58a03`, jetzt von der Pro-Plot-Pipeline gedeckt, S3).
+- **13.5 re-dekomponiert (Befund):** naiver Pro-Plot-Pfad → Frankfurt 40 statt 8
+  IDs + Kreuzungs-Tausch; Entscheidung volle Async (siehe Re-Dekompositions-Box
+  oben). Zerlegt in 13.5a–c.
+- **13.5a erledigt:** gemeinsame Assoziation über nahezu gleichzeitige Plots
+  (`process_plots`, `SIMULTANEITY_WINDOW`, geteilter `fuse_simultaneous_plots`),
+  FR-TRK-025; `process_scan` verhaltensgleich extrahiert, alle Gates grün.
+- **Nächster Schritt:** Häppchen **13.6** (Simulator azimut-abhängige Pro-Plot-
+  Zeitstempel, `scan_offset` raus; Basis-WIP `6a58a03`) — danach 13.7-Cutover und
+  *dann* 13.5c (Lösch-Kadenz) / 13.5b (Rest-Geister) empirisch gegen die
+  Frankfurt-8-ID-Zahl.
