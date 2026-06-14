@@ -28,13 +28,11 @@
   `frankfurt_crossing_pair_keeps_identity_through_the_crossing`) sind wieder
   grün; das Kreuzungs-Paar trägt jetzt die IDs 5/4 (statt 1/2 — Track-1 ist
   durchgehend `arrival_north`, kein Geister-Artefakt mehr).
-- **Branch:** `main` — grün und stabil (M1–M6, Stand M6.5, Charter-Pivot
-  Lernprojekt → Produktion / ADR 0014 angenommen, Issue #9 (UTC Time-of-Day in
-  I062/070) implementiert, `docs/ICD-CAT062.md` v1.0.0 erstellt). Die Branches
-  `claude/branch-merge-main-cqzdwk`, `claude/next-steps-ft3t3n` und
-  `claude/pr-main-merge-oggshe` sind bereits in `main` enthalten und können
-  remote gelöscht werden (Branch-Löschung war in dieser Sitzung wegen
-  fehlender Berechtigung nicht möglich).
+- **Branch:** `claude/serene-heisenberg-xq4rla` wird per PR nach `main`
+  gemergt (ADR 0013 13.1–13.7 inkl. 13.5d). Danach enthält `main` den
+  vollständigen Stand (M1–M6 + Produktions-Phase bis ADR 0013); alle anderen
+  Branches sind entweder bereits remote gelöscht oder können nach diesem
+  Merge gelöscht werden — `main` ist die einzige verbleibende Branch.
 
 > 🔁 **ADR 0014 (Pivot Produktion, Wayfinder konsumiert CAT062/UDP) — akzeptiert.**
 > `CLAUDE.md` ist auf Produktionsbetrieb umgestellt (Modell-Angabe pro Schritt
