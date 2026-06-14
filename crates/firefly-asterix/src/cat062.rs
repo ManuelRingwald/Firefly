@@ -32,9 +32,22 @@ use crate::fspec::{self, RecordBuilder};
 /// The ASTERIX category number for system tracks.
 const CATEGORY: u8 = 62;
 
-/// The CAT062 UAP slots (field reference numbers) we encode so far. Keeping the
-/// FRNs named and in one place documents the bit layout and stops magic numbers
-/// from drifting between the FSPEC and the payload order.
+/// The CAT062 UAP slots (field reference numbers) we encode. The FRNs follow
+/// the **standard EUROCONTROL CAT062 UAP** (SUR.ET1.ST05.2000-STD-09-01), so a
+/// conforming third-party decoder (e.g. an ARTAS-fed ASD) reads our stream
+/// without a private profile. We emit a *subset*; the gaps are the standard
+/// items we don't carry:
+///
+/// - FRN 2 — spare bit in the standard UAP (never an item).
+/// - FRN 3 — I062/015 Service Identification.
+/// - FRN 8 — I062/210 Calculated Acceleration.
+/// - FRN 10 — I062/245 Target Identification.
+/// - FRN 15 — I062/200 Mode of Movement.
+/// - FRN 16 — I062/295 Track Data Ages (reserved, not emitted).
+/// - FRN 18/19/20 — I062/130/135/220 (geometric altitude, baro altitude, RoCD).
+///
+/// Keeping the FRNs named and in one place documents the bit layout and stops
+/// magic numbers from drifting between the FSPEC and the payload order.
 mod uap {
     /// I062/010 — Data Source Identifier (SAC/SIC).
     pub const DATA_SOURCE_IDENTIFIER: u8 = 1;
@@ -56,8 +69,10 @@ mod uap {
     pub const TRACK_STATUS: u8 = 13;
     /// I062/290 — System Track Update Ages.
     pub const UPDATE_AGES: u8 = 14;
+    /// I062/136 — Measured Flight Level.
+    pub const MEASURED_FLIGHT_LEVEL: u8 = 17;
     /// I062/500 — Estimated Accuracies.
-    pub const ESTIMATED_ACCURACIES: u8 = 16;
+    pub const ESTIMATED_ACCURACIES: u8 = 27;
 }
 
 /// I062/070 is counted in units of 1/128 second since midnight.
@@ -77,6 +92,10 @@ const I24_MAX: i32 = (1 << 23) - 1;
 const VELOCITY_LSB_MPS: f64 = 0.25;
 /// I062/290 stores each update age as one octet of 1/4-second steps.
 const AGE_LSB_SECONDS: f64 = 0.25;
+/// I062/136 stores the measured flight level as a signed 16-bit count of
+/// 1/4-FL steps. One FL is 100 ft, so the LSB is 25 ft. Verified against
+/// SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.13.
+const FLIGHT_LEVEL_LSB_FT: f64 = 25.0;
 /// I062/500 APC stores each position-accuracy component in 0.5-metre steps.
 const ACCURACY_LSB_METRES: f64 = 0.5;
 /// I062/060 carries the Mode 3/A reply in its low 12 bits (4 octal digits); the
@@ -165,9 +184,9 @@ impl Cat062Encoder {
 
     /// One CAT062 record for one track: FSPEC + the present items in UAP order.
     ///
-    /// The identity items (I062/060, I062/380) are only added when the track
-    /// actually carries that identity; the [`RecordBuilder`] then reflects their
-    /// presence in the FSPEC automatically.
+    /// The SSR-derived items (I062/060, I062/380, I062/136) are only added when
+    /// the track actually carries that value; the [`RecordBuilder`] then
+    /// reflects their presence in the FSPEC automatically.
     fn record(&self, time: Timestamp, track: &SystemTrack) -> Vec<u8> {
         let mut builder = RecordBuilder::new()
             .item(
@@ -194,6 +213,12 @@ impl Cat062Encoder {
         }
         if let Some(address) = track.icao_address {
             builder = builder.item(uap::AIRCRAFT_DERIVED_DATA, encode_target_address(address));
+        }
+        if let Some(flight_level_ft) = track.flight_level_ft {
+            builder = builder.item(
+                uap::MEASURED_FLIGHT_LEVEL,
+                encode_measured_flight_level(flight_level_ft),
+            );
         }
 
         builder.finish()
@@ -287,6 +312,16 @@ fn encode_mode_3a(code: u16) -> Vec<u8> {
 fn encode_target_address(address: u32) -> Vec<u8> {
     let octets = address.to_be_bytes(); // [b3, b2, b1, b0]; b3 is always 0
     vec![ADR_TARGET_ADDRESS_PRESENT, octets[1], octets[2], octets[3]]
+}
+
+/// I062/136 — Measured Flight Level: two octets, a signed 16-bit count of
+/// 1/4-FL (25-ft) steps, big-endian. Our `flight_level_ft` is a barometric
+/// pressure altitude in feet, so the count is `feet / 25`. Negative levels
+/// (below the 1013.25 hPa datum) need no special handling — plain two's
+/// complement (`i16`).
+fn encode_measured_flight_level(flight_level_ft: f64) -> Vec<u8> {
+    let ticks = (flight_level_ft / FLIGHT_LEVEL_LSB_FT).round() as i16;
+    ticks.to_be_bytes().to_vec()
 }
 
 /// I062/040 — the 16-bit track number, big-endian. CAT062 track numbers are
@@ -404,6 +439,8 @@ pub struct DecodedRecord {
     pub mode_3a: Option<u16>,
     /// I062/380 Target Address, if the track carries a Mode S address.
     pub icao_address: Option<u32>,
+    /// I062/136 Measured Flight Level, in feet, if the track carries one.
+    pub flight_level_ft: Option<f64>,
 }
 
 /// Errors that can occur while decoding a CAT062 data block.
@@ -480,6 +517,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
     let mut position_uncertainty = None;
     let mut mode_3a = None;
     let mut icao_address = None;
+    let mut flight_level_ft = None;
 
     for frn in frns {
         match frn {
@@ -495,6 +533,9 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
             uap::TRACK_NUMBER => track_number = Some(decode_track_number(cursor.take(2)?)),
             uap::TRACK_STATUS => status = Some(decode_track_status(cursor.take_track_status()?)),
             uap::UPDATE_AGES => update_age = Some(decode_update_ages(cursor.take(2)?)),
+            uap::MEASURED_FLIGHT_LEVEL => {
+                flight_level_ft = Some(decode_measured_flight_level(cursor.take(2)?))
+            }
             uap::ESTIMATED_ACCURACIES => {
                 position_uncertainty = Some(decode_accuracies(cursor.take(5)?))
             }
@@ -520,6 +561,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
             .ok_or(DecodeError::MissingItem(uap::ESTIMATED_ACCURACIES))?,
         mode_3a,
         icao_address,
+        flight_level_ft,
     })
 }
 
@@ -616,6 +658,13 @@ fn decode_track_number(bytes: &[u8]) -> u16 {
     u16::from_be_bytes(bytes.try_into().unwrap())
 }
 
+/// I062/136 — the inverse of [`encode_measured_flight_level`]: a signed 16-bit
+/// count of 25-ft steps back into feet.
+fn decode_measured_flight_level(bytes: &[u8]) -> f64 {
+    let ticks = i16::from_be_bytes(bytes.try_into().unwrap());
+    ticks as f64 * FLIGHT_LEVEL_LSB_FT
+}
+
 /// I062/080 — the inverse of [`encode_track_status`]: CNF from octet 1, CST
 /// from octet 4 if the item was extended that far.
 fn decode_track_status(bytes: &[u8]) -> (bool, bool) {
@@ -710,6 +759,7 @@ mod tests {
             position_uncertainty: 0.0,
             mode_3a: None,
             icao_address: None,
+            flight_level_ft: None,
             contributing_sensors: Vec::new(),
         }
     }
@@ -954,12 +1004,43 @@ mod tests {
         assert_eq!(encode_accuracies(&t), vec![0x80, 0x00, 0xC8, 0x00, 0xC8]);
     }
 
+    /// Measured flight level: a signed 16-bit count of 25-ft (1/4-FL) steps.
+    /// FL350 = 35000 ft → 1400 = 0x0578; a negative level (below the datum)
+    /// uses two's complement. REQ: FR-IO-003, FR-TRK-027
+    #[test]
+    fn flight_level_scales_to_quarter_fl_and_signs_via_twos_complement() {
+        assert_eq!(encode_measured_flight_level(35_000.0), vec![0x05, 0x78]);
+        // −1000 ft → −40 = 0xFFD8.
+        assert_eq!(encode_measured_flight_level(-1_000.0), vec![0xFF, 0xD8]);
+    }
+
+    /// A track carrying a flight level encodes I062/136 (FRN 17) and the round
+    /// trip recovers it; the FSPEC reflects the extra item without disturbing
+    /// the others. REQ: FR-IO-003, FR-IO-004, FR-TRK-027
+    #[test]
+    fn decode_recovers_flight_level_when_present() {
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let mut t = track(1);
+        t.flight_level_ft = Some(35_000.0);
+        let block = encoder.encode(Timestamp(12.0), &[t]);
+
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].flight_level_ft, Some(35_000.0));
+        // The other items still decode correctly alongside it.
+        assert_eq!(records[0].track_number, 1);
+        assert_eq!(records[0].position_uncertainty, 100.0);
+    }
+
     /// One track encodes to a fully known byte string — the reference dump.
     ///
-    /// Hand derivation (present FRNs {1, 4, 5, 6, 7, 12, 13, 14, 16}):
+    /// Hand derivation (present FRNs {1, 4, 5, 6, 7, 12, 13, 14, 27} — the
+    /// reference track has no flight level, so I062/136 at FRN 17 is absent):
     /// - FSPEC: octet 1 = FRN1·0x80 + FRN4·0x10 + FRN5·0x08 + FRN6·0x04 + FRN7·0x02 + FX = `0x9F`;
     ///   octet 2 = FRN12·0x08 + FRN13·0x04 + FRN14·0x02 + FX = `0x0F`;
-    ///   octet 3 = FRN16·0x40 = `0x40`.
+    ///   octet 3 = (no FRN 15–21 present) + FX = `0x01`;
+    ///   octet 4 = FRN27·0x04 = `0x04` (FRN27 → (27-1)%7 = 5 → bit 1<<2).
     /// - I062/010 SAC/SIC = `[0x19, 0x02]`.
     /// - I062/070 at 12.0 s = 1536 ticks = `[0x00, 0x06, 0x00]`.
     /// - I062/105 lat 45° = `[0x00,0x80,0x00,0x00]`, lon 11.25° = `[0x00,0x20,0x00,0x00]`.
@@ -970,7 +1051,7 @@ mod tests {
     /// - I062/080 confirmed, fresh = `[0x00]`.
     /// - I062/290 PSR age 2 s = `[0x40, 0x08]`.
     /// - I062/500 APC 100 m = `[0x80, 0x00,0xC8, 0x00,0xC8]`.
-    /// - record (36 bytes) wrapped: CAT 62 = 0x3E, LEN = 3 + 36 = 39 = 0x0027.
+    /// - record (37 bytes) wrapped: CAT 62 = 0x3E, LEN = 3 + 37 = 40 = 0x0028.
     ///
     /// REQ: FR-IO-003
     #[test]
@@ -981,8 +1062,8 @@ mod tests {
 
         let expected = vec![
             0x3E, // CAT 62
-            0x00, 0x27, // LEN = 39
-            0x9F, 0x0F, 0x40, // FSPEC {1, 4, 5, 6, 7, 12, 13, 14, 16}
+            0x00, 0x28, // LEN = 40
+            0x9F, 0x0F, 0x01, 0x04, // FSPEC {1, 4, 5, 6, 7, 12, 13, 14, 27}
             0x19, 0x02, // I062/010 SAC/SIC
             0x00, 0x06, 0x00, // I062/070 time = 1536 ticks
             0x00, 0x80, 0x00, 0x00, // I062/105 latitude 45°
@@ -998,7 +1079,7 @@ mod tests {
         assert_eq!(block, expected);
     }
 
-    /// LEN counts every byte of every record. Two tracks → two 36-byte records.
+    /// LEN counts every byte of every record. Two tracks → two 37-byte records.
     /// REQ: FR-IO-003
     #[test]
     fn length_field_covers_all_records() {
@@ -1008,7 +1089,7 @@ mod tests {
         assert_eq!(block[0], 0x3E, "category");
         let len = u16::from_be_bytes([block[1], block[2]]) as usize;
         assert_eq!(len, block.len(), "LEN equals the real block length");
-        assert_eq!(len, 3 + 2 * 36, "header + two 36-byte records");
+        assert_eq!(len, 3 + 2 * 37, "header + two 37-byte records");
     }
 
     /// An empty scan still yields a valid, minimal data block (just the header).
@@ -1048,6 +1129,7 @@ mod tests {
         assert_eq!(record.position_uncertainty, 100.0);
         assert_eq!(record.mode_3a, None);
         assert_eq!(record.icao_address, None);
+        assert_eq!(record.flight_level_ft, None);
     }
 
     /// A track with an SSR identity decodes I062/060 and I062/380 back into

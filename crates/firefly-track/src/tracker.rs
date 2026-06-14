@@ -750,6 +750,7 @@ fn system_track_from(
         position_uncertainty: estimate.position_uncertainty(),
         mode_3a: track.mode_3a(),
         icao_address: track.icao_address(),
+        flight_level_ft: track.flight_level_ft(),
         contributing_sensors: track.contributing_sensors().iter().copied().collect(),
     }
 }
@@ -1054,6 +1055,32 @@ mod tests {
             sts[0].icao_address,
             Some(0x0040_0123),
             "identity stays sticky"
+        );
+    }
+
+    /// The measured flight level (Mode C) reaches the system track and is
+    /// sticky in the same way as the identity: a later primary-only hit (no
+    /// Mode C reply) keeps the last known level. REQ: FR-TRK-027
+    #[test]
+    fn measured_flight_level_reaches_system_track_and_stays_sticky() {
+        let mut tracker = Tracker::new(config());
+
+        // Born and confirmed with SSR-equipped plots (flight level = 35000 ft).
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[plot_with_identity(t, 50_000.0, 0.0, 0o2613, 0x0040_0123)],
+            );
+        }
+        assert_eq!(tracker.system_tracks()[0].flight_level_ft, Some(35_000.0));
+
+        // A primary-only hit must not erase the known level.
+        tracker.process_scan(Timestamp(12.0), &[plot(12.0, 50_000.0, 0.0)]);
+        assert_eq!(
+            tracker.system_tracks()[0].flight_level_ft,
+            Some(35_000.0),
+            "flight level stays sticky through a primary-only hit"
         );
     }
 

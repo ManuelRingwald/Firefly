@@ -62,6 +62,15 @@ pub struct SystemTrack {
     /// CAT062 I062/380 when present, and is the eventual correlation key for
     /// multi-radar fusion.
     pub icao_address: Option<u32>,
+    /// Most recently reported barometric flight level, in **feet** (Mode C
+    /// pressure altitude, 1013.25 hPa datum), if any SSR-equipped plot has ever
+    /// associated with this track. `None` for a primary-only track. Like the
+    /// identity fields it is sticky — a primary-only detection does not clear
+    /// the last known level. Encoded as CAT062 I062/136 (Measured Flight Level)
+    /// when present. The tracker carries no independent vertical *estimate* yet
+    /// (no vertical Kalman state); this is the last measured value, passed
+    /// through (FR-TRK-027).
+    pub flight_level_ft: Option<f64>,
     /// Sensors that contributed a hit to this track in the **most recent
     /// scan** (ADR 0010, central measurement fusion). Empty while coasting —
     /// no sensor saw it this scan. Sorted by [`SensorId`] for determinism.
@@ -112,6 +121,7 @@ mod tests {
             position_uncertainty: 0.0,
             mode_3a: None,
             icao_address: None,
+            flight_level_ft: None,
             contributing_sensors: Vec::new(),
         }
     }

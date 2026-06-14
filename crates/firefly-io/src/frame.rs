@@ -156,6 +156,7 @@ mod tests {
             position_uncertainty: 42.0,
             mode_3a: None,
             icao_address: None,
+            flight_level_ft: None,
             contributing_sensors: Vec::new(),
         }
     }
