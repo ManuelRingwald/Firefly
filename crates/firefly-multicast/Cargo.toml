@@ -12,6 +12,7 @@ firefly-core = { workspace = true }
 firefly-geo = { workspace = true }
 firefly-asterix = { workspace = true }
 tokio = { version = "1", features = ["net", "time", "rt"] }
+tracing = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }

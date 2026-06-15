@@ -7,7 +7,19 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-15 — Paket #1 „Multicast-Feed-Sicherheit",
+- **Zuletzt aktualisiert:** 2026-06-15 — Paket #2 „Observability-Grundgerüst",
+  Häppchen 2.2: `tracing`-Instrumentierung in `firefly-multicast` (Wayfinders
+  2.1 war bereits erledigt). Neue Abhängigkeit `tracing = "0.1"` (wie
+  `firefly-server`). Sender (`lib.rs::run`): `tracing::debug!` pro gesendetem
+  Scan (Zeit, Bytes, Track-Zahl, Ziel), `tracing::error!` bei Sendefehler vor
+  Rückgabe des `io::Error`. Empfänger (`receiver.rs::run`): `tracing::debug!`
+  pro empfangenem Block (Record-Zahl), `tracing::warn!` bei Socket-/Decode-
+  Fehler vor Rückgabe des `ReceiveError`. `firefly-asterix` unverändert
+  (Encoder ist infallibel, Decode-Fehler bereits typisiert). NFR-OBS-001
+  ergänzt. Alle Gates grün (`cargo test/clippy/fmt`). Nächster Schritt:
+  Häppchen 2.3 — gemeinsamer `/metrics`-Endpoint (Prometheus), nach
+  Abstimmung mit dem Projektverantwortlichen.
+- **Vorherige Aktualisierung:** 2026-06-15 — Paket #1 „Multicast-Feed-Sicherheit",
   Häppchen 1.1: **ADR 0017 „Vertrauensgrenze des CAT062-Multicast-Feeds"**
   erstellt (`docs/decisions/0017-multicast-feed-vertrauensgrenze.md`).
   Entscheidung: Vertrauensgrenze liegt auf der **Netzwerk-Schicht** (dediziertes

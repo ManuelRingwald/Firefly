@@ -86,8 +86,15 @@ pub async fn run(
 ) -> Result<usize, ReceiveError> {
     let mut received = 0usize;
     loop {
-        let records = recv_records(socket).await?;
+        let records = match recv_records(socket).await {
+            Ok(records) => records,
+            Err(error) => {
+                tracing::warn!(%error, "failed to receive/decode CAT062 data block");
+                return Err(error);
+            }
+        };
         received += 1;
+        tracing::debug!(records = records.len(), "received CAT062 data block");
         if !on_records(records) {
             return Ok(received);
         }
