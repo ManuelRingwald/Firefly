@@ -33,9 +33,13 @@
 //! REQ: FR-IO-003, FR-TRK-008
 
 mod cat062;
+mod cat065;
 mod fspec;
 
 pub use cat062::{
     decode_data_block, unproject_cartesian_position, Cat062Encoder, DataSourceId, DecodeError,
     DecodedRecord,
+};
+pub use cat065::{
+    decode_status_block, Cat065DecodeError, Cat065Encoder, DecodedStatus, MESSAGE_TYPE_SDPS_STATUS,
 };

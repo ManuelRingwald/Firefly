@@ -7,7 +7,73 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-15 (Branch `claude/tse-i062-080`, nach
+- **Zuletzt aktualisiert:** 2026-06-15 — Paket #3 „CAT065 Heartbeat" —
+  **Firefly-Seite (Sender) fertig.** Neues Modul `firefly-asterix::cat065`:
+  `Cat065Encoder` kodiert eine periodische SDPS-Status-Meldung (I065/000=1) mit
+  I065/010 (SAC/SIC), I065/015 (Service-ID), I065/030 (Time of Day, 1/128 s),
+  I065/040 (NOGO operationell/degradiert); `decode_status_block` als Umkehrung;
+  byte-genauer Referenz-Dump-Test. `firefly-multicast`: `run_heartbeat`
+  (wall-clock-getakteter, entkoppelter Sende-Task, Default 1 s) + Config
+  (`FIREFLY_CAT065_ENABLED`/`_PERIOD`/`_SERVICE_ID`). `firefly-server`:
+  `spawn_cat065_heartbeat` (eigener Socket, stempelt UTC-Tageszeit), Metrik
+  `firefly_cat065_heartbeats_sent_total`. **Gleiche Multicast-Gruppe wie
+  CAT062**, Dispatch am CAT-Oktett (Architektur-Entscheidung des
+  Projektverantwortlichen). Doku: **ADR 0018**, ICD → **2.3.0** (additiv, §8),
+  FR-IO-006 + FR-NET-003 im Register. Alle Gates grün (`cargo test/clippy/fmt`).
+  **Wayfinder-Seite ebenfalls fertig** (CAT065-Decoder `pkg/cat065`,
+  Receiver-Dispatch am CAT-Oktett, `pkg/health`-Staleness-Tracker,
+  Frontend-Banner, `/ready`/`/metrics`-Integration) — **Paket #3 beidseitig
+  abgeschlossen**, ROADMAP auf „erledigt". Nächster Schritt: nächstes
+  Roadmap-Paket nach Abstimmung (z. B. #4 Konfigurierbarer
+  System-Referenzpunkt).
+- **Vorherige Aktualisierung:** 2026-06-15 — Paket #2 „Observability-Grundgerüst"
+  **abgeschlossen** mit Häppchen 2.3: gemeinsamer `/metrics`-Endpoint
+  (Prometheus-Textformat). Firefly-Teil: neues Modul
+  `firefly-server::metrics` (`Metrics`-Struct mit Atomics,
+  `ConnectedClientGuard`, `render()`); `/metrics`-Route im axum-Router.
+  Exponiert: `firefly_scene_frames_total` (Gauge), `firefly_ws_clients_connected`
+  (Gauge, via `ConnectedClientGuard` in `pump_frames`),
+  `firefly_ws_clients_total` (Counter), `firefly_cat062_scans_sent_total` /
+  `firefly_cat062_send_errors_total` (Counter, aus `spawn_cat062_multicast`
+  nach `firefly_multicast::run`). NFR-OBS-001 aktualisiert (Metrik-Endpunkt
+  nicht mehr offen). Neue Tests: `metrics::render_includes_all_metrics`,
+  `metrics::connected_client_guard_tracks_lifetime`,
+  `app::metrics_endpoint_exposes_frame_count`. Alle Gates grün
+  (`cargo test/clippy/fmt`). Wayfinder-Teil (Paket #2.3, NFR-OBS-002):
+  `pkg/metrics` (Prometheus-Rendering), `/metrics` auf Port `:8080` neben
+  `/health`/`/ready` — Block-/Track-Zahlen, CAT062-Decode-Fehler
+  (`Receiver.DecodeErrorCount`), aktuelle Track-Zahl, WS-Client-Count/Evictions
+  (`Broadcaster.EvictedCount`). **Paket #2 vollständig erledigt.** Nächster
+  Schritt: nächstes Roadmap-Paket nach Abstimmung mit dem
+  Projektverantwortlichen (z. B. AP5/AP6 CAT065-Heartbeat oder
+  Konfigurierbarer System-Referenzpunkt).
+- **Vorherige Aktualisierung:** 2026-06-15 — Paket #2 „Observability-Grundgerüst",
+  Häppchen 2.2: `tracing`-Instrumentierung in `firefly-multicast` (Wayfinders
+  2.1 war bereits erledigt). Neue Abhängigkeit `tracing = "0.1"` (wie
+  `firefly-server`). Sender (`lib.rs::run`): `tracing::debug!` pro gesendetem
+  Scan (Zeit, Bytes, Track-Zahl, Ziel), `tracing::error!` bei Sendefehler vor
+  Rückgabe des `io::Error`. Empfänger (`receiver.rs::run`): `tracing::debug!`
+  pro empfangenem Block (Record-Zahl), `tracing::warn!` bei Socket-/Decode-
+  Fehler vor Rückgabe des `ReceiveError`. `firefly-asterix` unverändert
+  (Encoder ist infallibel, Decode-Fehler bereits typisiert). NFR-OBS-001
+  ergänzt. Alle Gates grün (`cargo test/clippy/fmt`). Nächster Schritt:
+  Häppchen 2.3 — gemeinsamer `/metrics`-Endpoint (Prometheus), nach
+  Abstimmung mit dem Projektverantwortlichen.
+- **Vorherige Aktualisierung:** 2026-06-15 — Paket #1 „Multicast-Feed-Sicherheit",
+  Häppchen 1.1: **ADR 0017 „Vertrauensgrenze des CAT062-Multicast-Feeds"**
+  erstellt (`docs/decisions/0017-multicast-feed-vertrauensgrenze.md`).
+  Entscheidung: Vertrauensgrenze liegt auf der **Netzwerk-Schicht** (dediziertes
+  isoliertes Segment/VLAN für Firefly-Sender + autorisierte ASD-Empfänger), nicht
+  im CAT062-Anwendungsprotokoll — kein anwendungsseitiges Signieren/Verschlüsseln
+  von CAT062 (würde ADR 0006 brechen). TTL=1 (`MulticastConfig`-Default) bleibt
+  zusätzliche, aber nicht hinreichende Maßnahme. Diskutiert auch das durch ADR
+  0016 neu entstandene Risiko eines gefälschten TSE-Bits (Track-Löschung durch
+  Injection) — Schutz ist identisch mit allgemeinem Injektions-Schutz, keine
+  TSE-spezifische Zusatzmaßnahme. Neue Anforderung **NFR-SEC-001** im Register
+  (Status: dokumentiert, Umsetzung ist Deployment-Sache). Reine Doku, kein
+  Code-Diff. Nächster Schritt: Häppchen 1.2 — Wayfinder-seitiges ADR-Pendant
+  (Empfangspfad-Vertrauensgrenze + Browser-Rand-Entscheidung TLS/Auth).
+- **Vorherige Aktualisierung:** 2026-06-15 (Branch `claude/tse-i062-080`, nach
   `main` gemergt — PRs #16 (Firefly) / #8 (Wayfinder):
   **TSE — CAT062 Track-Ende-Signalisierung über I062/080, ICD 2.2.0, additiv,
   ADR 0016.** AP7/AP8 (Callsign) waren bereits zuvor nach `main` gemergt — PRs

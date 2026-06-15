@@ -2,10 +2,11 @@
 //! shutdown and structured logging.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use firefly_asterix::Cat062Encoder;
 use firefly_multicast::MulticastConfig;
-use firefly_server::{router, scene, AppState, Scene, ServerConfig};
+use firefly_server::{router, scene, AppState, Metrics, Scene, ServerConfig};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -25,11 +26,15 @@ async fn main() {
         "starting Firefly server"
     );
 
-    spawn_cat062_multicast(config.speed, config.scene);
+    let metrics = Arc::new(Metrics::default());
+
+    spawn_cat062_multicast(config.speed, config.scene, Arc::clone(&metrics));
+    spawn_cat065_heartbeat(Arc::clone(&metrics));
 
     let state = AppState {
         frames: Arc::new(frames),
         speed: config.speed,
+        metrics,
     };
 
     let listener = match TcpListener::bind(("0.0.0.0", config.port)).await {
@@ -59,7 +64,7 @@ async fn main() {
 /// map shows — encoded as CAT062 and sent to the configured multicast group —
 /// paced into wall-clock at the same `speed` (ADR 0006). Disabled by default,
 /// so a plain `cargo run` never emits surprise network traffic.
-fn spawn_cat062_multicast(speed: f64, scene: Scene) {
+fn spawn_cat062_multicast(speed: f64, scene: Scene, metrics: Arc<Metrics>) {
     let config = MulticastConfig::from_env();
     if !config.enabled {
         tracing::info!(
@@ -89,10 +94,75 @@ fn spawn_cat062_multicast(speed: f64, scene: Scene) {
             }
         };
         match firefly_multicast::run(&socket, destination, &encoder, &scans, speed).await {
-            Ok(sent) => tracing::info!(sent, "CAT062 multicast feed complete"),
-            Err(error) => tracing::error!(%error, "CAT062 multicast feed stopped"),
+            Ok(sent) => {
+                metrics
+                    .cat062_scans_sent_total
+                    .fetch_add(sent as u64, std::sync::atomic::Ordering::Relaxed);
+                tracing::info!(sent, "CAT062 multicast feed complete");
+            }
+            Err(error) => {
+                metrics
+                    .cat062_send_errors_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tracing::error!(%error, "CAT062 multicast feed stopped");
+            }
         }
     });
+}
+
+/// Spawn the CAT065 SDPS-status **heartbeat** alongside the track feed, if both
+/// the multicast feed (`FIREFLY_CAT062_ENABLED`) and the heartbeat
+/// (`FIREFLY_CAT065_ENABLED`, default on) are enabled (ADR 0018). It sends one
+/// CAT065 status block to the **same** multicast group as CAT062, every
+/// `FIREFLY_CAT065_PERIOD` wall-clock seconds, so a consumer can distinguish an
+/// empty sky from a dead feed. The time of day (I065/030) is read from the wall
+/// clock at the delivery edge — the heartbeat is a real-time liveness signal.
+fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) {
+    let config = MulticastConfig::from_env();
+    if !config.enabled || !config.heartbeat_enabled {
+        return;
+    }
+
+    let destination = config.destination();
+    let encoder = config.cat065_encoder();
+    let period = Duration::from_secs_f64(config.heartbeat_period_secs);
+    tracing::info!(%destination, period_s = config.heartbeat_period_secs, "CAT065 heartbeat enabled");
+
+    tokio::spawn(async move {
+        let socket = match firefly_multicast::sender_socket().await {
+            Ok(socket) => socket,
+            Err(error) => {
+                tracing::error!(%error, "failed to open CAT065 heartbeat socket");
+                return;
+            }
+        };
+        let result = firefly_multicast::run_heartbeat(
+            &socket,
+            destination,
+            &encoder,
+            period,
+            utc_time_of_day_secs,
+            || {
+                metrics
+                    .cat065_heartbeats_sent_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            },
+        )
+        .await;
+        if let Err(error) = result {
+            tracing::error!(%error, "CAT065 heartbeat stopped");
+        }
+    });
+}
+
+/// The current UTC time of day in seconds since midnight, for I065/030. The
+/// heartbeat is a real-time liveness signal, so it reads the wall clock.
+fn utc_time_of_day_secs() -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64().rem_euclid(86_400.0))
+        .unwrap_or(0.0)
 }
 
 /// Initialise structured logging/tracing. Verbosity follows `RUST_LOG`

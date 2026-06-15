@@ -13,17 +13,20 @@
 //! - [`pacing`] — the single data-time→wall-clock mapping.
 //! - [`scene`] — a built-in demo frame stream.
 //! - [`app`] — the axum router, state and WebSocket pump.
+//! - [`metrics`] — the `/metrics` Prometheus endpoint.
 //!
 //! Networking lives only here; the tracker core stays pure and clock-free.
 
 pub mod app;
 pub mod config;
+pub mod metrics;
 pub mod pacing;
 pub mod scene;
 
 pub use app::{router, AppState};
 pub use config::{Scene, ServerConfig};
 pub use firefly_io::Frame;
+pub use metrics::Metrics;
 
 use tokio::net::TcpListener;
 

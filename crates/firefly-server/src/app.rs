@@ -12,6 +12,7 @@ use axum::{
 };
 use firefly_io::Frame;
 
+use crate::metrics::{ConnectedClientGuard, Metrics};
 use crate::pacing::due_at;
 
 /// Shared, read-only application state handed to every request.
@@ -25,6 +26,8 @@ pub struct AppState {
     pub frames: Arc<Vec<Frame>>,
     /// Playback speed: data-seconds per wall-second.
     pub speed: f64,
+    /// Operational counters exposed via `/metrics` (NFR-OBS-001).
+    pub metrics: Arc<Metrics>,
 }
 
 /// Build the router with every route wired to `state`.
@@ -33,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(index))
         .route("/health", get(health))
         .route("/ready", get(ready))
+        .route("/metrics", get(metrics_handler))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
@@ -46,6 +50,14 @@ async fn health() -> impl IntoResponse {
 /// listener binds, so answering at all means we are ready. ADR 0003.
 async fn ready() -> impl IntoResponse {
     "ready"
+}
+
+/// Prometheus text exposition of operational counters (NFR-OBS-001).
+async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
+    (
+        [("Content-Type", "text/plain; version=0.0.4; charset=utf-8")],
+        crate::metrics::render(&state.metrics, state.frames.len()),
+    )
 }
 
 /// The MapLibre air-picture page (Häppchen 3.4), embedded at compile time so the
@@ -76,6 +88,7 @@ pub const DELAY_TRIGGER_PAUSE: Duration = Duration::from_secs(5);
 /// deliberately paused *delivery* that demonstrates the tracks resume exactly
 /// where data-time says they should (NFR-CLOUD-004).
 async fn pump_frames(mut socket: WebSocket, state: AppState) {
+    let _client_guard = ConnectedClientGuard::new(&state.metrics);
     tracing::info!(
         frames = state.frames.len(),
         "client connected; replaying scene"
@@ -166,6 +179,7 @@ mod tests {
         AppState {
             frames: Arc::new(crate::scene::demo_frames()),
             speed: 1.0,
+            metrics: Arc::new(crate::metrics::Metrics::default()),
         }
     }
 
@@ -187,6 +201,28 @@ mod tests {
     #[tokio::test]
     async fn ready_probe_is_ok() {
         assert_eq!(get_status("/ready").await, StatusCode::OK);
+    }
+
+    /// The metrics endpoint answers 200 with a Prometheus exposition of the
+    /// scene's frame count. REQ: NFR-OBS-001
+    #[tokio::test]
+    async fn metrics_endpoint_exposes_frame_count() {
+        let response = router(state())
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("firefly_scene_frames_total"));
     }
 
     /// The index page is served. REQ: FR-NET-001

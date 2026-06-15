@@ -32,6 +32,7 @@
 //! REQ: FR-IO-003
 
 pub mod config;
+pub mod heartbeat;
 pub mod pacing;
 pub mod receiver;
 
@@ -42,6 +43,7 @@ use firefly_core::{SystemTrack, Timestamp};
 use tokio::net::UdpSocket;
 
 pub use config::MulticastConfig;
+pub use heartbeat::run_heartbeat;
 
 /// Bind a UDP socket suitable for *sending* multicast datagrams.
 ///
@@ -83,7 +85,21 @@ pub async fn run(
         }
 
         let block = encoder.encode(*time, tracks);
-        socket.send_to(&block, destination).await?;
+        match socket.send_to(&block, destination).await {
+            Ok(bytes) => {
+                tracing::debug!(
+                    time = now,
+                    bytes,
+                    tracks = tracks.len(),
+                    %destination,
+                    "sent CAT062 data block"
+                );
+            }
+            Err(error) => {
+                tracing::error!(time = now, %destination, %error, "failed to send CAT062 data block");
+                return Err(error);
+            }
+        }
 
         prev = Some(now);
         sent += 1;

@@ -207,6 +207,7 @@ dependencies = [
  "firefly-core",
  "firefly-geo",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
