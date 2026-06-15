@@ -4,6 +4,9 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
+> 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
+> `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
+
 - **Zuletzt aktualisiert:** 2026-06-15 (Branch `claude/tse-i062-080`, nach
   `main` gemergt — PRs #16 (Firefly) / #8 (Wayfinder):
   **TSE — CAT062 Track-Ende-Signalisierung über I062/080, ICD 2.2.0, additiv,
