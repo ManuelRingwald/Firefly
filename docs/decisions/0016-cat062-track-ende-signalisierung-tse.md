@@ -95,3 +95,11 @@ auch durch Coasting-Budget-Überschreitung sterben, während das Ziel noch flieg
 (z. B. dauerhafter Radar-Schatten). Das ASD entfernt die *Darstellung*; eine
 fachliche „Landung"-Semantik ist damit nicht behauptet. TSB (Geburt) und ein
 Unterscheiden der Lösch-*Ursache* bleiben bewusst offen.
+
+Im **asynchronen Pfad** (ADR 0013, `process_plots`) wird die Löschung durch
+**eintreffende Plots** getrieben, nicht durch den Ausgabe-Herzschlag. Verstummt
+der **gesamte** Feed (kein einziger Plot von irgendeinem Sensor), läuft kein
+Lösch-Sweep — ein verwaister Track coastet dann fort und es wird **kein** TSE
+gesendet, bis wieder irgendein Plot eintrifft. Im Normalbetrieb mit mehreren
+Zielen/Sensoren ist das unkritisch; ein heartbeat-getriebenes Löschen bei
+komplett stillem Feed bleibt mögliche Folgearbeit.
