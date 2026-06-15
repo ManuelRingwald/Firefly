@@ -7,7 +7,9 @@
 > diese Liste.**
 >
 > Stand: 2026-06-15 (Pakete #1 Multicast-Feed-Sicherheit, #2
-> Observability-Grundgerüst und #3 CAT065-Heartbeat abgeschlossen).
+> Observability-Grundgerüst und #3 CAT065-Heartbeat abgeschlossen; Pakete
+> #10–#20 aus den Backlogs „Firefly SDPS Core Features" und „Wayfinder"
+> übernommen).
 
 ## Empfohlene Reihenfolge
 
@@ -22,6 +24,17 @@
 | 7 | **FHA / Hazard-Analyse** | Firefly + Wayfinder | Sicherheits-Analyse-Dokument | **S4 · Opus 4.8** |
 | 8 | **Sensor-Registrierung/Bias-Korrektur** | Firefly | M4-Nachtrag, größere Mess-Fusions-Erweiterung | **S5 · Fable 5 / Opus 4.8** |
 | 9 | **Live-OpenAIP-Integration** | Firefly | Statische Airspace-GeoJSON → Live-API | **S3 · Sonnet 4.6** |
+| 10 | **SDPS-005 — Legal Recording & Replay** | Firefly | Sidecar zeichnet rohe Sensor-Multicast-Payloads mit Empfangs-Zeitstempel auf; dank Determinismus nach Datenzeit bit-genaue Rekonstruktion möglich | **S2 · Sonnet 4.6** |
+| 11 | **SDPS-006 — Erweiterte Observability** | Firefly | Prometheus-Exporter (Plots/s, Track-Count, Latenzen) + Grafana-Dashboard als Code, baut auf Paket #2 auf | **S2 · Sonnet 4.6** |
+| 12 | **ASD-001 — Erweiterter Data Block** | Wayfinder | Callsign (I062/245), Flight Level (I062/136, FLnnn), Ground Speed (aus Vx/Vy), Steig-/Sinkflug-Indikator im Track-Label | **S3 · Sonnet 4.6** |
+| 13 | **ASD-003 — Aeronautical Map Layer** | Wayfinder | "Radar Dark Mode"-Basistheme, Luftraumstrukturen (Sektoren/FIR), Waypoints/VOR/NDB als Layer | **S3 · Sonnet 4.6** |
+| 14 | **ASD-004 — Track-Lebenszyklus & History-Darstellung** | Wayfinder | Konfigurierbare History-Dots, Coasting-Blinken/Abdunkeln, Graceful Fade-Out bei TSE (ADR 0016) | **S3 · Sonnet 4.6** |
+| 15 | **ASD-005 — Höhen- und Filter-Tools** | Wayfinder | UI-Panel für Min/Max-FL-Filter, Tracks außerhalb ausblenden/entsättigen | **S2 · Sonnet 4.6** |
+| 16 | **ASD-002 — Anti-Garbling (Label-Vermeidung)** | Wayfinder | Algorithmus zur automatischen Label-Umpositionierung bei Überlappung (Leader Line); optional Drag&Drop | **S4 · Opus 4.8** |
+| 17 | **SDPS-003 — Environment & Meteo Data Service** | Firefly | Zyklisches QNH für barometrische Höhenkorrektur (I062/136), statische DTM-Daten als Basis für Bodenannäherungswarnungen | **S3 · Sonnet 4.6** |
+| 18 | **SDPS-004 + ASD-006 — STCA (gekoppeltes Paar)** | Firefly + Wayfinder | **Firefly:** serverseitige Konflikterkennung im Tracker (Vorausschau, Staffelungsminima), setzt Alarm-Flag in CAT062 (I062/340), ICD-Bump. **Wayfinder:** ASD-006 reformuliert als reiner Flag-Konsum — Data Block blinkt rot, keine eigene Geometrie-Berechnung (kein doppelter Determinismus-Pfad). Abhängigkeit: Wayfinder-Teil erst nach Firefly-ICD-Update | **S4 · Opus 4.8** |
+| 19 | **SDPS-001 — FEP Sensor Ingestion** | Firefly | UDP-Receiver für ASTERIX CAT048/CAT001, dynamische Sensor-Konfiguration, Koordinatentransformation Polar→kartesisch; löst Simulator als Eingangsquelle ab | **S5 · Fable 5 / Opus 4.8** |
+| 20 | **SDPS-002 — High Availability & State Sync** | Firefly | Main/Standby-Architektur (Leader Election), schnelle Sync des Tracker-States (Kalman-Matrizen, Assoziationen), drop-out-freier Standby-Übernahme im CAT062-Feed | **S5 · Fable 5 / Opus 4.8** |
 
 **Begründung der Reihenfolge:** Sicherheit (1) zuerst, da ASD sicherheitsrelevant
 und bisher nur als ADR-Lücke dokumentiert. Observability (2) direkt danach —
@@ -30,6 +43,22 @@ Lücken und macht alle Folgepakete (inkl. Heartbeat) beobachtbar. CAT065
 Heartbeat (3) baut darauf auf. Danach die unabhängigen S3-Pakete (4–6) je nach
 operativer Priorität. FHA (7) und die großen S5-Themen (8–9) zuletzt, auf
 stabilisierter Basis.
+
+## Begründung Pakete #10–#20 (Backlog-Übernahme, 2026-06-15)
+
+Reihenfolge: zuerst die kleinen, unabhängigen Pakete (#10–#15) für schnelle
+Wertschöpfung bei geringem Risiko; danach #16 (Anti-Garbling, algorithmisch
+anspruchsvoll) und #17 (Meteo, klar umrissen); dann das gekoppelte STCA-Paar
+(#18); die beiden großen S5-Architektur-Themen FEP-Ingestion (#19) und
+HA/State-Sync (#20) zuletzt, jeweils mit eigenem ADR vor Umsetzung.
+
+**Entscheidung SDPS-004/ASD-006:** ASD-006 wird **nicht** als unabhängige,
+Wayfinder-seitige STCA-Berechnung umgesetzt, sondern als Konsument des von
+Firefly im CAT062-Strom gesetzten Alarm-Flags (I062/340). Das vermeidet einen
+zweiten, potenziell abweichenden Determinismus-Pfad und hält die
+Konflikterkennung dort, wo sie nach SDPS-004 ohnehin berechnet wird. Das
+CAT062-ICD-Update (neues Item/Bit) wird im Rahmen von Paket #18 angekündigt,
+abgestimmt und versioniert.
 
 ## Findings (Logging/Observability-Audit, 2026-06-15)
 
