@@ -168,3 +168,64 @@ Message-Bus / WebSocket) für CAT062 zum ASD, und der **Koordinatenbezug**
 „`update_age` → PSR-Alter" eine **Single-Sensor-Vereinfachung** — die
 Mehr-Sensor-Provenienz (welcher Sensortyp zuletzt aktualisiert hat) kommt erst
 mit der Multi-Radar-Fusion in **M4**.
+
+---
+
+## Nachtrag AP7 — I062/245 Target Identification (Callsign), ICD 2.1.0
+
+**Status:** ✅ umgesetzt
+
+### Fachlich
+
+Der Lotse identifiziert ein Flugzeug primär über sein **Rufzeichen
+(Callsign / Flight ID)**, nicht über die 24-Bit-ICAO-Adresse oder den
+Mode-3/A-Code. CAT062 trägt das Rufzeichen in **I062/245** — ohne dieses Item
+müsste das ASD den Track-Label allein aus Track-Nummer und Mode 3/A bilden,
+was für den operativen Betrieb unzureichend ist.
+
+### Technisch
+
+I062/245 sitzt auf **FRN 10** — anders als I062/136/I062/500 (ADR 0015) liegt
+FRN 10 im **zweiten FSPEC-Oktett**, das wegen FRN 9/11/12/13/14 in jedem
+Record bereits vorhanden ist. Die Änderung ist daher **additiv**: kein
+Wachstum der FSPEC-Länge, bestehende Decoder bleiben gültig (sie überspringen
+das unbekannte FRN-10-Bit, bis sie nachziehen). ICD-Bump auf **2.1.0**
+(nicht-breaking), im Gegensatz zu ADR 0015 (2.0.0, breaking).
+
+Die Architektur folgt exakt dem **Pass-through-Muster von I062/136/FR-TRK-027**:
+
+```text
+ModeAC.callsign (Option<Callsign>, von firefly-sim)
+  → Track::update_identity (sticky: vorhandener Wert überschreibt, fehlender
+    Wert löscht nicht — wie mode_3a)
+  → SystemTrack.callsign (FR-TRK-028)
+  → Cat062Encoder: I062/245, FRN 10 (nur wenn Some)
+```
+
+**Wire-Format** (7 Oktette): Oktett 1 = STI (Source of Target Identification,
+Bits 8/7) + 6 Spare-Bits, hier `0x00` = *Downlinked Target Identification* —
+dieselbe ehrliche „durchgereicht, nicht von uns berechnet"-Framing wie bei der
+Flugfläche. Oktette 2–7 = 8 Zeichen × 6-Bit-IA-5-Code (ICAO Annex 10),
+MSB-first: `A`–`Z` → 1–26, `0`–`9` → 48–57, Leerzeichen → 32. Der neue Typ
+`Callsign([u8; 8])` (in `firefly-core`) kapselt das space-gepolsterte
+8-Byte-ASCII-Feld.
+
+Der Decoder (`decode_target_identification`) ist die Umkehrung: er verwirft
+das STI/Spare-Oktett, entpackt die sechs 6-Bit-Codes und bildet jeden
+Fremd-Code außerhalb {1–26, 32, 48–57} defensiv auf Leerzeichen ab — ein
+fremdes/fehlerhaftes Datagramm kann den Decoder nicht zum Absturz bringen
+(CLAUDE.md §8, Robustheit).
+
+### Tests
+
+- `cat062::target_identification_packs_eight_six_bit_ia5_codes` — Bit-Layout
+  für "DLH123" gegen Hand-Rechnung verifiziert.
+- `cat062::decode_recovers_callsign_when_present` — Encoder/Decoder-Rundreise.
+- `single_track_matches_reference_dump` bleibt **unverändert grün** (Track
+  ohne Callsign → FRN 10 nicht gesetzt, Referenz-Dump unverändert) — der
+  empirische Beleg für „additiv".
+
+### Wayfinder (AP8)
+
+Wayfinder zieht den Decoder für I062/245 nach (eigener Schritt, eigenes Repo)
+und zeigt das Callsign als primäre Track-Label-Zeile.

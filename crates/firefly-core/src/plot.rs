@@ -1,4 +1,5 @@
 use firefly_geo::Polar;
+use serde::{Deserialize, Serialize};
 
 use crate::ids::SensorId;
 use crate::time::Timestamp;
@@ -30,6 +31,30 @@ impl DetectionKind {
     }
 }
 
+/// An aircraft callsign / flight identification (Mode S "target identification").
+///
+/// Stored as up to 8 ASCII characters, space-padded — the same shape as the
+/// wire representation in CAT062 I062/245 (8 × 6-bit IA-5 characters).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Callsign(pub [u8; 8]);
+
+impl Callsign {
+    /// Build a callsign from a string, space-padding or truncating to 8 ASCII characters.
+    pub fn new(s: &str) -> Self {
+        let mut bytes = [b' '; 8];
+        for (i, b) in s.bytes().take(8).enumerate() {
+            bytes[i] = b;
+        }
+        Callsign(bytes)
+    }
+
+    /// The callsign as a string, with trailing spaces trimmed.
+    pub fn as_str(&self) -> &str {
+        let len = self.0.iter().rposition(|&b| b != b' ').map_or(0, |i| i + 1);
+        std::str::from_utf8(&self.0[..len]).unwrap_or("")
+    }
+}
+
 /// Secondary-radar replies attached to a plot.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ModeAC {
@@ -39,6 +64,8 @@ pub struct ModeAC {
     pub flight_level_ft: Option<f64>,
     /// Mode S 24-bit ICAO aircraft address, if available.
     pub icao_address: Option<u32>,
+    /// Mode S "target identification" (callsign / flight ID), if available.
+    pub callsign: Option<Callsign>,
 }
 
 /// A single radar detection ("plot") for one target on one scan of one sensor.

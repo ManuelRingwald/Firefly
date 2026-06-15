@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 
-use firefly_core::{ModeAC, SensorId, TrackId};
+use firefly_core::{Callsign, ModeAC, SensorId, TrackId};
 use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +76,10 @@ pub struct Track {
     /// change over time as the aircraft climbs/descends — we simply keep the
     /// latest reported value (no vertical tracking filter yet).
     flight_level_ft: Option<f64>,
+    /// Most recently reported callsign / flight ID (Mode S target
+    /// identification), if any SSR-equipped plot has ever associated with this
+    /// track. Sticky, like `mode_3a`.
+    callsign: Option<Callsign>,
     /// Sensors that contributed a hit (founded or updated this track) in the
     /// **most recent scan** (ADR 0010). Replaced wholesale each scan — unlike
     /// `mode_3a`/`icao_address` this is not sticky, since it answers "who sees
@@ -97,6 +101,7 @@ impl Track {
             mode_3a: None,
             icao_address: None,
             flight_level_ft: None,
+            callsign: None,
             contributing_sensors: BTreeSet::new(),
         }
     }
@@ -219,6 +224,11 @@ impl Track {
         self.flight_level_ft
     }
 
+    /// Most recently reported callsign / flight ID, if known.
+    pub fn callsign(&self) -> Option<Callsign> {
+        self.callsign
+    }
+
     /// Sensors that contributed a hit in the most recent scan.
     pub fn contributing_sensors(&self) -> &BTreeSet<SensorId> {
         &self.contributing_sensors
@@ -254,6 +264,9 @@ impl Track {
         }
         if mode_ac.flight_level_ft.is_some() {
             self.flight_level_ft = mode_ac.flight_level_ft;
+        }
+        if mode_ac.callsign.is_some() {
+            self.callsign = mode_ac.callsign;
         }
     }
 }
@@ -292,9 +305,11 @@ mod tests {
             mode_3a: Some(0o2613),
             flight_level_ft: Some(35_000.0),
             icao_address: Some(0x0040_0123),
+            callsign: Some(Callsign::new("DLH123")),
         });
         assert_eq!(track.mode_3a(), Some(0o2613));
         assert_eq!(track.icao_address(), Some(0x0040_0123));
+        assert_eq!(track.callsign(), Some(Callsign::new("DLH123")));
     }
 
     /// A primary-only plot (no SSR reply) does not erase a previously known
@@ -307,6 +322,7 @@ mod tests {
             mode_3a: Some(0o2613),
             flight_level_ft: None,
             icao_address: Some(0x0040_0123),
+            callsign: Some(Callsign::new("DLH123")),
         });
 
         track.update_identity(&ModeAC::default());
@@ -316,6 +332,11 @@ mod tests {
             track.icao_address(),
             Some(0x0040_0123),
             "ICAO address stays sticky"
+        );
+        assert_eq!(
+            track.callsign(),
+            Some(Callsign::new("DLH123")),
+            "callsign stays sticky"
         );
     }
 
@@ -329,11 +350,13 @@ mod tests {
             mode_3a: Some(0o2613),
             flight_level_ft: None,
             icao_address: Some(0x0040_0123),
+            callsign: None,
         });
         track.update_identity(&ModeAC {
             mode_3a: Some(0o7000),
             flight_level_ft: None,
             icao_address: Some(0x0040_0123),
+            callsign: None,
         });
 
         assert_eq!(track.mode_3a(), Some(0o7000));

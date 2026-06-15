@@ -21,13 +21,14 @@
 
 ## Version
 
-**2.0.0** (2026-06-14) — **Breaking:** Vertikallage I062/136 + I062/500 auf
-standardkonformen FRN 27 (ADR 0015).
+**2.1.0** (2026-06-15) — **Additiv:** Target Identification (Callsign)
+I062/245 auf FRN 10 (AP7).
 
 ### Changelog
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 2.1.0 | 2026-06-15 | **Additiv (AP7).** Neues optionales Item **I062/245** (Target Identification / Callsign, FRN 10, 7 Oktette: STI/spare-Oktett + 8 × 6-Bit-IA-5-Zeichen) — nur wenn der Track jemals eine Mode-S-Kennung getragen hat (sticky wie Mode 3/A). FRN 10 liegt im bereits vorhandenen 2. FSPEC-Oktett — kein Wachstum der FSPEC-Länge, kein Breaking Change für bestehende Decoder. |
 | 2.0.0 | 2026-06-14 | **BREAKING (ADR 0015).** (1) Neues optionales Item **I062/136** (Measured Flight Level, FRN 17, signed i16, LSB 1/4 FL = 25 ft) — nur wenn der Track eine Mode-C-Flugfläche trägt. (2) **I062/500** (Estimated Accuracies) wandert von **FRN 16 → FRN 27**, dem echten EUROCONTROL-UAP-Slot; FRN 16 (I062/295) bleibt reserviert/ungenutzt. Die Standard-Record-FSPEC wächst dadurch von 3 auf 4 Oktette. Decoder **muss** beide Änderungen nachziehen. |
 | 1.1.1 | 2026-06-14 | **Doku-Politur (kein Wire-Format-Change).** Normative Spec-Edition referenziert (Abschnitt 0), Update-Rate/Scan-Period dokumentiert (Abschnitt 1), Mitternachts-Rollover von I062/070 präzisiert (Abschnitt 6), Stand zum I062/100-Referenzpunkt verlinkt (Abschnitt 5). |
 | 1.1.0 | 2026-06-13 | **UTC Time-of-Day in I062/070.** I062/070 wird jetzt als echte ASTERIX-Time-of-Day kodiert (Sekunden seit UTC-Mitternacht des Simulationstags), nicht relativ zur Szenario-Start-Zeit. `Scenario` trägt `simulation_start_time_of_day: f64` (Default 0 = Mitternacht); `Timestamp` bleibt intern deterministisch (Offset seit Szenario-Start). `Cat062Encoder` nimmt die Startzeit im Konstruktor entgegen. |
@@ -97,6 +98,7 @@ zusätzlichen FSPEC-Bits — unbekannte Items werden anhand ihrer Längen-Regeln
 | 6 | I062/100 | Calculated Track Position (System-Stereografisch X/Y) | 6 Oktette | X, Y je i24 BE (Zweierkomplement), LSB = 0,5 m |
 | 7 | I062/185 | Calculated Track Velocity (Cartesian Vx/Vy) | 4 Oktette | Vx, Vy je i16 BE, LSB = 0,25 m/s |
 | 9 | I062/060 | Track Mode 3/A Code | 2 Oktette | 12-Bit-Antwort (4 Oktal-Ziffern) in den unteren 12 Bit |
+| 10 | I062/245 | Target Identification (Callsign, nur wenn vorhanden) | 7 Oktette | STI/spare-Oktett + 8 × 6-Bit-IA-5-Zeichen; siehe 4.5 |
 | 11 | I062/380 | Aircraft Derived Data (nur Target-Address-Subfeld) | variabel | Primary Subfield Bit 8 (`ADR`, `0x80`) + 24-Bit Mode-S-Adresse, nur wenn vorhanden |
 | 12 | I062/040 | Track Number | 2 Oktette | u16 BE |
 | 13 | I062/080 | Track Status | variabel mit FX | siehe 4.1 |
@@ -106,15 +108,16 @@ zusätzlichen FSPEC-Bits — unbekannte Items werden anhand ihrer Längen-Regeln
 
 > **UAP-Standardtreue (ADR 0015).** Die FRNs folgen der echten EUROCONTROL-
 > CAT062-UAP (SUR.ET1.ST05.2000-STD-09-01). Die Lücken sind die nicht
-> emittierten Standard-Items: FRN 2 (Spare), 3 (I062/015), 8 (I062/210), 10
-> (I062/245), 15 (I062/200), **16 (I062/295 — reserviert, ungenutzt)**, 18–20
+> emittierten Standard-Items: FRN 2 (Spare), 3 (I062/015), 8 (I062/210),
+> 15 (I062/200), **16 (I062/295 — reserviert, ungenutzt)**, 18–20
 > (I062/130/135/220). Ein konformer Fremd-Decoder liest den Strom ohne privates
 > Profil. Weil I062/500 auf FRN 27 (4. FSPEC-Oktett) liegt, hat ein Record
 > mindestens **4 FSPEC-Oktette**.
 
-Items werden **nur kodiert, wenn der Wert vorhanden ist** — I062/060 und
-I062/380 erscheinen nur bei vorhandener Mode-3/A- bzw. ICAO-Identität, I062/136
-nur bei vorhandener Mode-C-Flugfläche; das FSPEC spiegelt das automatisch.
+Items werden **nur kodiert, wenn der Wert vorhanden ist** — I062/060, I062/245
+und I062/380 erscheinen nur bei vorhandener Mode-3/A-, Callsign- bzw.
+ICAO-Identität, I062/136 nur bei vorhandener Mode-C-Flugfläche; das FSPEC
+spiegelt das automatisch.
 
 ### 4.1 I062/080 — Track Status
 
@@ -159,6 +162,24 @@ in Fuß). Es ist eine *gemessene* Größe, kein geglätteter vertikaler
 Track-Zustand — Firefly führt (noch) keinen vertikalen Schätzer (ADR 0015).
 Das Item erscheint nur, wenn der Track jemals eine Mode-C-Antwort getragen hat
 (sticky wie die Identität).
+
+### 4.5 I062/245 — Target Identification (Callsign)
+
+Sieben Oktette:
+
+| Oktett(e) | Inhalt | Kodierung |
+|-----------|--------|-----------|
+| 1 | STI (Source of Target Identification, Bits 8/7) + 6 Spare-Bits | `0x00` = "Downlinked Target Identification" (Mode-S-Downlink-Antwort, unverändert durchgereicht) |
+| 2–7 | Callsign / Flight ID, 8 Zeichen | 8 × 6-Bit-IA-5-Code, MSB-first (48 Bit = 6 Oktette) |
+
+**6-Bit-IA-5-Kodierung** (ICAO Annex 10): `A`–`Z` → 1–26, `0`–`9` → 48–57,
+Leerzeichen (und jeder andere Code defensiv beim Decoder) → 32. Das Callsign
+wird auf 8 Zeichen mit Leerzeichen aufgefüllt bzw. abgeschnitten.
+
+Quelle ist die **zuletzt empfangene Mode-S-Kennung**
+(`SystemTrack.callsign`) — ein reiner Durchreich-Wert, kein von Firefly
+generierter Bezeichner. Das Item erscheint nur, wenn der Track jemals eine
+Kennung getragen hat (sticky wie Mode 3/A und die Flugfläche).
 
 ## 5. Koordinaten
 

@@ -138,6 +138,7 @@ impl Radar {
                     mode_3a: target.mode_3a,
                     flight_level_ft: Some(flight_level_ft),
                     icao_address: target.icao_address,
+                    callsign: target.callsign,
                 },
             )
         } else {

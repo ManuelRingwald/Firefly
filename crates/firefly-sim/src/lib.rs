@@ -19,6 +19,7 @@
 //!     legs: vec![Leg::cruise(60.0)],
 //!     mode_3a: Some(0o7000),
 //!     icao_address: None,
+//!     callsign: None,
 //! };
 //! let scenario = Scenario::new(origin).add_radar(radar).add_target(target);
 //! let plots = firefly_sim::run(&scenario);

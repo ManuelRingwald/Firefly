@@ -42,6 +42,7 @@ fn crossing_aircraft() -> Target {
         legs: vec![Leg::cruise(200.0)],
         mode_3a: Some(0o1234),
         icao_address: Some(0x3C_65_AC),
+        callsign: None,
     }
 }
 

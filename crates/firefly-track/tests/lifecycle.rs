@@ -66,6 +66,7 @@ fn single_target_yields_one_confirmed_track() {
         legs: vec![Leg::cruise(160.0)],
         mode_3a: None,
         icao_address: None,
+        callsign: None,
     };
     let scenario = Scenario::new(origin)
         .with_duration(160.0)
@@ -105,6 +106,7 @@ fn two_crossing_targets_keep_their_identities() {
         legs: vec![Leg::cruise(360.0)],
         mode_3a: None,
         icao_address: None,
+        callsign: None,
     };
     // Westbound, north = 41 km (1 km apart, so always distinguishable).
     let westbound = Target {
@@ -118,6 +120,7 @@ fn two_crossing_targets_keep_their_identities() {
         legs: vec![Leg::cruise(360.0)],
         mode_3a: None,
         icao_address: None,
+        callsign: None,
     };
 
     let scenario = Scenario::new(origin)

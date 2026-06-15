@@ -38,6 +38,7 @@ fn main() {
         legs: vec![Leg::cruise(300.0)],
         mode_3a: Some(0o1000),
         icao_address: Some(0x3C_65_AC),
+        callsign: None,
     };
 
     // Aircraft B: climbing northbound, then a right turn — a primary-only
@@ -57,6 +58,7 @@ fn main() {
         ],
         mode_3a: None,
         icao_address: None,
+        callsign: None,
     };
 
     let scenario = Scenario::new(origin)

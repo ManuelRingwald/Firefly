@@ -41,6 +41,7 @@ fn eastbound() -> Target {
         legs: vec![Leg::cruise(180.0)],
         mode_3a: Some(0o1000),
         icao_address: Some(0x3C_00_01),
+        callsign: None,
     }
 }
 
@@ -57,6 +58,7 @@ fn turning() -> Target {
         legs: vec![Leg::cruise(60.0), Leg::turn(90.0, 1.0), Leg::cruise(30.0)],
         mode_3a: Some(0o2000),
         icao_address: Some(0x3C_00_02),
+        callsign: None,
     }
 }
 

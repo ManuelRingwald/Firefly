@@ -751,6 +751,7 @@ fn system_track_from(
         mode_3a: track.mode_3a(),
         icao_address: track.icao_address(),
         flight_level_ft: track.flight_level_ft(),
+        callsign: track.callsign(),
         contributing_sensors: track.contributing_sensors().iter().copied().collect(),
     }
 }
@@ -842,6 +843,7 @@ mod tests {
                 mode_3a: Some(mode_3a),
                 flight_level_ft: Some(35_000.0),
                 icao_address: Some(icao),
+                callsign: None,
             },
         }
     }
@@ -1614,6 +1616,7 @@ mod tests {
                 mode_3a: Some(squawk),
                 flight_level_ft: Some(35_000.0),
                 icao_address: None,
+                callsign: None,
             },
         };
 

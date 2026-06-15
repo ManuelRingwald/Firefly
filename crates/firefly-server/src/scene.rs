@@ -4,7 +4,7 @@
 //! demonstration scenario — including the deliberate "delay" trigger that shows
 //! timing robustness — lands in Häppchen 3.5.
 
-use firefly_core::{Sensor, SensorId, SystemTrack, TargetId, Timestamp};
+use firefly_core::{Callsign, Sensor, SensorId, SystemTrack, TargetId, Timestamp};
 use firefly_geo::{Enu, LocalFrame, Wgs84};
 use firefly_io::Frame;
 use firefly_player::Player;
@@ -85,6 +85,7 @@ fn eastbound() -> Target {
         legs: vec![Leg::cruise(180.0)],
         mode_3a: Some(0o1000),
         icao_address: Some(0x3C_00_01),
+        callsign: Some(Callsign::new("DLH401")),
     }
 }
 
@@ -101,6 +102,7 @@ fn turning() -> Target {
         legs: vec![Leg::cruise(60.0), Leg::turn(90.0, 1.0), Leg::cruise(30.0)],
         mode_3a: Some(0o2000),
         icao_address: Some(0x3C_00_02),
+        callsign: Some(Callsign::new("EWG23A")),
     }
 }
 
@@ -230,6 +232,7 @@ fn crossing_northeast() -> Target {
         legs: vec![Leg::cruise(240.0)],
         mode_3a: Some(0o2001),
         icao_address: Some(0x3C_10_01),
+        callsign: Some(Callsign::new("DLH4MA")),
     }
 }
 
@@ -248,6 +251,7 @@ fn crossing_southeast() -> Target {
         legs: vec![Leg::cruise(240.0)],
         mode_3a: Some(0o2002),
         icao_address: Some(0x3C_10_02),
+        callsign: Some(Callsign::new("AUA64J")),
     }
 }
 
@@ -267,6 +271,7 @@ fn departure_straight() -> Target {
         ],
         mode_3a: Some(0o2003),
         icao_address: Some(0x3C_10_03),
+        callsign: Some(Callsign::new("DLH9LH")),
     }
 }
 
@@ -288,6 +293,7 @@ fn departure_turning() -> Target {
         ],
         mode_3a: Some(0o2004),
         icao_address: Some(0x3C_10_04),
+        callsign: Some(Callsign::new("CFG2VB")),
     }
 }
 
@@ -304,6 +310,7 @@ fn overflight_ssr() -> Target {
         legs: vec![Leg::cruise(240.0)],
         mode_3a: Some(0o2005),
         icao_address: Some(0x3C_10_05),
+        callsign: Some(Callsign::new("BAW9CG")),
     }
 }
 
@@ -322,6 +329,7 @@ fn overflight_primary() -> Target {
         legs: vec![Leg::cruise(240.0)],
         mode_3a: None,
         icao_address: None,
+        callsign: None,
     }
 }
 
@@ -345,6 +353,7 @@ fn holding_pattern() -> Target {
         ],
         mode_3a: Some(0o2007),
         icao_address: Some(0x3C_10_07),
+        callsign: Some(Callsign::new("RYR43FH")),
     }
 }
 
@@ -367,6 +376,7 @@ fn arrival_north() -> Target {
         legs: vec![Leg::cruise(240.0).with_climb(-2.0)],
         mode_3a: Some(0o2010),
         icao_address: Some(0x3C_10_08),
+        callsign: Some(Callsign::new("SWR123")),
     }
 }
 

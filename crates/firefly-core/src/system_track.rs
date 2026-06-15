@@ -21,6 +21,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{SensorId, TrackId};
+use crate::plot::Callsign;
 use crate::time::Timestamp;
 use firefly_geo::Wgs84;
 
@@ -71,6 +72,13 @@ pub struct SystemTrack {
     /// (no vertical Kalman state); this is the last measured value, passed
     /// through (FR-TRK-027).
     pub flight_level_ft: Option<f64>,
+    /// Most recently reported callsign / flight ID (Mode S target
+    /// identification), if any SSR-equipped plot has ever associated with this
+    /// track. `None` for a primary-only track. Sticky, like `mode_3a`: a
+    /// primary-only detection does not clear the last known callsign. Encoded
+    /// as CAT062 I062/245 (Target Identification) when present, passed through
+    /// from the Mode S downlink reply (FR-TRK-028).
+    pub callsign: Option<Callsign>,
     /// Sensors that contributed a hit to this track in the **most recent
     /// scan** (ADR 0010, central measurement fusion). Empty while coasting —
     /// no sensor saw it this scan. Sorted by [`SensorId`] for determinism.
@@ -122,6 +130,7 @@ mod tests {
             mode_3a: None,
             icao_address: None,
             flight_level_ft: None,
+            callsign: None,
             contributing_sensors: Vec::new(),
         }
     }
