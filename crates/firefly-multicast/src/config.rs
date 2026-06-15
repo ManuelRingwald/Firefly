@@ -7,7 +7,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use firefly_asterix::DataSourceId;
+use firefly_asterix::{Cat065Encoder, DataSourceId};
 use firefly_geo::Wgs84;
 
 /// Configuration of the CAT062 multicast feed.
@@ -31,6 +31,19 @@ pub struct MulticastConfig {
     /// measured from. `FIREFLY_CAT062_REF_LAT` / `FIREFLY_CAT062_REF_LON` in
     /// degrees, default `48.0, 11.0` (the demo scene origin).
     pub reference_point: Wgs84,
+    /// Whether to emit the CAT065 SDPS-status heartbeat alongside the tracks
+    /// (ADR 0018). `FIREFLY_CAT065_ENABLED`, default `true` — when the feed is
+    /// on, a consumer should be able to tell "alive but empty" from "dead".
+    /// Only takes effect when [`enabled`](Self::enabled) is also set.
+    pub heartbeat_enabled: bool,
+    /// Heartbeat period in **wall-clock** seconds. `FIREFLY_CAT065_PERIOD`,
+    /// default `1.0` (the de-facto CAT065 status rate). The heartbeat is a
+    /// real-time liveness signal, so it is paced by the wall clock, not by
+    /// data-time like the track feed.
+    pub heartbeat_period_secs: f64,
+    /// Service identification stamped into I065/015. `FIREFLY_CAT065_SERVICE_ID`,
+    /// default `1`.
+    pub service_id: u8,
 }
 
 impl Default for MulticastConfig {
@@ -42,6 +55,9 @@ impl Default for MulticastConfig {
             sac: 25,
             sic: 2,
             reference_point: Wgs84::from_degrees(48.0, 11.0, 0.0),
+            heartbeat_enabled: true,
+            heartbeat_period_secs: 1.0,
+            service_id: 1,
         }
     }
 }
@@ -91,6 +107,16 @@ impl MulticastConfig {
                 0.0,
             ),
         };
+        let heartbeat_enabled = get("FIREFLY_CAT065_ENABLED")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(default.heartbeat_enabled);
+        let heartbeat_period_secs = get("FIREFLY_CAT065_PERIOD")
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|s| s.is_finite() && *s > 0.0)
+            .unwrap_or(default.heartbeat_period_secs);
+        let service_id = get("FIREFLY_CAT065_SERVICE_ID")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default.service_id);
         Self {
             enabled,
             group,
@@ -98,6 +124,9 @@ impl MulticastConfig {
             sac,
             sic,
             reference_point,
+            heartbeat_enabled,
+            heartbeat_period_secs,
+            service_id,
         }
     }
 
@@ -109,6 +138,11 @@ impl MulticastConfig {
     /// The data-source identifier (SAC/SIC) for I062/010.
     pub fn data_source(&self) -> DataSourceId {
         DataSourceId::new(self.sac, self.sic)
+    }
+
+    /// A CAT065 heartbeat encoder using this config's data source and service id.
+    pub fn cat065_encoder(&self) -> Cat065Encoder {
+        Cat065Encoder::new(self.data_source(), self.service_id)
     }
 }
 
@@ -167,6 +201,32 @@ mod tests {
             config.reference_point.lat_deg(),
             default.reference_point.lat_deg()
         );
+    }
+
+    /// The heartbeat is on by default and configurable; a non-positive or
+    /// garbage period falls back to the default rate.
+    #[test]
+    fn heartbeat_config_is_parsed_with_safe_defaults() {
+        let default = MulticastConfig::default();
+        assert!(default.heartbeat_enabled, "heartbeat on by default");
+        assert_eq!(default.heartbeat_period_secs, 1.0);
+        assert_eq!(default.service_id, 1);
+
+        let custom = MulticastConfig::from_lookup(|key| match key {
+            "FIREFLY_CAT065_ENABLED" => Some("false".to_string()),
+            "FIREFLY_CAT065_PERIOD" => Some("2.5".to_string()),
+            "FIREFLY_CAT065_SERVICE_ID" => Some("7".to_string()),
+            _ => None,
+        });
+        assert!(!custom.heartbeat_enabled);
+        assert_eq!(custom.heartbeat_period_secs, 2.5);
+        assert_eq!(custom.service_id, 7);
+
+        let garbage = MulticastConfig::from_lookup(|key| match key {
+            "FIREFLY_CAT065_PERIOD" => Some("-1".to_string()),
+            _ => None,
+        });
+        assert_eq!(garbage.heartbeat_period_secs, default.heartbeat_period_secs);
     }
 
     /// The enabled flag accepts the common truthy spellings and treats anything

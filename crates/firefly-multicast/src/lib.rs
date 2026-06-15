@@ -32,6 +32,7 @@
 //! REQ: FR-IO-003
 
 pub mod config;
+pub mod heartbeat;
 pub mod pacing;
 pub mod receiver;
 
@@ -42,6 +43,7 @@ use firefly_core::{SystemTrack, Timestamp};
 use tokio::net::UdpSocket;
 
 pub use config::MulticastConfig;
+pub use heartbeat::run_heartbeat;
 
 /// Bind a UDP socket suitable for *sending* multicast datagrams.
 ///

@@ -21,13 +21,20 @@
 
 ## Version
 
-**2.2.0** (2026-06-15) — **Additiv:** Track-Ende-Signal (TSE) in I062/080
-Oktett 2 (ADR 0016).
+**2.3.0** (2026-06-15) — **Additiv:** CAT065 SDPS-Service-Status-Heartbeat auf
+demselben Multicast-Strom (ADR 0018). Konsument dispatcht am CAT-Oktett.
+
+> ℹ️ **Geltungsbereich.** Diese ICD beschreibt den **gesamten
+> Multicast-Ausgabe-Vertrag** zwischen Firefly und Wayfinder. Seit 2.3.0
+> trägt der Strom **zwei** ASTERIX-Kategorien: **CAT062** (System-Tracks,
+> Abschnitte 2–6) und **CAT065** (SDPS-Service-Status / Heartbeat,
+> Abschnitt 8). Der Dateiname (`ICD-CAT062.md`) bleibt aus Historie erhalten.
 
 ### Changelog
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 2.3.0 | 2026-06-15 | **Additiv (ADR 0018).** Neue Kategorie **CAT065** (SDPS Service Status, „Heartbeat") auf **derselben** Multicast-Gruppe/Port wie CAT062. Periodische SDPS-Status-Meldung (I065/000 = 1) mit I065/010, I065/000, I065/015, I065/030 (Time of Day), I065/040 (NOGO operationell/degradiert). Wall-clock-getaktet (Default 1 s, `FIREFLY_CAT065_PERIOD`). **Konsument muss am führenden CAT-Oktett dispatchen** (`0x3E` → Track, `0x41` → Status) und unbekannte Kategorien überspringen — die robuste-Decoder-Regel verlangte das ohnehin. Kein Eingriff in das CAT062-Record-Format. Details: Abschnitt 8. |
 | 2.2.0 | 2026-06-15 | **Additiv (ADR 0016).** I062/080 (Track Status) trägt jetzt das **TSE-Bit** (*Track Service End*, Oktett 2, Bit 7, `0x40`): es markiert die **letzte** Meldung für einen Track (er wird gelöscht). Erscheint nur bei gelöschten Tracks; ein gelöschter Track wird damit **genau einmal** mit gesetztem TSE gemeldet und danach nicht mehr. I062/080 ist bereits ein variabel langes FX-Item (FRN 13, in jedem Record) — kein FSPEC-Wachstum, kein Breaking Change. **Konsument muss TSE als „Track entfernen" interpretieren** (sonst Ein-Frame-Geist). |
 | 2.1.0 | 2026-06-15 | **Additiv (AP7).** Neues optionales Item **I062/245** (Target Identification / Callsign, FRN 10, 7 Oktette: STI/spare-Oktett + 8 × 6-Bit-IA-5-Zeichen) — nur wenn der Track jemals eine Mode-S-Kennung getragen hat (sticky wie Mode 3/A). FRN 10 liegt im bereits vorhandenen 2. FSPEC-Oktett — kein Wachstum der FSPEC-Länge, kein Breaking Change für bestehende Decoder. |
 | 2.0.0 | 2026-06-14 | **BREAKING (ADR 0015).** (1) Neues optionales Item **I062/136** (Measured Flight Level, FRN 17, signed i16, LSB 1/4 FL = 25 ft) — nur wenn der Track eine Mode-C-Flugfläche trägt. (2) **I062/500** (Estimated Accuracies) wandert von **FRN 16 → FRN 27**, dem echten EUROCONTROL-UAP-Slot; FRN 16 (I062/295) bleibt reserviert/ungenutzt. Die Standard-Record-FSPEC wächst dadurch von 3 auf 4 Oktette. Decoder **muss** beide Änderungen nachziehen. |
@@ -57,7 +64,8 @@ ersetzt die Edition nicht als normative Quelle.
 | Default-Gruppe | `239.255.0.62` (Env: `FIREFLY_CAT062_GROUP`) |
 | Default-Port | `8600` (Env: `FIREFLY_CAT062_PORT`) |
 | TTL | 1 (subnetz-lokal, Default) |
-| Framing | **Ein Datagramm = ein vollständiger CAT062-Datenblock = ein Scan.** Keine zusätzliche Anwendungs-Rahmung (keine Sequenznummern, keine Extra-Header). |
+| Framing | **Ein Datagramm = ein vollständiger ASTERIX-Datenblock einer Kategorie.** Für CAT062 ist das ein Scan (Tracks); für CAT065 ein SDPS-Status (Heartbeat). Keine zusätzliche Anwendungs-Rahmung (keine Sequenznummern, keine Extra-Header). |
+| Kategorien | **CAT062** (Tracks) **und CAT065** (Heartbeat, seit 2.3.0) auf **derselben** Gruppe/Port. Der Empfänger **dispatcht am führenden CAT-Oktett**: `0x3E` (62) → Track-Datenblock (Abschnitt 2), `0x41` (65) → SDPS-Status (Abschnitt 8). Unbekannte Kategorien werden verworfen, nicht als Fehler behandelt. |
 
 **Update-Rate.** Es gibt **keine feste, globale Update-Periode** — jeder Sensor
 hat seine eigene `scan_period` (typisch 4–12 s, konfiguriert pro Radar, siehe
@@ -223,11 +231,67 @@ monoton steigenden Zeitstempel über Mitternacht hinweg ableiten**; ein
 Sprung von einem Wert nahe 86 400 s auf einen kleinen Wert ist ein normaler
 Tageswechsel, kein Datenfehler.
 
+## 8. CAT065 — SDPS Service Status (Heartbeat, seit 2.3.0)
+
+**Zweck.** CAT065 ist der periodische **Lebenssignal-Strom** des
+Datenverarbeitungssystems (SDPS). Er erlaubt dem Konsumenten, **„leerer
+Himmel"** (gültig, keine Tracks) von **„toter Feed"** (nichts kommt mehr an) zu
+unterscheiden — Grundlage für Staleness-Erkennung und ein Readiness-Signal
+(ADR 0018). CAT065 läuft auf **derselben** Gruppe/Port wie CAT062; der Empfänger
+erkennt es am CAT-Oktett `0x41` (65).
+
+**Normative Referenz.** EUROCONTROL **SUR.ET1.ST05.2000-STD-13-01** („CAT065
+SDPS Service Status Messages"). Wir senden ein bewusstes Subset (periodische
+SDPS-Status-Meldung).
+
+**Datenblock.**
+```
+[CAT = 0x41] [LEN: u16 BE] [Record]
+```
+- `CAT` = 1 Oktett, immer `0x41` (65).
+- `LEN` = 2 Oktette, big-endian, Gesamtlänge inkl. 3-Oktett-Header.
+- Ein Datagramm trägt **einen** SDPS-Status-Record.
+
+**Record (FSPEC/UAP).** Gleiche FSPEC-Mechanik wie CAT062 (Abschnitt 3). Die
+periodische SDPS-Status-Meldung setzt die FRNs **{1, 2, 3, 4, 6}** → ein
+einzelnes FSPEC-Oktett `0xF4`.
+
+| FRN | Item | Länge | Inhalt |
+|-----|------|-------|--------|
+| 1 | I065/010 | 2 | Data Source Identifier (SAC/SIC). |
+| 2 | I065/000 | 1 | Message Type. **`1` = SDPS Status** (der Heartbeat). |
+| 3 | I065/015 | 1 | Service Identification (`FIREFLY_CAT065_SERVICE_ID`, Default 1). |
+| 4 | I065/030 | 3 | Time of Day, 24-Bit, **1/128 s** seit UTC-Mitternacht (wie I062/070). **Wall-clock-Aussendezeit**, nicht Datenzeit. |
+| 6 | I065/040 | 1 | SDPS Configuration & Status. **NOGO-Feld** (Bits 8/7): `00` = operationell (`0x00`), sonst degradiert (wir senden `0x40`). |
+
+> FRN 5 (I065/020 Batch Number) und FRN 7 (I065/050 Service Status Report) sind
+> Teil der CAT065-UAP, gehören aber zu anderen Message-Types und werden vom
+> Heartbeat **nicht** gesendet. Ein Decoder soll sie tolerieren (1 Oktett je).
+
+**Byte-genauer Referenz-Dump** (Service-ID 1, Mitternacht, operationell):
+```
+0x41 0x00 0x0C 0xF4 SAC SIC 0x01 0x01 0x00 0x00 0x00 0x00
+```
+(`LEN` = 12; FSPEC `0xF4`; I065/000 = `0x01`; I065/015 = `0x01`; I065/030 =
+`00 00 00`; I065/040 = `0x00`.)
+
+**Takt.** Wall-clock-periodisch, Default **1 s** (`FIREFLY_CAT065_PERIOD`).
+Konsument-Empfehlung für Staleness: Feed als *stale* werten, wenn länger als
+**~3 × Periode** kein Heartbeat ankam.
+
+**Konfiguration (Sender).** `FIREFLY_CAT065_ENABLED` (Default `true`, greift nur
+wenn der Feed via `FIREFLY_CAT062_ENABLED` läuft), `FIREFLY_CAT065_PERIOD`
+(Sekunden), `FIREFLY_CAT065_SERVICE_ID`. SAC/SIC stammen aus den
+`FIREFLY_CAT062_SAC`/`_SIC`.
+
 ## 7. Referenzen
 
-- Referenz-Encoder: `crates/firefly-asterix/src/cat062.rs` (Firefly).
-- Byte-genauer Referenz-Dump/Test: `single_track_matches_reference_dump`
+- Referenz-Encoder CAT062: `crates/firefly-asterix/src/cat062.rs` (Firefly).
+- Referenz-Encoder/Decoder CAT065: `crates/firefly-asterix/src/cat065.rs`
+  (Firefly); byte-genauer Test `cat065::status_matches_reference_dump`.
+- Byte-genauer CAT062-Referenz-Dump/Test: `single_track_matches_reference_dump`
   (Firefly, `firefly-asterix`).
 - Architekturentscheidungen: Fireflys ADR 0006 (Integration/CAT062), ADR 0014
-  (Produktions-Pivot, Wayfinder konsumiert CAT062/UDP).
+  (Produktions-Pivot, Wayfinder konsumiert CAT062/UDP), **ADR 0018 (CAT065
+  Heartbeat)**.
 - Kurzfassung für Wayfinder: Wayfinders `CLAUDE.md` Abschnitt 2.

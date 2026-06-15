@@ -7,7 +7,23 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-15 — Paket #2 „Observability-Grundgerüst"
+- **Zuletzt aktualisiert:** 2026-06-15 — Paket #3 „CAT065 Heartbeat" —
+  **Firefly-Seite (Sender) fertig.** Neues Modul `firefly-asterix::cat065`:
+  `Cat065Encoder` kodiert eine periodische SDPS-Status-Meldung (I065/000=1) mit
+  I065/010 (SAC/SIC), I065/015 (Service-ID), I065/030 (Time of Day, 1/128 s),
+  I065/040 (NOGO operationell/degradiert); `decode_status_block` als Umkehrung;
+  byte-genauer Referenz-Dump-Test. `firefly-multicast`: `run_heartbeat`
+  (wall-clock-getakteter, entkoppelter Sende-Task, Default 1 s) + Config
+  (`FIREFLY_CAT065_ENABLED`/`_PERIOD`/`_SERVICE_ID`). `firefly-server`:
+  `spawn_cat065_heartbeat` (eigener Socket, stempelt UTC-Tageszeit), Metrik
+  `firefly_cat065_heartbeats_sent_total`. **Gleiche Multicast-Gruppe wie
+  CAT062**, Dispatch am CAT-Oktett (Architektur-Entscheidung des
+  Projektverantwortlichen). Doku: **ADR 0018**, ICD → **2.3.0** (additiv, §8),
+  FR-IO-006 + FR-NET-003 im Register. Alle Gates grün (`cargo test/clippy/fmt`).
+  **Offen: Wayfinder-Seite** (CAT065-Decoder, Receiver-Dispatch am CAT-Oktett,
+  Staleness-Tracker, Frontend-Banner, /metrics). Danach Cross-Project-Issue
+  schließen + ROADMAP auf „erledigt".
+- **Vorherige Aktualisierung:** 2026-06-15 — Paket #2 „Observability-Grundgerüst"
   **abgeschlossen** mit Häppchen 2.3: gemeinsamer `/metrics`-Endpoint
   (Prometheus-Textformat). Firefly-Teil: neues Modul
   `firefly-server::metrics` (`Metrics`-Struct mit Atomics,
