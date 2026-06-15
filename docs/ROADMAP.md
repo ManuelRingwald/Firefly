@@ -6,8 +6,8 @@
 > Arbeit neue Findings/Pakete ergeben. **Stichwort „Roadmap" im Chat zeigt
 > diese Liste.**
 >
-> Stand: 2026-06-15 (nach Merge von PR #16 (Firefly) / #8 (Wayfinder), TSE/ADR
-> 0016 abgeschlossen).
+> Stand: 2026-06-15 (Pakete #1 Multicast-Feed-Sicherheit, #2
+> Observability-Grundgerüst und #3 CAT065-Heartbeat abgeschlossen).
 
 ## Empfohlene Reihenfolge
 
@@ -15,7 +15,7 @@
 |---|-------|---------|--------|--------------|
 | 1 | **Multicast-Feed-Sicherheit** ✅ *inhaltlich abgeschlossen* | Firefly + Wayfinder | Netz-Isolation/Authentizität des CAT062-Eingangspfads dokumentieren + ggf. absichern (ADR), Wayfinder-Browser-Rand (TLS/Auth, ehem. Issue #7). **Häppchen 1.1 ✅ erledigt** (Firefly ADR 0017, NFR-SEC-001); **Häppchen 1.2 ✅ erledigt** (Wayfinder ADR 0003, Empfangspfad-Pendant + Browser-Rand-Entscheidung: TLS/Auth primär am Reverse-Proxy, fail-closed Origin-Check/Token/TLS in Wayfinder, NFR-SEC-001); **Häppchen 1.3 ✅ erledigt** (Browser-Rand-Implementierung: strikter Origin-Check, optionale Token-Middleware, optionales TLS in `pkg/ws/handler.go`/`cmd/wayfinder/main.go`, Tests, NFR-SEC-001 vollständig); **1.4** optional Sender-Härtung Firefly (offen, unabhängiges Nice-to-have) | **S4 · Opus 4.8** |
 | 2 | **Observability-Grundgerüst** ✅ *abgeschlossen* | Firefly + Wayfinder | **Häppchen 2.1 ✅ erledigt** (Wayfinder: totes `internal/config` entfernt, `WAYFINDER_LOG_LEVEL` konfigurierbar, Client-Eviction im Broadcaster geloggt, NFR-OBS-001); **Häppchen 2.2 ✅ erledigt** (Firefly: `tracing` in `firefly-multicast` eingezogen — Sender `lib.rs::run` mit `debug!`/`error!` pro Scan, Empfänger `receiver.rs::run` mit `debug!`/`warn!` pro Block; `firefly-asterix` unverändert, NFR-OBS-001); **Häppchen 2.3 ✅ erledigt** (gemeinsamer `/metrics`-Endpoint, Prometheus-Textformat: Wayfinder `pkg/metrics` auf Port `:8080` — Block-/Track-Zahlen, CAT062-Decode-Fehler, aktuelle Track-Zahl, WS-Client-Count/Evictions, NFR-OBS-002; Firefly `firefly-server::metrics` auf `/metrics` — Szene-Frame-Zahl, WS-Client-Count/Total, CAT062-Multicast-Scans/Sendefehler, NFR-OBS-001) | **S3 · Sonnet 4.6** |
-| 3 | **AP5/AP6 — CAT065 Heartbeat** | Firefly (Encoder) + Wayfinder (Decoder) | Service-Status-Reports (Feed-Health) — wichtig für Readiness/Staleness-Erkennung, ergänzt Observability | **S3–S4 · Sonnet/Opus** |
+| 3 | **AP5/AP6 — CAT065 Heartbeat** ✅ *abgeschlossen* | Firefly (Encoder) + Wayfinder (Decoder) | SDPS-Service-Status (Feed-Health) — unterscheidet „leerer Himmel" von „totem Feed". **Firefly:** `firefly-asterix::cat065` (Encoder+Decoder, byte-genau), `firefly-multicast::run_heartbeat` (wall-clock, gleiche Gruppe wie CAT062, ADR 0018), Metrik `firefly_cat065_heartbeats_sent_total`; ICD → 2.3.0 (additiv, §8), FR-IO-006/FR-NET-003. **Wayfinder:** `pkg/cat065`-Decoder, Receiver-Dispatch am CAT-Oktett, `pkg/health`-Staleness-Tracker, Feed-Banner im Frontend, `/ready`-Integration, Metriken `wayfinder_cat065_heartbeats_received_total`/`wayfinder_feed_stale`; FR-DATA-004/FR-OPS-004/NFR-OBS-003. | **S4 · Opus 4.8** |
 | 4 | **Konfigurierbarer System-Referenzpunkt** | Firefly | I062/100-Referenzpunkt jenseits Demo-Ursprung Frankfurt, ADR-0006-Folgeentscheidung | **S3 · Sonnet 4.6** |
 | 5 | **Out-of-Order-Eingang (Robustheit)** | Firefly | Tracker-Härtung gegen verspätete/umsortierte Plots | **S3 · Sonnet 4.6** |
 | 6 | **Coverage-Werkzeug** | Firefly | Visualisierung Sensor-Abdeckung | **S3 · Sonnet 4.6** |
@@ -53,6 +53,9 @@ stabilisierter Basis.
 
 ## Erledigt (Referenz)
 
+- ✅ Paket #3 / AP5/AP6 — CAT065 SDPS-Heartbeat, ICD 2.3.0 (ADR 0018; Firefly Sender + Wayfinder Decoder/Staleness)
+- ✅ Paket #2 — Observability-Grundgerüst (Log-Level, `tracing` in firefly-multicast, `/metrics` beidseitig)
+- ✅ Paket #1 — Multicast-Feed-Sicherheit (Firefly ADR 0017, Wayfinder ADR 0003, Browser-Rand)
 - ✅ AP7/AP8 — CAT062 I062/245 Callsign, ICD 2.1.0 (PR #15 Firefly / #7 Wayfinder)
 - ✅ ADR 0016/TSE — CAT062 I062/080 Track-Ende, ICD 2.2.0 (PR #16 Firefly / #8 Wayfinder)
 - ✅ AP1/AP2 — CAT062 I062/136 Vertikallage + UAP-Standardtreue, ICD 2.0.0 (ADR 0015)

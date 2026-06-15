@@ -20,9 +20,12 @@
   CAT062**, Dispatch am CAT-Oktett (Architektur-Entscheidung des
   Projektverantwortlichen). Doku: **ADR 0018**, ICD → **2.3.0** (additiv, §8),
   FR-IO-006 + FR-NET-003 im Register. Alle Gates grün (`cargo test/clippy/fmt`).
-  **Offen: Wayfinder-Seite** (CAT065-Decoder, Receiver-Dispatch am CAT-Oktett,
-  Staleness-Tracker, Frontend-Banner, /metrics). Danach Cross-Project-Issue
-  schließen + ROADMAP auf „erledigt".
+  **Wayfinder-Seite ebenfalls fertig** (CAT065-Decoder `pkg/cat065`,
+  Receiver-Dispatch am CAT-Oktett, `pkg/health`-Staleness-Tracker,
+  Frontend-Banner, `/ready`/`/metrics`-Integration) — **Paket #3 beidseitig
+  abgeschlossen**, ROADMAP auf „erledigt". Nächster Schritt: nächstes
+  Roadmap-Paket nach Abstimmung (z. B. #4 Konfigurierbarer
+  System-Referenzpunkt).
 - **Vorherige Aktualisierung:** 2026-06-15 — Paket #2 „Observability-Grundgerüst"
   **abgeschlossen** mit Häppchen 2.3: gemeinsamer `/metrics`-Endpoint
   (Prometheus-Textformat). Firefly-Teil: neues Modul
