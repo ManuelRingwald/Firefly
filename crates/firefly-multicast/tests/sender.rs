@@ -26,6 +26,7 @@ fn track(id: u32) -> SystemTrack {
         v_north: -50.0,
         confirmed: true,
         coasting: false,
+        ended: false,
         update_age: 0.0,
         position_uncertainty: 100.0,
         mode_3a: Some(0o1000),

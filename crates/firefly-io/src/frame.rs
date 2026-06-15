@@ -152,6 +152,7 @@ mod tests {
             v_north: 0.0,
             confirmed: true,
             coasting: false,
+            ended: false,
             update_age: 0.0,
             position_uncertainty: 42.0,
             mode_3a: None,

@@ -207,6 +207,11 @@ pub struct Tracker {
     /// feed (small gaps between sensors, but each sensor revisiting every few
     /// seconds) keeps tracks alive across a single sensor's revisit.
     sensor_period: BTreeMap<SensorId, f64>,
+    /// Final reports for tracks deleted since the last drain (ADR 0016): each is
+    /// the deleted track's last known state with `ended = true`, to be emitted
+    /// once as a CAT062 I062/080 TSE record. Filled at the deletion sites,
+    /// drained by the output stage via [`take_ended_tracks`](Self::take_ended_tracks).
+    ended_tracks: Vec<SystemTrack>,
 }
 
 impl Tracker {
@@ -218,6 +223,7 @@ impl Tracker {
             prev_scan_time: None,
             sensor_last_scan: BTreeMap::new(),
             sensor_period: BTreeMap::new(),
+            ended_tracks: Vec::new(),
         }
     }
 
@@ -308,6 +314,47 @@ impl Tracker {
                 system_track_from(track, &estimate, t, coasting, update_age, frame)
             })
             .collect()
+    }
+
+    /// Take and clear the buffered **final reports** for tracks deleted since
+    /// the last call (ADR 0016, FR-TRK-029).
+    ///
+    /// Each returned [`SystemTrack`] carries the deleted track's last known
+    /// state with `ended = true` (→ the CAT062 I062/080 TSE bit). The output
+    /// stage calls this once per heartbeat and appends the results to the air
+    /// picture, so a deleted track is reported **exactly once** more — letting a
+    /// consumer remove it deterministically — and then never again. Draining is
+    /// idempotent: a second call before the next deletion returns empty.
+    pub fn take_ended_tracks(&mut self) -> Vec<SystemTrack> {
+        std::mem::take(&mut self.ended_tracks)
+    }
+
+    /// Buffer the final state of every track matching `should_delete`, then drop
+    /// those tracks from the live set (ADR 0016). The captured [`SystemTrack`]s
+    /// carry `ended = true` and are appended in live-set order, so the buffer is
+    /// deterministic (NFR-CLOUD-001). Shared by both deletion sites (batch
+    /// `process_scan` and the time-continuous `process_plots`).
+    fn delete_and_buffer_ended(&mut self, should_delete: impl Fn(&Track) -> bool) {
+        let frame = &self.config.tracking_frame;
+        let mut newly_ended: Vec<SystemTrack> = self
+            .tracks
+            .iter()
+            .filter(|track| should_delete(track))
+            .map(|track| {
+                let mut final_track = system_track_from(
+                    track,
+                    &track.estimate(),
+                    track.last_time,
+                    track.is_coasting(),
+                    track.update_age(),
+                    frame,
+                );
+                final_track.ended = true;
+                final_track
+            })
+            .collect();
+        self.tracks.retain(|track| !should_delete(track));
+        self.ended_tracks.append(&mut newly_ended);
     }
 
     /// Process one scan: a batch of plots that share the time `time`.
@@ -456,8 +503,9 @@ impl Tracker {
         //    deletion governed by how many updates were missed, independent of
         //    the feed's absolute pace (NFR-CLOUD-004), while tolerating the
         //    interleaved misses an asynchronous multi-radar feed produces.
-        self.tracks
-            .retain(|track| !should_delete(track, delete_tentative, delete_confirmed, cadence));
+        self.delete_and_buffer_ended(|track| {
+            should_delete(track, delete_tentative, delete_confirmed, cadence)
+        });
     }
 
     /// Process a **single plot at its own data time** — the asynchronous,
@@ -602,8 +650,8 @@ impl Tracker {
 
             // 5. Delete via the time-continuous missed-revisit budget, floored
             //    by the slowest observed sensor cadence (Häppchen 13.5c).
-            self.tracks.retain(|track| {
-                !should_delete_continuous(track, delete_tentative, delete_confirmed, cadence)
+            self.delete_and_buffer_ended(|track| {
+                should_delete_continuous(track, delete_tentative, delete_confirmed, cadence)
             });
 
             gi = gj;
@@ -746,6 +794,7 @@ fn system_track_from(
         v_north: v[1],
         confirmed: track.is_confirmed(),
         coasting,
+        ended: false,
         update_age,
         position_uncertainty: estimate.position_uncertainty(),
         mode_3a: track.mode_3a(),
@@ -901,6 +950,63 @@ mod tests {
         tracker.process_scan(Timestamp(4.0), &[]);
         tracker.process_scan(Timestamp(8.0), &[]);
         assert_eq!(tracker.tracks().len(), 0);
+    }
+
+    /// While a track is alive it is never reported as ended, and the live output
+    /// carries `ended = false`. ADR 0016. REQ: FR-TRK-029
+    #[test]
+    fn live_track_is_never_ended() {
+        let mut tracker = Tracker::new(config());
+        tracker.process_scan(Timestamp(0.0), &[plot(0.0, 50_000.0, 0.0)]);
+        assert!(
+            tracker.take_ended_tracks().is_empty(),
+            "a live track must not be buffered as ended"
+        );
+        assert!(
+            tracker.system_tracks().iter().all(|st| !st.ended),
+            "live system tracks carry ended = false"
+        );
+    }
+
+    /// When a track is deleted it is reported **exactly once** as an ended
+    /// `SystemTrack` (TSE), carrying its identity and last known state; a second
+    /// drain returns nothing. ADR 0016. REQ: FR-TRK-029
+    #[test]
+    fn deleted_track_is_buffered_once_with_ended_flag() {
+        let mut tracker = Tracker::new(config());
+        // Confirm a track carrying an SSR identity.
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[plot_with_identity(t, 50_000.0, 0.0, 0o1234, 0xABCDEF)],
+            );
+        }
+        let id = tracker.tracks()[0].id();
+        assert!(tracker.take_ended_tracks().is_empty(), "still alive");
+
+        // Starve it until deletion (delete_misses_confirmed = 4).
+        for k in 3..7 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(Timestamp(t), &[]);
+        }
+        assert_eq!(tracker.tracks().len(), 0, "track should be deleted");
+
+        let ended = tracker.take_ended_tracks();
+        assert_eq!(ended.len(), 1, "exactly one final report");
+        assert!(ended[0].ended, "final report carries the TSE/ended flag");
+        assert_eq!(ended[0].id, id, "it is the deleted track");
+        assert_eq!(
+            ended[0].mode_3a,
+            Some(0o1234),
+            "the final report carries the track's last known identity"
+        );
+
+        // Draining is one-shot: nothing is reported a second time.
+        assert!(
+            tracker.take_ended_tracks().is_empty(),
+            "an ended track is reported exactly once, then never again"
+        );
     }
 
     /// Two well-separated plots create two distinct tracks.
