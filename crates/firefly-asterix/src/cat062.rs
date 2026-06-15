@@ -24,7 +24,7 @@
 
 use std::collections::BTreeSet;
 
-use firefly_core::{SystemTrack, Timestamp};
+use firefly_core::{Callsign, SystemTrack, Timestamp};
 use firefly_geo::{StereographicProjection, Wgs84};
 
 use crate::fspec::{self, RecordBuilder};
@@ -41,7 +41,6 @@ const CATEGORY: u8 = 62;
 /// - FRN 2 — spare bit in the standard UAP (never an item).
 /// - FRN 3 — I062/015 Service Identification.
 /// - FRN 8 — I062/210 Calculated Acceleration.
-/// - FRN 10 — I062/245 Target Identification.
 /// - FRN 15 — I062/200 Mode of Movement.
 /// - FRN 16 — I062/295 Track Data Ages (reserved, not emitted).
 /// - FRN 18/19/20 — I062/130/135/220 (geometric altitude, baro altitude, RoCD).
@@ -61,6 +60,8 @@ mod uap {
     pub const VELOCITY_CARTESIAN: u8 = 7;
     /// I062/060 — Track Mode 3/A Code.
     pub const MODE_3A_CODE: u8 = 9;
+    /// I062/245 — Target Identification (callsign / flight ID).
+    pub const TARGET_IDENTIFICATION: u8 = 10;
     /// I062/380 — Aircraft Derived Data (here: the Target Address subfield).
     pub const AIRCRAFT_DERIVED_DATA: u8 = 11;
     /// I062/040 — Track Number.
@@ -105,6 +106,13 @@ const MODE_3A_CODE_MASK: u16 = 0x0FFF;
 /// (Mode S address) subfield is present. Verified against
 /// SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.24.
 const ADR_TARGET_ADDRESS_PRESENT: u8 = 0x80;
+/// I062/245 octet 1, bits 8/7 (STI, Source of Target Identification): `00`
+/// means "Downlinked Target Identification" (a Mode S downlink reply, passed
+/// through unchanged) — the honest characterisation for our pass-through
+/// callsign, mirroring the framing used for the flight level (FR-TRK-027).
+/// The remaining six bits of octet 1 are spare and stay zero. Verified
+/// against SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.9.
+const STI_DOWNLINKED_TARGET_IDENTIFICATION: u8 = 0x00;
 
 /// The field-extension bit (lowest bit of an octet): "another octet follows".
 /// Used both by the FSPEC and, here, *inside* the variable-length I062/080.
@@ -184,9 +192,10 @@ impl Cat062Encoder {
 
     /// One CAT062 record for one track: FSPEC + the present items in UAP order.
     ///
-    /// The SSR-derived items (I062/060, I062/380, I062/136) are only added when
-    /// the track actually carries that value; the [`RecordBuilder`] then
-    /// reflects their presence in the FSPEC automatically.
+    /// The SSR-derived items (I062/060, I062/245, I062/380, I062/136) are only
+    /// added when the track actually carries that value; the
+    /// [`RecordBuilder`] then reflects their presence in the FSPEC
+    /// automatically.
     fn record(&self, time: Timestamp, track: &SystemTrack) -> Vec<u8> {
         let mut builder = RecordBuilder::new()
             .item(
@@ -210,6 +219,12 @@ impl Cat062Encoder {
 
         if let Some(code) = track.mode_3a {
             builder = builder.item(uap::MODE_3A_CODE, encode_mode_3a(code));
+        }
+        if let Some(callsign) = track.callsign {
+            builder = builder.item(
+                uap::TARGET_IDENTIFICATION,
+                encode_target_identification(callsign),
+            );
         }
         if let Some(address) = track.icao_address {
             builder = builder.item(uap::AIRCRAFT_DERIVED_DATA, encode_target_address(address));
@@ -303,6 +318,32 @@ fn encode_velocity_component(mps: f64) -> [u8; 2] {
 /// already stores the code as that 12-bit octal value, so it maps straight in.
 fn encode_mode_3a(code: u16) -> Vec<u8> {
     (code & MODE_3A_CODE_MASK).to_be_bytes().to_vec()
+}
+
+/// I062/245 — Target Identification: a primary subfield octet (STI, here
+/// [`STI_DOWNLINKED_TARGET_IDENTIFICATION`]) followed by the 8-character
+/// callsign packed as 8 × 6-bit IA-5 codes (48 bits, six octets), MSB-first.
+fn encode_target_identification(callsign: Callsign) -> Vec<u8> {
+    let mut bits: u64 = 0;
+    for &b in &callsign.0 {
+        bits = (bits << 6) | ia5_encode(b) as u64;
+    }
+    let packed = bits.to_be_bytes(); // 48 significant bits in the low 6 octets
+    let mut out = Vec::with_capacity(7);
+    out.push(STI_DOWNLINKED_TARGET_IDENTIFICATION);
+    out.extend_from_slice(&packed[2..8]);
+    out
+}
+
+/// Encode one IA-5 character to its 6-bit ASTERIX code (ICAO Annex 10):
+/// `A`-`Z` → 1-26, `0`-`9` → 48-57, space (and anything else, defensively) →
+/// 32.
+fn ia5_encode(byte: u8) -> u8 {
+    match byte {
+        b'A'..=b'Z' => byte - b'A' + 1,
+        b'0'..=b'9' => byte - b'0' + 48,
+        _ => 32,
+    }
 }
 
 /// I062/380 — Aircraft Derived Data, here just the **Target Address** (ADR)
@@ -437,6 +478,9 @@ pub struct DecodedRecord {
     pub position_uncertainty: f64,
     /// I062/060, if the track carries an SSR identity.
     pub mode_3a: Option<u16>,
+    /// I062/245 Target Identification (callsign / flight ID), if the track
+    /// carries one.
+    pub callsign: Option<Callsign>,
     /// I062/380 Target Address, if the track carries a Mode S address.
     pub icao_address: Option<u32>,
     /// I062/136 Measured Flight Level, in feet, if the track carries one.
@@ -516,6 +560,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
     let mut update_age = None;
     let mut position_uncertainty = None;
     let mut mode_3a = None;
+    let mut callsign = None;
     let mut icao_address = None;
     let mut flight_level_ft = None;
 
@@ -527,6 +572,9 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
             uap::POSITION_CARTESIAN => cartesian = Some(decode_position_cartesian(cursor.take(6)?)),
             uap::VELOCITY_CARTESIAN => velocity = Some(decode_velocity(cursor.take(4)?)),
             uap::MODE_3A_CODE => mode_3a = Some(decode_mode_3a(cursor.take(2)?)),
+            uap::TARGET_IDENTIFICATION => {
+                callsign = Some(decode_target_identification(cursor.take(7)?))
+            }
             uap::AIRCRAFT_DERIVED_DATA => {
                 icao_address = Some(decode_target_address(cursor.take(4)?))
             }
@@ -560,6 +608,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         position_uncertainty: position_uncertainty
             .ok_or(DecodeError::MissingItem(uap::ESTIMATED_ACCURACIES))?,
         mode_3a,
+        callsign,
         icao_address,
         flight_level_ft,
     })
@@ -644,6 +693,35 @@ fn decode_velocity_component(bytes: &[u8]) -> f64 {
 /// I062/060 — the inverse of [`encode_mode_3a`].
 fn decode_mode_3a(bytes: &[u8]) -> u16 {
     u16::from_be_bytes(bytes.try_into().unwrap()) & MODE_3A_CODE_MASK
+}
+
+/// I062/245 — the inverse of [`encode_target_identification`]. The leading
+/// STI/spare octet is dropped; the remaining six octets are unpacked into
+/// eight 6-bit IA-5 codes and decoded back to ASCII.
+fn decode_target_identification(bytes: &[u8]) -> Callsign {
+    let mut bits: u64 = 0;
+    for &b in &bytes[1..7] {
+        bits = (bits << 8) | b as u64;
+    }
+    let mut chars = [0u8; 8];
+    for (i, c) in chars.iter_mut().enumerate() {
+        let shift = (7 - i) * 6;
+        let code = ((bits >> shift) & 0x3F) as u8;
+        *c = ia5_decode(code);
+    }
+    Callsign(chars)
+}
+
+/// Decode one 6-bit ASTERIX IA-5 code back to ASCII — the inverse of
+/// [`ia5_encode`]. Codes outside the defined ranges (1-26, 32, 48-57) cannot
+/// occur from our own encoder, but a malformed/foreign datagram could send
+/// one; map those defensively to space rather than panicking.
+fn ia5_decode(code: u8) -> u8 {
+    match code {
+        1..=26 => b'A' + (code - 1),
+        48..=57 => b'0' + (code - 48),
+        _ => b' ',
+    }
 }
 
 /// I062/380 — the inverse of [`encode_target_address`]. The leading
@@ -760,6 +838,7 @@ mod tests {
             mode_3a: None,
             icao_address: None,
             flight_level_ft: None,
+            callsign: None,
             contributing_sensors: Vec::new(),
         }
     }
@@ -1033,6 +1112,43 @@ mod tests {
         assert_eq!(records[0].position_uncertainty, 100.0);
     }
 
+    /// I062/245 packs 8 characters as 8 × 6-bit IA-5 codes (48 bits = 6
+    /// octets) behind a leading STI/spare octet. "DLH123 " (space-padded to 8)
+    /// → codes [4,12,8,49,50,51,32,32] (D=4, L=12, H=8, '1'=49, '2'=50, '3'=51,
+    /// space=32). REQ: FR-IO-003, FR-TRK-028
+    #[test]
+    fn target_identification_packs_eight_six_bit_ia5_codes() {
+        let callsign = Callsign::new("DLH123");
+        assert_eq!(
+            encode_target_identification(callsign),
+            vec![
+                0x00, // STI=00, spare
+                // codes 4,12,8,49,50,51,32,32 packed 6-bit MSB-first:
+                // 000100 001100 001000 110001 110010 110011 100000 100000
+                0x10, 0xC2, 0x31, 0xCB, 0x38, 0x20,
+            ]
+        );
+    }
+
+    /// A track carrying a callsign encodes I062/245 (FRN 10) and the round
+    /// trip recovers it, trailing spaces and all. REQ: FR-IO-003, FR-IO-004,
+    /// FR-TRK-028
+    #[test]
+    fn decode_recovers_callsign_when_present() {
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let mut t = track(1);
+        t.callsign = Some(Callsign::new("DLH123"));
+        let block = encoder.encode(Timestamp(12.0), &[t]);
+
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].callsign, Some(Callsign::new("DLH123")));
+        // The other items still decode correctly alongside it.
+        assert_eq!(records[0].track_number, 1);
+        assert_eq!(records[0].position_uncertainty, 100.0);
+    }
+
     /// One track encodes to a fully known byte string — the reference dump.
     ///
     /// Hand derivation (present FRNs {1, 4, 5, 6, 7, 12, 13, 14, 27} — the
@@ -1128,6 +1244,7 @@ mod tests {
         assert_eq!(record.update_age, 2.0);
         assert_eq!(record.position_uncertainty, 100.0);
         assert_eq!(record.mode_3a, None);
+        assert_eq!(record.callsign, None);
         assert_eq!(record.icao_address, None);
         assert_eq!(record.flight_level_ft, None);
     }

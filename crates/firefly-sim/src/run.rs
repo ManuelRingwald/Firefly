@@ -103,7 +103,7 @@ mod tests {
     use super::*;
     use crate::radar::{Radar, RadarParams};
     use crate::target::{Leg, State};
-    use firefly_core::{DetectionKind, Sensor, SensorId, TargetId};
+    use firefly_core::{Callsign, DetectionKind, Sensor, SensorId, TargetId};
     use firefly_geo::Wgs84;
 
     fn straight_north_target() -> Target {
@@ -118,6 +118,7 @@ mod tests {
             legs: vec![Leg::cruise(100.0)],
             mode_3a: Some(0o1234),
             icao_address: Some(0x3C_65_AC),
+            callsign: Some(Callsign::new("DLH123")),
         }
     }
 

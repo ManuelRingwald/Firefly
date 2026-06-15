@@ -262,6 +262,7 @@ mod tests {
             legs: vec![Leg::cruise(60.0)],
             mode_3a: Some(0o7000),
             icao_address: None,
+            callsign: None,
         }
     }
 

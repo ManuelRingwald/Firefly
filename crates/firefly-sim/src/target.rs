@@ -6,7 +6,7 @@
 //! cruise, coordinated turns, accelerations and climbs/descents — enough to
 //! exercise a tracker's motion models without a full flight-dynamics engine.
 
-use firefly_core::TargetId;
+use firefly_core::{Callsign, TargetId};
 use firefly_geo::Enu;
 
 /// A constant-control segment of a target's trajectory.
@@ -104,6 +104,8 @@ pub struct Target {
     pub mode_3a: Option<u16>,
     /// Mode S 24-bit ICAO address, if equipped.
     pub icao_address: Option<u32>,
+    /// Callsign / flight ID reported via Mode S, if equipped.
+    pub callsign: Option<Callsign>,
 }
 
 impl Target {

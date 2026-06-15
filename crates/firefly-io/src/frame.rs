@@ -157,6 +157,7 @@ mod tests {
             mode_3a: None,
             icao_address: None,
             flight_level_ft: None,
+            callsign: None,
             contributing_sensors: Vec::new(),
         }
     }

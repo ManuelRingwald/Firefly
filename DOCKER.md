@@ -72,6 +72,20 @@ Das Docker-Image eignet sich für:
 - Runtime-Image ist optimiert; Build ist ~2–3 Min auf moderner Hardware
 - Multi-stage spart ~1 GB Speicher gegenüber einem Single-stage Build
 
+## Mit Wayfinder (End-to-End-ASD)
+
+Standardmäßig sendet der Container **keinen** CAT062-Multicast. Für den
+End-to-End-Test mit Wayfinder:
+
+```bash
+FIREFLY_CAT062_ENABLED=true docker-compose up
+```
+
+Multicast (`239.255.0.62:8600`) traversiert Docker's Standard-Bridge-Netz
+nicht — für den Container-basierten End-to-End-Test mit Wayfinder muss daher
+`network_mode: host` verwendet werden (Linux). Details und der lokale Weg
+(ohne Docker) stehen in Wayfinders `README.md`/`DOCKER.md`.
+
 ## Zukunft
 
 - Optional: **nginx Reverse Proxy** (in docker-compose.yml auskommentiert) für HTTPS/Load-Balancing

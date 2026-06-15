@@ -45,6 +45,7 @@ fn filter_smooths_and_recovers_velocity() {
         legs: vec![Leg::cruise(240.0)],
         mode_3a: None,
         icao_address: None,
+        callsign: None,
     };
 
     let scenario = Scenario::new(origin)

@@ -59,6 +59,7 @@ fn demo_scenario() -> Scenario {
         legs: vec![Leg::cruise(200.0)],
         mode_3a: None,
         icao_address: None,
+        callsign: None,
     };
     Scenario::new(origin)
         .with_duration(200.0)

@@ -53,6 +53,7 @@ fn single_target_quality_meets_thresholds() {
         legs: vec![Leg::cruise(duration)],
         mode_3a: None,
         icao_address: None,
+        callsign: None,
     };
 
     let scenario = Scenario::new(origin)

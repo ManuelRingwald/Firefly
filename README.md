@@ -146,6 +146,23 @@ cargo run --example demo -p firefly-sim   # nur den M1-Simulator sehen
 Details zu Docker, docker-compose und Cloud-Deployment (Kubernetes, Cloud
 Run, ECS) stehen in [DOCKER.md](DOCKER.md).
 
+## Zusammen mit Wayfinder testen (End-to-End-ASD)
+
+Firefly sendet seinen Live-Track-Strom als ASTERIX CAT062 über UDP-Multicast
+(ADR 0006) — das **Wayfinder**-Projekt (eigenes Repo) ist der produktive ASD-
+Konsument dafür. Standardmäßig sendet Firefly keinen Multicast (kein
+überraschender Netzwerkverkehr bei `cargo run`):
+
+```bash
+FIREFLY_CAT062_ENABLED=true cargo run -p firefly-server
+# oder mit Docker:
+FIREFLY_CAT062_ENABLED=true docker-compose up
+```
+
+Mit Wayfinder parallel gestartet (siehe dessen README) erscheinen die Tracks
+live auf Wayfinders Karte. Details zum Wire-Vertrag stehen in
+[docs/ICD-CAT062.md](docs/ICD-CAT062.md).
+
 ## Mehr erfahren
 
 - [docs/README.md](docs/README.md) — Dokumentations-Wegweiser (Glossar,

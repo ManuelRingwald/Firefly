@@ -4,7 +4,29 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
+- **Zuletzt aktualisiert:** 2026-06-15 (Branch `claude/callsign-i062-245`:
+  **AP7 — CAT062 Target Identification I062/245 (Callsign), ICD 2.1.0,
+  additiv.**) Neuer Typ `Callsign([u8; 8])` (`firefly-core`), durchgereicht von
+  `ModeAC.callsign` über `Track::update_identity` (sticky, wie `mode_3a`/
+  `flight_level_ft`) bis `SystemTrack.callsign` (FR-TRK-028). Encoder kodiert
+  I062/245 (FRN 10, 7 Oktette: STI/spare + 8 × 6-Bit-IA-5) nur wenn vorhanden;
+  FRN 10 liegt im bereits vorhandenen 2. FSPEC-Oktett → **additiv, kein
+  Breaking Change** (ICD 1.x/2.0.0-Decoder bleiben gültig). Decoder
+  (`decode_target_identification`) robust gegen Fremd-Codes (defensiv →
+  Leerzeichen). Tests: `target_identification_packs_eight_six_bit_ia5_codes`,
+  `decode_recovers_callsign_when_present`; Referenz-Dump-Test unverändert grün
+  (empirischer Beleg für additiv). Alle 9 Frankfurt-Szene-Targets tragen jetzt
+  Callsigns (`firefly-server::scene`). Doku: ICD → 2.1.0, FR-TRK-028 ergänzt,
+  Milestone `M3X-cat062-encoder.md` (Nachtrag AP7). Alle Gates grün
+  (`cargo test --workspace`, `clippy`, `fmt`). **Nächster Schritt: AP8
+  (Wayfinder-Decoder für I062/245 nachziehen).**
+- **Vorherige Aktualisierung:** 2026-06-15 (Branch `claude/callsign-i062-245`:
+  Doku-Vorbereitung fürs Testen — `README.md`/`DOCKER.md` um einen Abschnitt
+  „Zusammen mit Wayfinder testen (End-to-End-ASD)" ergänzt:
+  `FIREFLY_CAT062_ENABLED=true` aktiviert den CAT062-Multicast-Feed, Hinweis
+  auf `network_mode: host` (Multicast traversiert Docker-Bridge nicht).
+  Wayfinder erhält im Gegenzug README/Dockerfile/docker-compose/DOCKER.md.)
+- **Frühere Aktualisierung:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
   **AP1 — CAT062 Vertikallage I062/136 + UAP-Standardtreue, ADR 0015.**)
   Neues optionales Item **I062/136** (Measured Flight Level, FRN 17, signed
   i16, LSB 1/4 FL = 25 ft) als **Pass-through** der zuletzt gemessenen
