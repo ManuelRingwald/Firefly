@@ -7,7 +7,28 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-15 — Paket #2 „Observability-Grundgerüst",
+- **Zuletzt aktualisiert:** 2026-06-15 — Paket #2 „Observability-Grundgerüst"
+  **abgeschlossen** mit Häppchen 2.3: gemeinsamer `/metrics`-Endpoint
+  (Prometheus-Textformat). Firefly-Teil: neues Modul
+  `firefly-server::metrics` (`Metrics`-Struct mit Atomics,
+  `ConnectedClientGuard`, `render()`); `/metrics`-Route im axum-Router.
+  Exponiert: `firefly_scene_frames_total` (Gauge), `firefly_ws_clients_connected`
+  (Gauge, via `ConnectedClientGuard` in `pump_frames`),
+  `firefly_ws_clients_total` (Counter), `firefly_cat062_scans_sent_total` /
+  `firefly_cat062_send_errors_total` (Counter, aus `spawn_cat062_multicast`
+  nach `firefly_multicast::run`). NFR-OBS-001 aktualisiert (Metrik-Endpunkt
+  nicht mehr offen). Neue Tests: `metrics::render_includes_all_metrics`,
+  `metrics::connected_client_guard_tracks_lifetime`,
+  `app::metrics_endpoint_exposes_frame_count`. Alle Gates grün
+  (`cargo test/clippy/fmt`). Wayfinder-Teil (Paket #2.3, NFR-OBS-002):
+  `pkg/metrics` (Prometheus-Rendering), `/metrics` auf Port `:8080` neben
+  `/health`/`/ready` — Block-/Track-Zahlen, CAT062-Decode-Fehler
+  (`Receiver.DecodeErrorCount`), aktuelle Track-Zahl, WS-Client-Count/Evictions
+  (`Broadcaster.EvictedCount`). **Paket #2 vollständig erledigt.** Nächster
+  Schritt: nächstes Roadmap-Paket nach Abstimmung mit dem
+  Projektverantwortlichen (z. B. AP5/AP6 CAT065-Heartbeat oder
+  Konfigurierbarer System-Referenzpunkt).
+- **Vorherige Aktualisierung:** 2026-06-15 — Paket #2 „Observability-Grundgerüst",
   Häppchen 2.2: `tracing`-Instrumentierung in `firefly-multicast` (Wayfinders
   2.1 war bereits erledigt). Neue Abhängigkeit `tracing = "0.1"` (wie
   `firefly-server`). Sender (`lib.rs::run`): `tracing::debug!` pro gesendetem

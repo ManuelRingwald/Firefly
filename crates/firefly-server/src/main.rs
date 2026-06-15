@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use firefly_asterix::Cat062Encoder;
 use firefly_multicast::MulticastConfig;
-use firefly_server::{router, scene, AppState, Scene, ServerConfig};
+use firefly_server::{router, scene, AppState, Metrics, Scene, ServerConfig};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -25,11 +25,14 @@ async fn main() {
         "starting Firefly server"
     );
 
-    spawn_cat062_multicast(config.speed, config.scene);
+    let metrics = Arc::new(Metrics::default());
+
+    spawn_cat062_multicast(config.speed, config.scene, Arc::clone(&metrics));
 
     let state = AppState {
         frames: Arc::new(frames),
         speed: config.speed,
+        metrics,
     };
 
     let listener = match TcpListener::bind(("0.0.0.0", config.port)).await {
@@ -59,7 +62,7 @@ async fn main() {
 /// map shows — encoded as CAT062 and sent to the configured multicast group —
 /// paced into wall-clock at the same `speed` (ADR 0006). Disabled by default,
 /// so a plain `cargo run` never emits surprise network traffic.
-fn spawn_cat062_multicast(speed: f64, scene: Scene) {
+fn spawn_cat062_multicast(speed: f64, scene: Scene, metrics: Arc<Metrics>) {
     let config = MulticastConfig::from_env();
     if !config.enabled {
         tracing::info!(
@@ -89,8 +92,18 @@ fn spawn_cat062_multicast(speed: f64, scene: Scene) {
             }
         };
         match firefly_multicast::run(&socket, destination, &encoder, &scans, speed).await {
-            Ok(sent) => tracing::info!(sent, "CAT062 multicast feed complete"),
-            Err(error) => tracing::error!(%error, "CAT062 multicast feed stopped"),
+            Ok(sent) => {
+                metrics
+                    .cat062_scans_sent_total
+                    .fetch_add(sent as u64, std::sync::atomic::Ordering::Relaxed);
+                tracing::info!(sent, "CAT062 multicast feed complete");
+            }
+            Err(error) => {
+                metrics
+                    .cat062_send_errors_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tracing::error!(%error, "CAT062 multicast feed stopped");
+            }
         }
     });
 }

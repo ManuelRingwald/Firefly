@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use firefly_server::{scene, AppState, Frame};
+use firefly_server::{scene, AppState, Frame, Metrics};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 
@@ -18,6 +18,7 @@ async fn websocket_streams_parseable_frames_in_order() {
     let state = AppState {
         frames: Arc::new(scene::demo_frames()),
         speed: 100_000.0,
+        metrics: Arc::new(Metrics::default()),
     };
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -62,6 +63,7 @@ async fn delay_trigger_pauses_delivery_without_corrupting_the_stream() {
     let state = AppState {
         frames: Arc::new(scene::demo_frames()),
         speed: 100_000.0,
+        metrics: Arc::new(Metrics::default()),
     };
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
