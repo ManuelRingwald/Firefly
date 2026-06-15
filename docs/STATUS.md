@@ -4,7 +4,14 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
+- **Zuletzt aktualisiert:** 2026-06-15 (Branch `claude/callsign-i062-245`:
+  Doku-Vorbereitung fürs Testen — `README.md`/`DOCKER.md` um einen Abschnitt
+  „Zusammen mit Wayfinder testen (End-to-End-ASD)" ergänzt:
+  `FIREFLY_CAT062_ENABLED=true` aktiviert den CAT062-Multicast-Feed, Hinweis
+  auf `network_mode: host` (Multicast traversiert Docker-Bridge nicht).
+  Wayfinder erhält im Gegenzug README/Dockerfile/docker-compose/DOCKER.md.
+  Nächster Schritt danach: AP7/AP8 (Callsign I062/245).)
+- **Vorherige Aktualisierung:** 2026-06-14 (Branch `claude/serene-heisenberg-xq4rla`:
   **AP1 — CAT062 Vertikallage I062/136 + UAP-Standardtreue, ADR 0015.**)
   Neues optionales Item **I062/136** (Measured Flight Level, FRN 17, signed
   i16, LSB 1/4 FL = 25 ft) als **Pass-through** der zuletzt gemessenen
