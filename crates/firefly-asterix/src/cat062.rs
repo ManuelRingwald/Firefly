@@ -119,6 +119,11 @@ const STI_DOWNLINKED_TARGET_IDENTIFICATION: u8 = 0x00;
 const FX: u8 = 0x01;
 /// I062/080 octet 1, bit 2 (CNF): set means the track is still *tentative*.
 const STATUS_CNF_TENTATIVE: u8 = 0x02;
+/// I062/080 octet 2, bit 7 (TSE, *Track Service End*): set means this is the
+/// **last** report transmitted for the track — it is being deleted (ADR 0016).
+/// Verified against SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.9 (second
+/// extent: bit-15 TSE, bit-14 TSB).
+const STATUS_TSE_END: u8 = 0x40;
 /// I062/080 octet 4, bit 8 (CST): set means the track is *coasting*.
 const STATUS_CST_COASTING: u8 = 0x80;
 /// I062/290 primary subfield, bit 7 (spec bit-15, "PSR"): the PSR-age subfield
@@ -373,24 +378,37 @@ fn encode_track_number(track: &SystemTrack) -> Vec<u8> {
 }
 
 /// I062/080 — Track Status, a **variable-length** item whose octets chain via the
-/// FX bit. We carry the two safety-relevant flags from ADR 0008:
+/// FX bit. We carry the safety-relevant flags from ADR 0008 plus the track-end
+/// signal from ADR 0016:
 ///
 /// - **CNF** (octet 1, bit 2): confirmed vs. tentative.
+/// - **TSE** (octet 2, bit 7): *Track Service End* — this is the last report
+///   for the track (it is being deleted).
 /// - **CST** (octet 4, bit 8): coasting.
 ///
-/// CST lives in the fourth octet, so a coasting track must extend that far;
-/// octets 2 and 3 then carry only their FX bit (all their fields default to 0).
-/// A non-coasting track needs no extension at all — one octet suffices, because
-/// CST's default is already "not coasting".
+/// The item extends only as far as the highest set flag's octet: CST → octet 4,
+/// else TSE → octet 2, else octet 1 alone. Every octet but the last carries the
+/// FX bit. A live, non-coasting track is a single octet (CST/TSE default to 0),
+/// so the common case — and the byte-exact reference dump — is unchanged.
 fn encode_track_status(track: &SystemTrack) -> Vec<u8> {
     let mut octet1 = 0u8;
     if !track.confirmed {
         octet1 |= STATUS_CNF_TENTATIVE;
     }
-    if !track.coasting {
-        return vec![octet1];
+    let mut octet2 = 0u8;
+    if track.ended {
+        octet2 |= STATUS_TSE_END;
     }
-    vec![octet1 | FX, FX, FX, STATUS_CST_COASTING]
+
+    if track.coasting {
+        // CST is in octet 4: extend that far. Octet 2 still carries TSE if set.
+        vec![octet1 | FX, octet2 | FX, FX, STATUS_CST_COASTING]
+    } else if octet2 != 0 {
+        // TSE is in octet 2, which is then the last octet (no trailing FX).
+        vec![octet1 | FX, octet2]
+    } else {
+        vec![octet1]
+    }
 }
 
 /// I062/290 — System Track Update Ages, a compound item: a primary subfield
@@ -472,6 +490,9 @@ pub struct DecodedRecord {
     pub confirmed: bool,
     /// I062/080 CST — `true` while the track is coasting.
     pub coasting: bool,
+    /// I062/080 TSE — `true` when this is the **last** report for the track
+    /// (it is being deleted, ADR 0016). A consumer removes the track on this.
+    pub ended: bool,
     /// I062/290 PSR age, seconds.
     pub update_age: f64,
     /// I062/500 APC, 1σ position uncertainty in metres.
@@ -591,7 +612,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         }
     }
 
-    let (confirmed, coasting) = status.ok_or(DecodeError::MissingItem(uap::TRACK_STATUS))?;
+    let (confirmed, coasting, ended) = status.ok_or(DecodeError::MissingItem(uap::TRACK_STATUS))?;
     let (v_east, v_north) = velocity.ok_or(DecodeError::MissingItem(uap::VELOCITY_CARTESIAN))?;
 
     Ok(DecodedRecord {
@@ -604,6 +625,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         track_number: track_number.ok_or(DecodeError::MissingItem(uap::TRACK_NUMBER))?,
         confirmed,
         coasting,
+        ended,
         update_age: update_age.ok_or(DecodeError::MissingItem(uap::UPDATE_AGES))?,
         position_uncertainty: position_uncertainty
             .ok_or(DecodeError::MissingItem(uap::ESTIMATED_ACCURACIES))?,
@@ -743,12 +765,15 @@ fn decode_measured_flight_level(bytes: &[u8]) -> f64 {
     ticks as f64 * FLIGHT_LEVEL_LSB_FT
 }
 
-/// I062/080 — the inverse of [`encode_track_status`]: CNF from octet 1, CST
-/// from octet 4 if the item was extended that far.
-fn decode_track_status(bytes: &[u8]) -> (bool, bool) {
+/// I062/080 — the inverse of [`encode_track_status`]: CNF from octet 1, TSE from
+/// octet 2, and CST from octet 4 — each read only if the item extended that far
+/// (the FX chain is tolerant of records that stop earlier). Returns
+/// `(confirmed, coasting, ended)`.
+fn decode_track_status(bytes: &[u8]) -> (bool, bool, bool) {
     let confirmed = bytes[0] & STATUS_CNF_TENTATIVE == 0;
+    let ended = bytes.len() >= 2 && bytes[1] & STATUS_TSE_END != 0;
     let coasting = bytes.len() >= 4 && bytes[3] & STATUS_CST_COASTING != 0;
-    (confirmed, coasting)
+    (confirmed, coasting, ended)
 }
 
 /// I062/290 — the inverse of [`encode_update_ages`]: our encoder always
@@ -1062,6 +1087,38 @@ mod tests {
         );
     }
 
+    /// TSE (Track Service End) lives in octet 2, bit 7 (0x40). An ended track
+    /// extends the item to octet 2; if it is also coasting it extends on to
+    /// octet 4, with TSE riding in octet 2. ADR 0016. REQ: FR-IO-003, FR-TRK-029
+    #[test]
+    fn track_status_carries_tse_when_ended() {
+        let mut t = track_at(1, 0.0, 0.0, 0.0, 0.0);
+
+        t.confirmed = true;
+        t.coasting = false;
+        t.ended = true;
+        assert_eq!(
+            encode_track_status(&t),
+            vec![0x01, 0x40],
+            "ended, fresh → octet 1 (FX) + octet 2 (TSE)"
+        );
+
+        t.coasting = true;
+        assert_eq!(
+            encode_track_status(&t),
+            vec![0x01, 0x41, 0x01, 0x80],
+            "ended and coasting → TSE in octet 2 (FX), CST in octet 4"
+        );
+
+        t.coasting = false;
+        t.confirmed = false;
+        assert_eq!(
+            encode_track_status(&t),
+            vec![0x03, 0x40],
+            "tentative and ended"
+        );
+    }
+
     /// Update ages: the PSR-age subfield is present (0x40) and the age is in
     /// quarter-seconds. 2.0 s → 8; saturates at 255. REQ: FR-IO-003, FR-TRK-008
     #[test]
@@ -1242,6 +1299,7 @@ mod tests {
         assert_eq!(record.track_number, 1);
         assert!(record.confirmed);
         assert!(!record.coasting);
+        assert!(!record.ended);
         assert_eq!(record.update_age, 2.0);
         assert_eq!(record.position_uncertainty, 100.0);
         assert_eq!(record.mode_3a, None);
@@ -1280,6 +1338,27 @@ mod tests {
         let records = decode_data_block(&block).unwrap();
         assert!(!records[0].confirmed);
         assert!(records[0].coasting);
+        assert!(!records[0].ended, "a live track is not ended");
+    }
+
+    /// A track marked `ended` round-trips through I062/080 TSE: the decoder
+    /// recovers the end flag, and the other status flags alongside it. ADR 0016.
+    /// REQ: FR-IO-003, FR-IO-004, FR-TRK-029
+    #[test]
+    fn decode_recovers_track_end_when_present() {
+        let encoder = Cat062Encoder::new(DataSourceId::new(1, 2), system_reference_point(), 0.0);
+        let mut t = track(1);
+        // A deleted track is typically coasting too; check both flags survive.
+        t.coasting = true;
+        t.ended = true;
+        let block = encoder.encode(Timestamp(0.0), &[t]);
+
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].ended, "TSE recovered");
+        assert!(records[0].coasting, "CST still recovered alongside TSE");
+        assert!(records[0].confirmed);
+        assert_eq!(records[0].track_number, 1);
     }
 
     /// A block with two tracks decodes into two records, in order.

@@ -4,7 +4,22 @@
 > Handy. Sie wird am Ende jeder Arbeitssitzung aktualisiert und committet.
 > Claude liest sie zu Sitzungsbeginn (siehe `CLAUDE.md`).
 
-- **Zuletzt aktualisiert:** 2026-06-15 (Branch `claude/callsign-i062-245`:
+- **Zuletzt aktualisiert:** 2026-06-15 (Branch `claude/tse-i062-080`:
+  **TSE — CAT062 Track-Ende-Signalisierung über I062/080, ICD 2.2.0, additiv,
+  ADR 0016.** AP7/AP8 (Callsign) sind nach `main` gemergt — PRs #15 (Firefly) /
+  #7 (Wayfinder).) Firefly-Teil **T1–T4 erledigt**: (T1) ADR 0016; (T2)
+  `SystemTrack.ended: bool`, Lösch-Ereignis an beiden Löschstellen
+  (`process_scan` + `process_plots`) via `delete_and_buffer_ended` eingefangen
+  (voller letzter Zustand), `Tracker::take_ended_tracks()` draint für die
+  Ausgabe — FR-TRK-029; (T3) `Player::periodic_snapshots` hängt Ende-Records
+  einmalig an den Tick an (CAT062/Multicast-Pfad; JSON/`periodic_frames`
+  unberührt); (T4) Encoder/Decoder setzen/lesen das **TSE-Bit (I062/080
+  Oktett 2, Bit 7, `0x40`)**, ICD → 2.2.0, byte-genaue Tests. Additiv: kein
+  FSPEC-Wachstum, Referenz-Dump unverändert. Ehrliche Grenze: im async-Pfad
+  treibt Plot-Verkehr die Löschung — bei komplett stillem Feed (noch) kein TSE.
+  Alle Gates grün (`cargo test/clippy/fmt`). **Nächster Schritt: T5
+  (Wayfinder-Decoder liest TSE und entfernt den Track sofort).**
+- **Vorherige Aktualisierung:** 2026-06-15 (Branch `claude/callsign-i062-245`:
   **AP7 — CAT062 Target Identification I062/245 (Callsign), ICD 2.1.0,
   additiv.**) Neuer Typ `Callsign([u8; 8])` (`firefly-core`), durchgereicht von
   `ModeAC.callsign` über `Track::update_identity` (sticky, wie `mode_3a`/

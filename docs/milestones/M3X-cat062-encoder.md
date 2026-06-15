@@ -229,3 +229,40 @@ fremdes/fehlerhaftes Datagramm kann den Decoder nicht zum Absturz bringen
 
 Wayfinder zieht den Decoder für I062/245 nach (eigener Schritt, eigenes Repo)
 und zeigt das Callsign als primäre Track-Label-Zeile.
+
+---
+
+## Nachtrag T4 — I062/080 TSE (Track-Ende), ICD 2.2.0
+
+**Status:** ✅ umgesetzt (ADR 0016)
+
+### Fachlich
+
+Bisher „starb" ein Track für den Konsumenten nur implizit (er fiel aus dem
+Strom, das ASD musste per Timeout raten). Das **TSE-Bit** (*Track Service
+End*) in I062/080 ist die explizite letzte Meldung „Track wird gelöscht,
+entfernen" — deterministisches Entfernen statt Timeout-Raten.
+
+### Technisch
+
+`SystemTrack.ended` (FR-TRK-029, in der Lifecycle-Stufe T2/T3 gefüllt) wird im
+Encoder auf das **TSE-Bit (Oktett 2, Bit 7, `0x40`)** von I062/080 abgebildet.
+I062/080 ist bereits ein variabel langes FX-Item (FRN 13, in jedem Record), das
+Item verlängert sich nur so weit wie das höchste gesetzte Flag (CST → Oktett 4,
+sonst TSE → Oktett 2, sonst Oktett 1). **Additiv** — kein FSPEC-Wachstum, der
+byte-genaue Referenz-Dump (lebender Track) bleibt unverändert. ICD → **2.2.0**.
+
+Der Decoder (`decode_track_status`) liest TSE aus Oktett 2, tolerant gegenüber
+Records, die früher enden. `DecodedRecord.ended` trägt das Ergebnis.
+
+### Tests
+
+- `cat062::track_status_carries_tse_when_ended` — byte-genaue Bit-Lage für
+  ended/coasting-Kombinationen.
+- `cat062::decode_recovers_track_end_when_present` — Encoder/Decoder-Rundreise
+  (TSE + CST gemeinsam).
+
+### Wayfinder (T5)
+
+Wayfinder zieht den Decoder für das TSE-Bit nach und **entfernt** den Track
+beim Empfang sofort (eigener Schritt, eigenes Repo).
