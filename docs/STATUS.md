@@ -7,7 +7,21 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-15 (Branch `claude/tse-i062-080`, nach
+- **Zuletzt aktualisiert:** 2026-06-15 — Paket #1 „Multicast-Feed-Sicherheit",
+  Häppchen 1.1: **ADR 0017 „Vertrauensgrenze des CAT062-Multicast-Feeds"**
+  erstellt (`docs/decisions/0017-multicast-feed-vertrauensgrenze.md`).
+  Entscheidung: Vertrauensgrenze liegt auf der **Netzwerk-Schicht** (dediziertes
+  isoliertes Segment/VLAN für Firefly-Sender + autorisierte ASD-Empfänger), nicht
+  im CAT062-Anwendungsprotokoll — kein anwendungsseitiges Signieren/Verschlüsseln
+  von CAT062 (würde ADR 0006 brechen). TTL=1 (`MulticastConfig`-Default) bleibt
+  zusätzliche, aber nicht hinreichende Maßnahme. Diskutiert auch das durch ADR
+  0016 neu entstandene Risiko eines gefälschten TSE-Bits (Track-Löschung durch
+  Injection) — Schutz ist identisch mit allgemeinem Injektions-Schutz, keine
+  TSE-spezifische Zusatzmaßnahme. Neue Anforderung **NFR-SEC-001** im Register
+  (Status: dokumentiert, Umsetzung ist Deployment-Sache). Reine Doku, kein
+  Code-Diff. Nächster Schritt: Häppchen 1.2 — Wayfinder-seitiges ADR-Pendant
+  (Empfangspfad-Vertrauensgrenze + Browser-Rand-Entscheidung TLS/Auth).
+- **Vorherige Aktualisierung:** 2026-06-15 (Branch `claude/tse-i062-080`, nach
   `main` gemergt — PRs #16 (Firefly) / #8 (Wayfinder):
   **TSE — CAT062 Track-Ende-Signalisierung über I062/080, ICD 2.2.0, additiv,
   ADR 0016.** AP7/AP8 (Callsign) waren bereits zuvor nach `main` gemergt — PRs

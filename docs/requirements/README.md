@@ -104,6 +104,7 @@ nächsten Anfassen nachgezogen; seine Nachweise stehen bereits in der Tabelle.
 | NFR-SAFE-001 | Kein `unsafe`-Code ohne dokumentierte Begründung. | umgesetzt | Clippy/Review-Gate (CLAUDE.md §5) |
 | NFR-INT-001 | Tracker-Kern ist format-/transport-neutral; Ausgabe erfolgt über einen neutralen `SystemTrack` + Adapter (Ports & Adapters). | verifiziert | `firefly-track`: `tracker::system_track_position_round_trips_through_wgs84`, `tracker::system_tracks_carry_confirmation_status` |
 | NFR-INT-002 | Track-Positionen sind nach WGS84 zurückprojizierbar (geodätische Ausgabe); der Sensor-Frame wird zur Ausgabezeit übergeben (nicht im Zustand gehalten). | verifiziert | `firefly-track`: `tracker::system_track_position_round_trips_through_wgs84`; `firefly-core`: `system_track::ground_speed_is_vector_length`, `system_track::track_angle_follows_compass_convention` |
+| NFR-SEC-001 | Der CAT062-Multicast-Pfad (Senden wie Empfangen) ist gegen unautorisiertes Mitlesen und Einspeisen durch **Netz-Isolation** (dediziertes, abgeschottetes Segment/VLAN, ausschließlich Firefly-Sender + autorisierte ASD-Empfänger) abgegrenzt; Multicast-TTL=1 (`MulticastConfig`-Default) ist eine zusätzliche, aber nicht hinreichende Maßnahme. Die Vertrauensgrenze liegt auf der Netzwerk-Schicht, nicht im CAT062-Anwendungsprotokoll. | dokumentiert (Umsetzung ist Deployment-Sache) | ADR 0017; `firefly-multicast`: `config::*` (Bind-Interface, TTL=1, Gruppe/Port per Env) |
 
 ### Randbedingungen (CON)
 

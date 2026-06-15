@@ -13,7 +13,7 @@
 
 | # | Paket | Repo(s) | Inhalt | Stufe/Modell |
 |---|-------|---------|--------|--------------|
-| 1 | **Multicast-Feed-Sicherheit** | Firefly + Wayfinder | Netz-Isolation/Authentizität des CAT062-Eingangspfads dokumentieren + ggf. absichern (ADR), Wayfinder-Browser-Rand (TLS/Auth, ehem. Issue #7) | **S4 · Opus 4.8** |
+| 1 | **Multicast-Feed-Sicherheit** ⏳ *in Arbeit* | Firefly + Wayfinder | Netz-Isolation/Authentizität des CAT062-Eingangspfads dokumentieren + ggf. absichern (ADR), Wayfinder-Browser-Rand (TLS/Auth, ehem. Issue #7). **Häppchen 1.1 ✅ erledigt** (Firefly ADR 0017, NFR-SEC-001); **1.2** Wayfinder-ADR-Pendant + Browser-Rand-Entscheidung (offen); **1.3** Browser-Rand-Implementierung (offen); **1.4** optional Sender-Härtung Firefly (offen) | **S4 · Opus 4.8** |
 | 2 | **Observability-Grundgerüst** | Firefly + Wayfinder | Wayfinder: `internal/config` tot-Code entfernen oder anschließen, Log-Level konfigurierbar machen, Eviction-Logging. Firefly: `tracing` in `firefly-multicast`/`firefly-asterix` einziehen (Decode-Fehler, Socket-Fehler). Danach gemeinsam: `/metrics`-Endpoint (Prometheus) für Track-Zahlen, Decode-Fehler, Drops, Client-Counts | **S3 · Sonnet 4.6** |
 | 3 | **AP5/AP6 — CAT065 Heartbeat** | Firefly (Encoder) + Wayfinder (Decoder) | Service-Status-Reports (Feed-Health) — wichtig für Readiness/Staleness-Erkennung, ergänzt Observability | **S3–S4 · Sonnet/Opus** |
 | 4 | **Konfigurierbarer System-Referenzpunkt** | Firefly | I062/100-Referenzpunkt jenseits Demo-Ursprung Frankfurt, ADR-0006-Folgeentscheidung | **S3 · Sonnet 4.6** |
