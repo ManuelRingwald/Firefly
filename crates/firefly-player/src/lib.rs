@@ -183,7 +183,15 @@ impl Player {
             }
             self.tracker.process_plots(&self.plots[start..i]);
             let ts = Timestamp(tick);
-            out.push((ts, self.tracker.snapshot_at(ts)));
+            // Live air picture at this tick, plus a one-shot final record for
+            // each track deleted during this window (ADR 0016): the CAT062
+            // adapter turns the `ended` flag into an I062/080 TSE bit so a
+            // consumer removes the track deterministically. The JSON/web path
+            // (`periodic_frames`) deliberately omits these — its `FrameTrack`
+            // wire type carries no end-of-track concept.
+            let mut snapshot = self.tracker.snapshot_at(ts);
+            snapshot.extend(self.tracker.take_ended_tracks());
+            out.push((ts, snapshot));
             tick += t_out;
         }
         out
@@ -428,5 +436,84 @@ mod tests {
             frames.iter().any(|f| !f.tracks.is_empty()),
             "tracks reported"
         );
+    }
+
+    // --- ADR 0016: track-end (TSE) signalling in the periodic output -------
+
+    /// A track that leaves coverage and is deleted shows up **exactly once** as
+    /// an `ended` `SystemTrack` in the periodic snapshot stream (the CAT062/
+    /// multicast feed), carrying its last known identity, and never again. ADR
+    /// 0016. REQ: FR-TRK-029, FR-IO-005
+    #[test]
+    fn deleted_track_is_reported_once_as_ended_in_periodic_snapshots() {
+        // A radar with a short range: the northbound target (starting at 50 km,
+        // flying outward at 200 m/s) leaves coverage after ~10 s, so its track
+        // coasts and is deleted well within the run.
+        let short_range_radar = {
+            let sensor = Sensor::new(Sid(1), Wgs84::from_degrees(48.0, 11.0, 0.0));
+            Radar::new(
+                sensor,
+                RadarParams {
+                    scan_period: 4.0,
+                    prob_detection: 1.0,
+                    sigma_range: 0.0,
+                    sigma_azimuth: 0.0,
+                    sigma_elevation: 0.0,
+                    max_range: 52_000.0,
+                    ..RadarParams::default()
+                },
+            )
+        };
+        // A second target that stays well within coverage for the whole run,
+        // so the feed keeps delivering plots: in the asynchronous path deletion
+        // is driven by incoming plots, so something must keep the lifecycle
+        // sweep running after the first target goes silent.
+        let resident_target = Target {
+            id: TargetId(2),
+            initial: State {
+                position: Enu::new(0.0, 30_000.0, 3000.0),
+                speed: 100.0,
+                heading: 0.0,
+                climb_rate: 0.0,
+            },
+            legs: vec![Leg::cruise(80.0)],
+            mode_3a: Some(0o1111),
+            icao_address: None,
+            callsign: None,
+        };
+        let scenario = Scenario::new(Wgs84::from_degrees(48.0, 11.0, 0.0))
+            .with_duration(80.0)
+            .add_radar(short_range_radar)
+            .add_target(northbound_target())
+            .add_target(resident_target);
+
+        let snaps = Player::new(&scenario, config()).periodic_snapshots(4.0);
+
+        let ended: Vec<&SystemTrack> = snaps
+            .iter()
+            .flat_map(|(_, tracks)| tracks.iter())
+            .filter(|t| t.ended)
+            .collect();
+
+        assert_eq!(
+            ended.len(),
+            1,
+            "the deleted track is signalled as ended exactly once"
+        );
+        assert_eq!(
+            ended[0].mode_3a,
+            Some(0o7000),
+            "the final record carries the track's last known identity"
+        );
+        // The same track id never reappears as a live track after its TSE.
+        let ended_id = ended[0].id;
+        let last_ended_tick = snaps
+            .iter()
+            .position(|(_, tracks)| tracks.iter().any(|t| t.ended && t.id == ended_id))
+            .unwrap();
+        let reappears = snaps[last_ended_tick + 1..]
+            .iter()
+            .any(|(_, tracks)| tracks.iter().any(|t| t.id == ended_id));
+        assert!(!reappears, "a track must not reappear after its end report");
     }
 }

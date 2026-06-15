@@ -46,6 +46,13 @@ pub struct SystemTrack {
     /// because it had no fresh measurement this scan. Maps to the CST bit of
     /// CAT062 I062/080. A track may be both `confirmed` and `coasting`.
     pub coasting: bool,
+    /// Whether this is the **final** report for the track — it has just been
+    /// deleted from the tracker's live set, and this record carries its last
+    /// known state once so a consumer can remove it deterministically instead
+    /// of waiting for a timeout. Maps to the TSE (*Track Service End*) bit of
+    /// CAT062 I062/080 (ADR 0016, FR-TRK-029). `false` for every live track;
+    /// `true` appears exactly once, in the heartbeat following deletion.
+    pub ended: bool,
     /// Update age: data-time since the last real measurement, seconds. `0` right
     /// after a hit, growing while coasting. Maps to CAT062 I062/290 (track ages).
     pub update_age: f64,
@@ -125,6 +132,7 @@ mod tests {
             v_north,
             confirmed: true,
             coasting: false,
+            ended: false,
             update_age: 0.0,
             position_uncertainty: 0.0,
             mode_3a: None,

@@ -21,13 +21,14 @@
 
 ## Version
 
-**2.1.0** (2026-06-15) — **Additiv:** Target Identification (Callsign)
-I062/245 auf FRN 10 (AP7).
+**2.2.0** (2026-06-15) — **Additiv:** Track-Ende-Signal (TSE) in I062/080
+Oktett 2 (ADR 0016).
 
 ### Changelog
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 2.2.0 | 2026-06-15 | **Additiv (ADR 0016).** I062/080 (Track Status) trägt jetzt das **TSE-Bit** (*Track Service End*, Oktett 2, Bit 7, `0x40`): es markiert die **letzte** Meldung für einen Track (er wird gelöscht). Erscheint nur bei gelöschten Tracks; ein gelöschter Track wird damit **genau einmal** mit gesetztem TSE gemeldet und danach nicht mehr. I062/080 ist bereits ein variabel langes FX-Item (FRN 13, in jedem Record) — kein FSPEC-Wachstum, kein Breaking Change. **Konsument muss TSE als „Track entfernen" interpretieren** (sonst Ein-Frame-Geist). |
 | 2.1.0 | 2026-06-15 | **Additiv (AP7).** Neues optionales Item **I062/245** (Target Identification / Callsign, FRN 10, 7 Oktette: STI/spare-Oktett + 8 × 6-Bit-IA-5-Zeichen) — nur wenn der Track jemals eine Mode-S-Kennung getragen hat (sticky wie Mode 3/A). FRN 10 liegt im bereits vorhandenen 2. FSPEC-Oktett — kein Wachstum der FSPEC-Länge, kein Breaking Change für bestehende Decoder. |
 | 2.0.0 | 2026-06-14 | **BREAKING (ADR 0015).** (1) Neues optionales Item **I062/136** (Measured Flight Level, FRN 17, signed i16, LSB 1/4 FL = 25 ft) — nur wenn der Track eine Mode-C-Flugfläche trägt. (2) **I062/500** (Estimated Accuracies) wandert von **FRN 16 → FRN 27**, dem echten EUROCONTROL-UAP-Slot; FRN 16 (I062/295) bleibt reserviert/ungenutzt. Die Standard-Record-FSPEC wächst dadurch von 3 auf 4 Oktette. Decoder **muss** beide Änderungen nachziehen. |
 | 1.1.1 | 2026-06-14 | **Doku-Politur (kein Wire-Format-Change).** Normative Spec-Edition referenziert (Abschnitt 0), Update-Rate/Scan-Period dokumentiert (Abschnitt 1), Mitternachts-Rollover von I062/070 präzisiert (Abschnitt 6), Stand zum I062/100-Referenzpunkt verlinkt (Abschnitt 5). |
@@ -127,7 +128,14 @@ weiteres Oktett folgt).
 | Oktett | Bit | Bedeutung |
 |--------|-----|-----------|
 | 1 | `0x02` (CNF) | gesetzt = Track ist noch **tentativ** (nicht bestätigt) |
+| 2 | `0x40` (TSE) | gesetzt = **letzte** Meldung für den Track (er wird gelöscht); Konsument **entfernt** den Track (ADR 0016) |
 | 4 | `0x80` (CST) | gesetzt = Track ist **coasting** (kein aktuelles Update) |
+
+Das Item verlängert sich nur so weit wie das höchste gesetzte Flag: CST →
+Oktett 4, sonst TSE → Oktett 2, sonst nur Oktett 1. Ein lebender, nicht
+coastender Track bleibt ein einzelnes Oktett (TSE/CST default 0). Ein gelöschter
+Track ist typischerweise zugleich coasting — dann sitzt TSE in Oktett 2 und CST
+in Oktett 4 desselben Records.
 
 ### 4.2 I062/290 — System Track Update Ages
 
