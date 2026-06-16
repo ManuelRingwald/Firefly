@@ -93,7 +93,14 @@ fn spawn_cat062_multicast(speed: f64, scene: Scene, metrics: Arc<Metrics>) {
                 return;
             }
         };
-        match firefly_multicast::run(&socket, destination, &encoder, &scans, speed).await {
+        let metrics_scan = Arc::clone(&metrics);
+        match firefly_multicast::run(&socket, destination, &encoder, &scans, speed, move |n| {
+            metrics_scan
+                .tracks_active
+                .store(n as u64, std::sync::atomic::Ordering::Relaxed);
+        })
+        .await
+        {
             Ok(sent) => {
                 metrics
                     .cat062_scans_sent_total

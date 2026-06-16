@@ -22,6 +22,10 @@ pub struct Metrics {
     pub cat062_send_errors_total: AtomicU64,
     /// Total number of CAT065 SDPS-status heartbeats sent (counter, ADR 0018).
     pub cat065_heartbeats_sent_total: AtomicU64,
+    /// Number of confirmed tracks in the most recently sent CAT062 scan (gauge,
+    /// SDPS-006). Updated after each successful multicast send via the on_scan
+    /// callback in firefly_multicast::run. Stays at 0 until the first scan.
+    pub tracks_active: AtomicU64,
 }
 
 /// A guard that increments `ws_clients_connected` (and `ws_clients_total`) on
@@ -93,6 +97,13 @@ pub fn render(metrics: &Metrics, frames_total: usize) -> String {
         "Total number of CAT065 SDPS-status heartbeats sent over multicast.",
         metrics.cat065_heartbeats_sent_total.load(Ordering::Relaxed) as f64,
     );
+    write_metric(
+        &mut out,
+        "firefly_tracks_active",
+        "gauge",
+        "Number of tracks in the most recently sent CAT062 scan (SDPS-006).",
+        metrics.tracks_active.load(Ordering::Relaxed) as f64,
+    );
     out
 }
 
@@ -118,6 +129,7 @@ mod tests {
         metrics
             .cat065_heartbeats_sent_total
             .store(13, Ordering::Relaxed);
+        metrics.tracks_active.store(7, Ordering::Relaxed);
 
         let text = render(&metrics, 9);
 
@@ -127,8 +139,10 @@ mod tests {
         assert!(text.contains("firefly_cat062_scans_sent_total 42"));
         assert!(text.contains("firefly_cat062_send_errors_total 1"));
         assert!(text.contains("firefly_cat065_heartbeats_sent_total 13"));
+        assert!(text.contains("firefly_tracks_active 7"));
         assert!(text.contains("# TYPE firefly_ws_clients_connected gauge"));
         assert!(text.contains("# TYPE firefly_cat062_scans_sent_total counter"));
+        assert!(text.contains("# TYPE firefly_tracks_active gauge"));
     }
 
     /// The connected-client guard increments on creation and decrements again

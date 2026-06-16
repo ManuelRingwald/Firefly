@@ -66,7 +66,8 @@ async fn sends_one_cat062_block_per_scan() {
         .collect();
 
     // Huge speed → pacing delay is negligible, so the test does not wait 4 s.
-    let send = tokio::spawn(async move { run(&sender, destination, &enc, &scans, 1.0e9).await });
+    let send =
+        tokio::spawn(async move { run(&sender, destination, &enc, &scans, 1.0e9, |_| {}).await });
 
     let mut buf = [0u8; 2048];
     for expected_block in &expected {
@@ -94,7 +95,7 @@ async fn sends_one_cat062_block_per_scan() {
 async fn empty_scan_list_sends_nothing() {
     let sender = sender_socket().await.unwrap();
     let destination: SocketAddr = (Ipv4Addr::LOCALHOST, 9).into(); // discard port
-    let sent = run(&sender, destination, &encoder(), &[], 1.0)
+    let sent = run(&sender, destination, &encoder(), &[], 1.0, |_| {})
         .await
         .unwrap();
     assert_eq!(sent, 0);
