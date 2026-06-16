@@ -7,7 +7,22 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-15 — Paket #3 „CAT065 Heartbeat" —
+- **Zuletzt aktualisiert:** 2026-06-16 — **Paket #11 / SDPS-006 „Erweiterte
+  Observability" abgeschlossen.** SDPS-006a: `firefly_tracks_active` (Gauge) in
+  `firefly_server::Metrics`; `firefly_multicast::run` auf generisches
+  `run<F: Fn(usize)>` erweitert — `on_scan`-Callback wird nach jedem
+  erfolgreichen Send mit `tracks.len()` aufgerufen; `spawn_cat062_multicast`
+  in `main.rs` verdrahtet den Callback auf `metrics_scan.tracks_active.store()`.
+  Alle 3 betroffenen Test-Calls (`sender.rs`, `receiver.rs`) mit no-op `|_| {}`
+  ergänzt. `render()` exponiert `firefly_tracks_active` als Prometheus-Gauge.
+  SDPS-006b: `monitoring/grafana/dashboard.json` — importierbares Grafana-
+  Dashboard (Schema 38) mit 5 Panels: Tracks-Active-Stat/Zeitreihe,
+  CAT062-Scan-Rate + CAT065-Heartbeat-Rate, WS-Clients-Stat,
+  Sendefehler-Stat. Hinweis: Plots/s erst mit SDPS-001 sinnvoll.
+  NFR-OBS-002 im Register. Milestone `docs/milestones/SDPS-006_Erweiterte_Observability.md`.
+  Gates: `cargo test --workspace` grün, `cargo clippy` sauber, `cargo fmt` sauber.
+  S2 · Sonnet 4.6. Nächster Schritt: nächstes Roadmap-Paket nach Abstimmung.
+- **Vorherige Aktualisierung:** 2026-06-15 — Paket #3 „CAT065 Heartbeat" —
   **Firefly-Seite (Sender) fertig.** Neues Modul `firefly-asterix::cat065`:
   `Cat065Encoder` kodiert eine periodische SDPS-Status-Meldung (I065/000=1) mit
   I065/010 (SAC/SIC), I065/015 (Service-ID), I065/030 (Time of Day, 1/128 s),

@@ -118,6 +118,8 @@ nächsten Anfassen nachgezogen; seine Nachweise stehen bereits in der Tabelle.
 | CON-004 | Code Englisch, Doku/Erklärung Deutsch. | ADR 0002 |
 | CON-005 | Integrationsziel Phoenix WebInnovation (ASD/EFS); Track-Ausgabe als ASTERIX CAT062; Transport/Koordinatenbezug noch offen. | ADR 0006 |
 
+| NFR-OBS-002 | **Erweiterte Observability (SDPS-006):** `/metrics` exponiert zusätzlich `firefly_tracks_active` (Gauge) — Anzahl der Tracks im zuletzt gesendeten CAT062-Scan. Die Metrik wird per-Scan über den `on_scan`-Callback in `firefly_multicast::run` aktualisiert (SDPS-006a). Ein importierbares Grafana-Dashboard (`monitoring/grafana/dashboard.json`) stellt alle Firefly-Metriken visualisiert bereit: Tracks-Active-Zeitreihe, CAT062-Scan-Rate, CAT065-Heartbeat-Rate, WS-Clients-Stat, Sendefehler (SDPS-006b). Hinweis: Plots/s als Echtzeit-Streaming-Metrik wird mit SDPS-001 (Live-FEP-Sensor-Ingestion) relevant; in der aktuellen Replay-Architektur sind Plots offline vorberechnet. | verifiziert | `firefly-server/src/metrics.rs` (`tracks_active`, `render`), `firefly-multicast/src/lib.rs` (`run<F>`, `on_scan`-Callback), `firefly-server/src/main.rs` (`spawn_cat062_multicast`), `monitoring/grafana/dashboard.json` | `firefly-server`: `metrics::render_includes_all_metrics` (testet `firefly_tracks_active 7` + TYPE gauge); `firefly-multicast`: `sender::sends_one_cat062_block_per_scan`, `sender::empty_scan_list_sends_nothing`, `receiver::decoded_records_match_encoded_tracks` |
+
 ## Statuswerte
 
 `geplant` · `in Arbeit` · `umgesetzt` · `verifiziert` (umgesetzt **und** durch

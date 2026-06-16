@@ -62,7 +62,8 @@ async fn receiver_decodes_what_sender_sends() {
 
     let enc = encoder();
     // Huge speed → pacing delay is negligible, so the test does not wait 4 s.
-    let send = tokio::spawn(async move { run(&sender, destination, &enc, &scans, 1.0e9).await });
+    let send =
+        tokio::spawn(async move { run(&sender, destination, &enc, &scans, 1.0e9, |_| {}).await });
 
     let mut received_scans = Vec::new();
     let receive = tokio::time::timeout(Duration::from_secs(5), async {

@@ -65,14 +65,19 @@ pub async fn sender_socket() -> std::io::Result<UdpSocket> {
 /// data-time gap and `speed` (data-seconds per wall-second), then encode the
 /// scan with `encoder` and send the bytes.
 ///
+/// After each successful send `on_scan` is called with the number of tracks in
+/// that scan. Callers can use this to update gauges (e.g. `tracks_active`);
+/// pass `|_| {}` if no per-scan hook is needed.
+///
 /// Returns the number of datagrams sent. A send error stops the run and is
 /// returned — the caller (a spawned task) decides how to react.
-pub async fn run(
+pub async fn run<F: Fn(usize)>(
     socket: &UdpSocket,
     destination: SocketAddr,
     encoder: &Cat062Encoder,
     scans: &[(Timestamp, Vec<SystemTrack>)],
     speed: f64,
+    on_scan: F,
 ) -> std::io::Result<usize> {
     let mut prev: Option<f64> = None;
     let mut sent = 0usize;
@@ -94,6 +99,7 @@ pub async fn run(
                     %destination,
                     "sent CAT062 data block"
                 );
+                on_scan(tracks.len());
             }
             Err(error) => {
                 tracing::error!(time = now, %destination, %error, "failed to send CAT062 data block");
