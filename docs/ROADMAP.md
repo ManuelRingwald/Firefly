@@ -6,10 +6,8 @@
 > Arbeit neue Findings/Pakete ergeben. **Stichwort „Roadmap" im Chat zeigt
 > diese Liste.**
 >
-> Stand: 2026-06-15 (Pakete #1 Multicast-Feed-Sicherheit, #2
-> Observability-Grundgerüst und #3 CAT065-Heartbeat abgeschlossen; Pakete
-> #10–#20 aus den Backlogs „Firefly SDPS Core Features" und „Wayfinder"
-> übernommen).
+> Stand: 2026-06-16 (Pakete #1–#3, #11–#14 abgeschlossen; Pakete #10–#20
+> aus den Backlogs „Firefly SDPS Core Features" und „Wayfinder" übernommen).
 
 ## Empfohlene Reihenfolge
 
@@ -28,7 +26,7 @@
 | 11 | **SDPS-006 — Erweiterte Observability** ✅ *abgeschlossen* | Firefly | `firefly_tracks_active`-Gauge per-Scan via `on_scan`-Callback in `run<F>` (SDPS-006a); importierbares Grafana-Dashboard `monitoring/grafana/dashboard.json` mit 5 Panels (SDPS-006b). Plots/s erst mit SDPS-001 relevant. | **S2 · Sonnet 4.6** |
 | 12 | **ASD-001 — Erweiterter Data Block** ✅ *abgeschlossen* | Wayfinder | Callsign (I062/245), Flight Level (I062/136, FLnnn), Ground Speed (aus Vx/Vy), Steig-/Sinkflug-Indikator im Track-Label — alle vier Elemente in `buildLabel(track, vTrend)` + `trackFlHistory` für Tendenz. | **S2 · Sonnet 4.6** |
 | 13 | **ASD-003 — Aeronautical Map Layer** ✅ *abgeschlossen* | Wayfinder | "Radar Dark Mode"-Basistheme (3a), **Live-OpenAIP**-Backend (3b, ADR 0004), Luftraumstrukturen + Waypoints/VOR/NDB als schaltbare Layer (3c/3d). Setzt die Wayfinder-Seite von #9 (Live-OpenAIP) um. | **S4 · Opus 4.8** |
-| 14 | **ASD-004 — Track-Lebenszyklus & History-Darstellung** | Wayfinder | Konfigurierbare History-Dots, Coasting-Blinken/Abdunkeln, Graceful Fade-Out bei TSE (ADR 0016) | **S3 · Sonnet 4.6** |
+| 14 | **ASD-004 — Track-Lebenszyklus & History-Darstellung** ✅ *abgeschlossen* | Wayfinder | History-Dots als diskreter Circle-Layer über der Trail-Linie (4a), Coasting-Abdunkeln auf allen Layern via MapLibre-Expressions (4b), Graceful Fade-Out (1,5 s) bei TSE via `fadingTracks`-Map + `setInterval`-Loop (4c); FR-ASD-004. | **S3 · Sonnet 4.6** |
 | 15 | **ASD-005 — Höhen- und Filter-Tools** | Wayfinder | UI-Panel für Min/Max-FL-Filter, Tracks außerhalb ausblenden/entsättigen | **S2 · Sonnet 4.6** |
 | 16 | **ASD-002 — Anti-Garbling (Label-Vermeidung)** | Wayfinder | Algorithmus zur automatischen Label-Umpositionierung bei Überlappung (Leader Line); optional Drag&Drop | **S4 · Opus 4.8** |
 | 17 | **SDPS-003 — Environment & Meteo Data Service** | Firefly | Zyklisches QNH für barometrische Höhenkorrektur (I062/136), statische DTM-Daten als Basis für Bodenannäherungswarnungen | **S3 · Sonnet 4.6** |
@@ -83,6 +81,7 @@ abgestimmt und versioniert.
 ## Erledigt (Referenz)
 
 - ✅ Paket #11 / SDPS-006 — Erweiterte Observability (Firefly): `firefly_tracks_active` Gauge + Grafana-Dashboard; NFR-OBS-002
+- ✅ Paket #14 / ASD-004 — Track-Lebenszyklus & History-Darstellung (Wayfinder): History-Dots (4a), Coasting-Abdunkeln (4b), Graceful Fade-Out bei TSE 1,5 s (4c); FR-ASD-004
 - ✅ Paket #12 / ASD-001 — Erweiterter Data Block (Wayfinder): Callsign + FL (`FLnnn`) + Vertikaltendenz (▲/▼) + Ground Speed (kt) in `buildLabel`; `trackFlHistory` für Tendenz-Erkennung; FR-ASD-001
 - ✅ Paket #13 / ASD-003 — Aeronautical Map Layer (Wayfinder): Radar Dark Mode (3a), Live-OpenAIP-Backend (3b, ADR 0004), Luftraum/Navaid/Waypoint-Overlays + Layer-Steuerung (3c/3d); FR-MAP-001..004, NFR-OPS-004/SEC-002/OBS-004
 - ✅ Paket #3 / AP5/AP6 — CAT065 SDPS-Heartbeat, ICD 2.3.0 (ADR 0018; Firefly Sender + Wayfinder Decoder/Staleness)
