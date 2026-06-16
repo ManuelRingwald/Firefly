@@ -57,7 +57,7 @@ einem einzelnen Radar fliegen. Jedes Flugzeug erscheint als Punkt mit:
 
 | Knopf | Was er tut |
 |-------|-----------|
-| **„Verzug simulieren (5 s)"** | Simuliert eine 5 Sekunden lange Zustellverzögerung — die Berechnung läuft unverändert weiter, nur die Anzeige hängt kurz. Zeigt: Firefly ist *robust* gegenüber holpriger Netzwerkzustellung (siehe [M3 — Vom Tracker zum Live-Lagebild](docs/milestones/M3-live-picture.md)). |
+| **„Verzug simulieren (5 s)"** | Simuliert eine 5 Sekunden lange Zustellverzögerung — die Berechnung läuft unverändert weiter, nur die Anzeige hängt kurz. Zeigt: Firefly ist *robust* gegenüber holpriger Netzwerkzustellung (siehe [M3 — Vom Tracker zum Live-Lagebild](docs/milestones/M3-live-picture.md)). **Hinweis:** Dieser Verzug betrifft ausschließlich den internen Browser-WebSocket (`/ws`) dieses ASD. Der CAT062/UDP-Multicast-Feed — den Wayfinder empfängt — läuft als eigenständiger Task und ist davon **nicht** betroffen. |
 | **„airspaces"** | Blendet eine Luftraum-Übersicht (TMA, CTR, Sperrgebiet) als violette Flächen über die Karte. Beispieldaten rund um Frankfurt (`crates/firefly-server/static/airspaces.geojson`). |
 | **„raw plots"** | Blendet die **rohen Radar-Messungen** ein (kleine rote Punkte) — das, was der Tracker als *Input* bekommt, bevor daraus glatte Tracks werden. Gut zum Vergleich: „was misst das Radar" vs. „was berechnet der Tracker". |
 
