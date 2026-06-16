@@ -26,7 +26,7 @@
 | 9 | **Live-OpenAIP-Integration** | Firefly | Statische Airspace-GeoJSON → Live-API. *Hinweis:* die **Wayfinder-Seite** ist mit ASD-003 (#13, ADR 0004) live umgesetzt; offen bleibt ein etwaiger Firefly-seitiger Bedarf. | **S3 · Sonnet 4.6** |
 | 10 | **SDPS-005 — Legal Recording & Replay** | Firefly | Sidecar zeichnet rohe Sensor-Multicast-Payloads mit Empfangs-Zeitstempel auf; dank Determinismus nach Datenzeit bit-genaue Rekonstruktion möglich | **S2 · Sonnet 4.6** |
 | 11 | **SDPS-006 — Erweiterte Observability** | Firefly | Prometheus-Exporter (Plots/s, Track-Count, Latenzen) + Grafana-Dashboard als Code, baut auf Paket #2 auf | **S2 · Sonnet 4.6** |
-| 12 | **ASD-001 — Erweiterter Data Block** | Wayfinder | Callsign (I062/245), Flight Level (I062/136, FLnnn), Ground Speed (aus Vx/Vy), Steig-/Sinkflug-Indikator im Track-Label | **S3 · Sonnet 4.6** |
+| 12 | **ASD-001 — Erweiterter Data Block** ✅ *abgeschlossen* | Wayfinder | Callsign (I062/245), Flight Level (I062/136, FLnnn), Ground Speed (aus Vx/Vy), Steig-/Sinkflug-Indikator im Track-Label — alle vier Elemente in `buildLabel(track, vTrend)` + `trackFlHistory` für Tendenz. | **S2 · Sonnet 4.6** |
 | 13 | **ASD-003 — Aeronautical Map Layer** ✅ *abgeschlossen* | Wayfinder | "Radar Dark Mode"-Basistheme (3a), **Live-OpenAIP**-Backend (3b, ADR 0004), Luftraumstrukturen + Waypoints/VOR/NDB als schaltbare Layer (3c/3d). Setzt die Wayfinder-Seite von #9 (Live-OpenAIP) um. | **S4 · Opus 4.8** |
 | 14 | **ASD-004 — Track-Lebenszyklus & History-Darstellung** | Wayfinder | Konfigurierbare History-Dots, Coasting-Blinken/Abdunkeln, Graceful Fade-Out bei TSE (ADR 0016) | **S3 · Sonnet 4.6** |
 | 15 | **ASD-005 — Höhen- und Filter-Tools** | Wayfinder | UI-Panel für Min/Max-FL-Filter, Tracks außerhalb ausblenden/entsättigen | **S2 · Sonnet 4.6** |
@@ -82,6 +82,7 @@ abgestimmt und versioniert.
 
 ## Erledigt (Referenz)
 
+- ✅ Paket #12 / ASD-001 — Erweiterter Data Block (Wayfinder): Callsign + FL (`FLnnn`) + Vertikaltendenz (▲/▼) + Ground Speed (kt) in `buildLabel`; `trackFlHistory` für Tendenz-Erkennung; FR-ASD-001
 - ✅ Paket #13 / ASD-003 — Aeronautical Map Layer (Wayfinder): Radar Dark Mode (3a), Live-OpenAIP-Backend (3b, ADR 0004), Luftraum/Navaid/Waypoint-Overlays + Layer-Steuerung (3c/3d); FR-MAP-001..004, NFR-OPS-004/SEC-002/OBS-004
 - ✅ Paket #3 / AP5/AP6 — CAT065 SDPS-Heartbeat, ICD 2.3.0 (ADR 0018; Firefly Sender + Wayfinder Decoder/Staleness)
 - ✅ Paket #2 — Observability-Grundgerüst (Log-Level, `tracing` in firefly-multicast, `/metrics` beidseitig)
