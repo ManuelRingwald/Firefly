@@ -6,7 +6,7 @@
 > Arbeit neue Findings/Pakete ergeben. **Stichwort „Roadmap" im Chat zeigt
 > diese Liste.**
 >
-> Stand: 2026-06-16 (Pakete #1–#3, #11–#14 abgeschlossen; Pakete #10–#20
+> Stand: 2026-06-16 (Pakete #1–#3, #10–#15 abgeschlossen; Pakete #10–#20
 > aus den Backlogs „Firefly SDPS Core Features" und „Wayfinder" übernommen).
 
 ## Empfohlene Reihenfolge
@@ -22,7 +22,7 @@
 | 7 | **FHA / Hazard-Analyse** | Firefly + Wayfinder | Sicherheits-Analyse-Dokument | **S4 · Opus 4.8** |
 | 8 | **Sensor-Registrierung/Bias-Korrektur** | Firefly | M4-Nachtrag, größere Mess-Fusions-Erweiterung | **S5 · Fable 5 / Opus 4.8** |
 | 9 | **Live-OpenAIP-Integration** | Firefly | Statische Airspace-GeoJSON → Live-API. *Hinweis:* die **Wayfinder-Seite** ist mit ASD-003 (#13, ADR 0004) live umgesetzt; offen bleibt ein etwaiger Firefly-seitiger Bedarf. | **S3 · Sonnet 4.6** |
-| 10 | **SDPS-005 — Legal Recording & Replay** | Firefly | Sidecar zeichnet rohe Sensor-Multicast-Payloads mit Empfangs-Zeitstempel auf; dank Determinismus nach Datenzeit bit-genaue Rekonstruktion möglich | **S2 · Sonnet 4.6** |
+| 10 | **SDPS-005 — Legal Recording & Replay** ✅ *abgeschlossen* | Firefly | `firefly-recorder`-Crate: `firefly-record` (Multicast-Sidecar → `.ffrec`-Datei mit Unix-ns-Zeitstempeln) + `firefly-replay` (`.ffrec` → Multicast, drift-freies Timing, `FIREFLY_REPLAY_SPEED`); `.ffrec`-Format (16-Byte-Header + `[u64 ts][u16 len][payload]`); FR-OPS-005. | **S2 · Sonnet 4.6** |
 | 11 | **SDPS-006 — Erweiterte Observability** ✅ *abgeschlossen* | Firefly | `firefly_tracks_active`-Gauge per-Scan via `on_scan`-Callback in `run<F>` (SDPS-006a); importierbares Grafana-Dashboard `monitoring/grafana/dashboard.json` mit 5 Panels (SDPS-006b). Plots/s erst mit SDPS-001 relevant. | **S2 · Sonnet 4.6** |
 | 12 | **ASD-001 — Erweiterter Data Block** ✅ *abgeschlossen* | Wayfinder | Callsign (I062/245), Flight Level (I062/136, FLnnn), Ground Speed (aus Vx/Vy), Steig-/Sinkflug-Indikator im Track-Label — alle vier Elemente in `buildLabel(track, vTrend)` + `trackFlHistory` für Tendenz. | **S2 · Sonnet 4.6** |
 | 13 | **ASD-003 — Aeronautical Map Layer** ✅ *abgeschlossen* | Wayfinder | "Radar Dark Mode"-Basistheme (3a), **Live-OpenAIP**-Backend (3b, ADR 0004), Luftraumstrukturen + Waypoints/VOR/NDB als schaltbare Layer (3c/3d). Setzt die Wayfinder-Seite von #9 (Live-OpenAIP) um. | **S4 · Opus 4.8** |
@@ -80,6 +80,7 @@ abgestimmt und versioniert.
 
 ## Erledigt (Referenz)
 
+- ✅ Paket #10 / SDPS-005 — Legal Recording & Replay (Firefly): `firefly-record` + `firefly-replay`, `.ffrec`-Format, FR-OPS-005
 - ✅ Paket #11 / SDPS-006 — Erweiterte Observability (Firefly): `firefly_tracks_active` Gauge + Grafana-Dashboard; NFR-OBS-002
 - ✅ Paket #15 / ASD-005 — Höhen- und Filter-Tools (Wayfinder): Min/Max-FL-Filter-Panel, entsättigen/ausblenden, FR-ASD-005
 - ✅ Paket #14 / ASD-004 — Track-Lebenszyklus & History-Darstellung (Wayfinder): History-Dots (4a), Coasting-Abdunkeln (4b), Graceful Fade-Out bei TSE 1,5 s (4c); FR-ASD-004

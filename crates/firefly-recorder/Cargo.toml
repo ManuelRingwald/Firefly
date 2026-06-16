@@ -1,0 +1,24 @@
+[package]
+name = "firefly-recorder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "SDPS-005: CAT062/CAT065 multicast recorder and replayer — legal recording and bit-exact replay of the track feed (ADR 0006, ED-109A)."
+
+[[bin]]
+name = "firefly-record"
+path = "src/bin/record.rs"
+
+[[bin]]
+name = "firefly-replay"
+path = "src/bin/replay.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["net", "time", "rt-multi-thread", "macros", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
