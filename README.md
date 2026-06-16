@@ -172,4 +172,4 @@ live auf Wayfinders Karte. Details zum Wire-Vertrag stehen in
 
 ## Lizenz
 
-MIT
+Apache-2.0
