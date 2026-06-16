@@ -27,7 +27,7 @@
 | 12 | **ASD-001 — Erweiterter Data Block** ✅ *abgeschlossen* | Wayfinder | Callsign (I062/245), Flight Level (I062/136, FLnnn), Ground Speed (aus Vx/Vy), Steig-/Sinkflug-Indikator im Track-Label — alle vier Elemente in `buildLabel(track, vTrend)` + `trackFlHistory` für Tendenz. | **S2 · Sonnet 4.6** |
 | 13 | **ASD-003 — Aeronautical Map Layer** ✅ *abgeschlossen* | Wayfinder | "Radar Dark Mode"-Basistheme (3a), **Live-OpenAIP**-Backend (3b, ADR 0004), Luftraumstrukturen + Waypoints/VOR/NDB als schaltbare Layer (3c/3d). Setzt die Wayfinder-Seite von #9 (Live-OpenAIP) um. | **S4 · Opus 4.8** |
 | 14 | **ASD-004 — Track-Lebenszyklus & History-Darstellung** ✅ *abgeschlossen* | Wayfinder | History-Dots als diskreter Circle-Layer über der Trail-Linie (4a), Coasting-Abdunkeln auf allen Layern via MapLibre-Expressions (4b), Graceful Fade-Out (1,5 s) bei TSE via `fadingTracks`-Map + `setInterval`-Loop (4c); FR-ASD-004. | **S3 · Sonnet 4.6** |
-| 15 | **ASD-005 — Höhen- und Filter-Tools** | Wayfinder | UI-Panel für Min/Max-FL-Filter, Tracks außerhalb ausblenden/entsättigen | **S2 · Sonnet 4.6** |
+| 15 | **ASD-005 — Höhen- und Filter-Tools** ✅ *abgeschlossen* | Wayfinder | Min/Max-FL-Inputs + Ausblenden-Checkbox im Layer-Panel; `isFlFiltered`/`flOpacity`; sofortiger Re-Render via `setupFlFilter`; `fl_opacity`-Property in allen 5 Layer-Expressions; FR-ASD-005. | **S2 · Sonnet 4.6** |
 | 16 | **ASD-002 — Anti-Garbling (Label-Vermeidung)** | Wayfinder | Algorithmus zur automatischen Label-Umpositionierung bei Überlappung (Leader Line); optional Drag&Drop | **S4 · Opus 4.8** |
 | 17 | **SDPS-003 — Environment & Meteo Data Service** | Firefly | Zyklisches QNH für barometrische Höhenkorrektur (I062/136), statische DTM-Daten als Basis für Bodenannäherungswarnungen | **S3 · Sonnet 4.6** |
 | 18 | **SDPS-004 + ASD-006 — STCA (gekoppeltes Paar)** | Firefly + Wayfinder | **Firefly:** serverseitige Konflikterkennung im Tracker (Vorausschau, Staffelungsminima), setzt Alarm-Flag in CAT062 (I062/340), ICD-Bump. **Wayfinder:** ASD-006 reformuliert als reiner Flag-Konsum — Data Block blinkt rot, keine eigene Geometrie-Berechnung (kein doppelter Determinismus-Pfad). Abhängigkeit: Wayfinder-Teil erst nach Firefly-ICD-Update | **S4 · Opus 4.8** |
@@ -81,6 +81,7 @@ abgestimmt und versioniert.
 ## Erledigt (Referenz)
 
 - ✅ Paket #11 / SDPS-006 — Erweiterte Observability (Firefly): `firefly_tracks_active` Gauge + Grafana-Dashboard; NFR-OBS-002
+- ✅ Paket #15 / ASD-005 — Höhen- und Filter-Tools (Wayfinder): Min/Max-FL-Filter-Panel, entsättigen/ausblenden, FR-ASD-005
 - ✅ Paket #14 / ASD-004 — Track-Lebenszyklus & History-Darstellung (Wayfinder): History-Dots (4a), Coasting-Abdunkeln (4b), Graceful Fade-Out bei TSE 1,5 s (4c); FR-ASD-004
 - ✅ Paket #12 / ASD-001 — Erweiterter Data Block (Wayfinder): Callsign + FL (`FLnnn`) + Vertikaltendenz (▲/▼) + Ground Speed (kt) in `buildLabel`; `trackFlHistory` für Tendenz-Erkennung; FR-ASD-001
 - ✅ Paket #13 / ASD-003 — Aeronautical Map Layer (Wayfinder): Radar Dark Mode (3a), Live-OpenAIP-Backend (3b, ADR 0004), Luftraum/Navaid/Waypoint-Overlays + Layer-Steuerung (3c/3d); FR-MAP-001..004, NFR-OPS-004/SEC-002/OBS-004
