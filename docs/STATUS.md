@@ -7,7 +7,17 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-16 — **Paket #11 / SDPS-006 „Erweiterte
+- **Zuletzt aktualisiert:** 2026-06-16 — **Paket #10 / SDPS-005 „Legal
+  Recording & Replay" abgeschlossen.** Neues Crate `firefly-recorder` mit zwei
+  Binaries: `firefly-record` (Sidecar, tritt Multicast-Gruppe bei, schreibt
+  Datagramme mit Unix-ns-Zeitstempel in `.ffrec`-Datei) und `firefly-replay`
+  (liest `.ffrec`, sendet Datagramme mit originalem Timing, skalierbar via
+  `FIREFLY_REPLAY_SPEED`). Format-Bibliothek `lib.rs` mit Header-/Record-
+  Schreib/Lese-API; 6 Unit-Tests (Round-Trip, Bad-Magic, Version-Check, EOF).
+  FR-OPS-005 im Anforderungs-Register. Milestone `docs/milestones/SDPS-005_Legal_Recording_Replay.md`.
+  ROADMAP aktualisiert. Gates: `cargo test/clippy/fmt` grün. S2 · Sonnet 4.6.
+  Nächster Schritt: nächstes Roadmap-Paket nach Abstimmung.
+- **Vorherige Aktualisierung:** 2026-06-16 — **Paket #11 / SDPS-006 „Erweiterte
   Observability" abgeschlossen.** SDPS-006a: `firefly_tracks_active` (Gauge) in
   `firefly_server::Metrics`; `firefly_multicast::run` auf generisches
   `run<F: Fn(usize)>` erweitert — `on_scan`-Callback wird nach jedem

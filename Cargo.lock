@@ -222,6 +222,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-recorder"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "firefly-server"
 version = "0.1.0"
 dependencies = [
