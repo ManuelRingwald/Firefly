@@ -75,16 +75,21 @@ Das Docker-Image eignet sich für:
 ## Mit Wayfinder (End-to-End-ASD)
 
 Standardmäßig sendet der Container **keinen** CAT062-Multicast. Für den
-End-to-End-Test mit Wayfinder:
+End-to-End-Test mit Wayfinder empfiehlt sich das Frankfurt-Szenario:
 
 ```bash
-FIREFLY_CAT062_ENABLED=true docker-compose up
+FIREFLY_SCENE=frankfurt FIREFLY_CAT062_ENABLED=true docker-compose up
 ```
 
 Multicast (`239.255.0.62:8600`) traversiert Docker's Standard-Bridge-Netz
 nicht — für den Container-basierten End-to-End-Test mit Wayfinder muss daher
 `network_mode: host` verwendet werden (Linux). Details und der lokale Weg
 (ohne Docker) stehen in Wayfinders `README.md`/`DOCKER.md`.
+
+Unter **macOS/Windows (Docker Desktop)** funktioniert `network_mode: host`
+nicht zuverlässig (Container sehen nur die Docker-VM, nicht den Host).
+Wayfinders `DOCKER.md` beschreibt dafür eine Bridge-Netzwerk-Variante mit
+gemeinsamem Master-Compose (beide Repos als Geschwister-Ordner).
 
 ## Zukunft
 
