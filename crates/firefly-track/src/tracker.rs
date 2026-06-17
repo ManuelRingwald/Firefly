@@ -290,7 +290,11 @@ impl Tracker {
     ///
     /// A track already at or after `t` is reported as-is (no backward
     /// prediction). Status is evaluated at `t`: `update_age = t − last_hit_time`,
-    /// and the track is `coasting` once `t` is past its last hit.
+    /// and the track is `coasting` once it is overdue by a full expected revisit
+    /// interval — i.e. the output time has reached the moment its next hit was
+    /// due. A track that is still being updated on cadence is therefore *not*
+    /// reported coasting, even though the fixed output heartbeat (ADR 0013) lands
+    /// a fraction of a second after its last hit.
     ///
     /// REQ: NFR-INT-001, NFR-INT-002, FR-TRK-024
     pub fn snapshot_at(&self, t: Timestamp) -> Vec<SystemTrack> {
@@ -310,7 +314,16 @@ impl Tracker {
                     track.estimate()
                 };
                 let update_age = (t - track.last_hit_time).max(0.0);
-                let coasting = t > track.last_hit_time;
+                // A track coasts once the output time has reached the moment its
+                // next hit was due, i.e. it has missed at least one expected
+                // revisit. Comparing against the track's expected revisit
+                // interval (not against a bare `t > last_hit_time`) is essential:
+                // the periodic output runs on a fixed heartbeat decoupled from
+                // the asynchronous input (ADR 0013), so the output time is almost
+                // always a sliver past the last hit even for a perfectly healthy,
+                // freshly-updated track. Flagging every such track as coasting
+                // would make the whole air picture coast permanently.
+                let coasting = update_age >= track.expected_revisit(NOMINAL_REVISIT_INTERVAL);
                 system_track_from(track, &estimate, t, coasting, update_age, frame)
             })
             .collect()
@@ -1923,6 +1936,29 @@ mod tests {
             "update age = t − last hit"
         );
         assert!((snap[0].time.as_secs() - 12.0).abs() < 1e-9);
+    }
+
+    /// A track sampled by the periodic output a sliver after its last hit is
+    /// **not** coasting: the fixed output heartbeat (ADR 0013) is decoupled from
+    /// the asynchronous input, so it almost always lands just past the last hit.
+    /// Regression guard for the bug where every track coasted permanently because
+    /// the test was merely `t > last_hit_time`.
+    #[test]
+    fn snapshot_at_does_not_coast_a_freshly_updated_track() {
+        let mut tracker = Tracker::new(config());
+        // Hits every 4 s → revisit interval settles to 4 s.
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_plot(&plot(t, 50_000.0, 0.0));
+        }
+        // Output heartbeat lands 0.1 s after the last hit (t = 8.0): the track is
+        // well within its expected revisit, so it must report as live.
+        let snap = tracker.snapshot_at(Timestamp(8.1));
+        assert!(
+            !snap[0].coasting,
+            "fresh track sampled mid-cadence must not coast"
+        );
+        assert!((snap[0].update_age - 0.1).abs() < 1e-9);
     }
 
     /// An empty tracker snapshots to an empty air picture.
