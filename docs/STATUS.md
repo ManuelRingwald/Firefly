@@ -7,7 +7,26 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.9 (Wayfinder ES-Age-Decoder + ADS-B-Badge) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-18 — **ADR 0020 akzeptiert + AP9.4c-0 (`.ffplots`-Eingangs-Aufzeichnung) abgeschlossen.**
+  ADR 0020 („Live-Tracker-Modus und Plot-Aufzeichnung") legt fest: zwei sich
+  ausschließende Betriebsmodi (deterministischer **Replay** vs. echtzeit **Live**,
+  `FIREFLY_MODE`), und — auf Wunsch des Projektverantwortlichen — eine **Eingangs-
+  Aufzeichnungsebene**: alle eingehenden Plots (ADS-B, künftig PSR/SSR, FLARM)
+  werden vor dem Tracker mitgeschrieben, sodass jeder Produktions-Lauf
+  reproduzierbar ist (nicht-deterministisch im Timing ≠ nicht-reproduzierbar).
+  **AP9.4c-0** baut das `.ffplots`-Format in `firefly-recorder`: teilt das
+  Record-Framing von `.ffrec` (`[u64 ts_ns][u16 len][payload]`), Magic
+  `FFPLOTS\x00`, Payload = `serde_json(Plot)`. `firefly-core::Plot` (+ `DetectionKind`/
+  `Measurement`/`ModeAC`) leiten jetzt `Serialize`/`Deserialize` ab (additiv).
+  Neue API: `write_plot_file_header`/`read_plot_file_header`,
+  `write_plot_record`/`read_plot_record`; robuster Reader (`ReadError::PlotDeserialize`
+  statt Panic). Quellenagnostisch über den `Plot`-Typ. 6 neue Tests
+  (Round-Trip ADS-B + Radar gemischt, Magic-Abgrenzung zu `.ffrec`, EOF,
+  malformed JSON). FR-OPS-006 im Register. Alle Gates grün (`cargo test
+  --workspace`, `clippy --workspace --all-targets`, `fmt`). S2 · Opus 4.8.
+  **Nächster Schritt: AP9.4c-1** (`FrameSource`-Abstraktion + `AppState`
+  modusfähig, Replay-Pfad unverändert grün — S3 · Sonnet 4.6).
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.9 (Wayfinder ES-Age-Decoder + ADS-B-Badge) abgeschlossen.**
   Wayfinder-Seite von AP9 ist fertig: `UpdateAge.ESAge *float64` (nil = Radar-only), Fall 14 als
   bit-walking Loop (tolerant gegenüber zukünftigen I062/290-Subfeldern), `TrackMessage.AdsbAgeS`,
   `isAdsbFresh`-Helper + `◆`-Badge im Track-Label (≤ 30 s). Byte-exakte Tests gegen Fireflys

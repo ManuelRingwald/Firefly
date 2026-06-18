@@ -283,6 +283,9 @@ dependencies = [
 name = "firefly-recorder"
 version = "0.1.0"
 dependencies = [
+ "firefly-core",
+ "firefly-geo",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

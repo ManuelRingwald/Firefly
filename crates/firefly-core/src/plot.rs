@@ -11,7 +11,7 @@ use crate::time::Timestamp;
 /// transponder and gets Mode A/C/S replies. In practice a plot is often the
 /// *combined* result of correlating a primary return with an SSR reply in the
 /// same beam dwell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DetectionKind {
     /// Primary surveillance radar only (skin paint).
     Primary,
@@ -56,7 +56,7 @@ impl Callsign {
 }
 
 /// Secondary-radar replies attached to a plot.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModeAC {
     /// Mode 3/A identity code (the 4-digit octal "squawk"), if replied.
     pub mode_3a: Option<u16>,
@@ -81,7 +81,7 @@ pub struct ModeAC {
 /// Keeping the source in the plot (rather than splitting into two plot types)
 /// lets one association/fusion path serve both: the tracker dispatches on the
 /// variant only when turning the plot into a Cartesian measurement.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Measurement {
     /// Radar polar reading (range/azimuth/elevation) in the sensor's local frame.
     Polar(Polar),
@@ -112,7 +112,7 @@ impl Measurement {
 /// The measurement is stored in its native form ([`Measurement`]); converting it
 /// into the tracking frame is the tracker's job, because the choice of frame and
 /// the measurement-noise model belong to the estimator, not to the detection.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Plot {
     /// Sensor that produced this plot.
     pub sensor: SensorId,

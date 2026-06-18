@@ -1,6 +1,6 @@
 # ADR 0020 — Live-Tracker-Modus und Plot-Aufzeichnung
 
-- **Status:** Vorschlag — zur Freigabe (noch nicht akzeptiert)
+- **Status:** akzeptiert (2026-06-18; Umsetzung in AP9.4c-0…6 läuft)
 - **Datum:** 2026-06-18
 - **Schnittstellen-relevant:** nein (CAT062-Draht-Vertrag bleibt unverändert;
   ICD 2.4.0 deckt das ES-Age-Subfeld bereits ab). Diese Entscheidung betrifft
@@ -260,7 +260,7 @@ Neue Metriken: `firefly_live_plots_ingested_total`, `firefly_live_tracks_current
 
 | Schritt | Inhalt | Komplex. | Modell |
 |---------|--------|----------|--------|
-| **AP9.4c-0** | `.ffplots`-Format in `firefly-recorder`: `write_plot_header`, `write_plot_record`, `read_plot_record`; Round-Trip-Tests | S2 | Sonnet 4.6 |
+| **AP9.4c-0** ✅ | `.ffplots`-Format in `firefly-recorder`: `write_plot_file_header`/`write_plot_record`/`read_plot_record`; `Plot` serde-fähig; 6 Round-Trip-Tests | S2 | Opus 4.8 |
 | **AP9.4c-1** | `FrameSource`-Abstraktion + `AppState` modusfähig; Replay-Pfad unverändert grün | S3 | Sonnet 4.6 |
 | **AP9.4c-2** | LiveTracker-Task: Channel vom Poller, `process_plots` nach Datenzeit, Snapshot-Publish (`watch`); `PlotRecorder` schreibt parallel | S4 | Opus 4.8 |
 | **AP9.4c-3** | WS-Pump + CAT062-Feed lesen Live-Snapshot; Mode-Switch in `main.rs` (`FIREFLY_MODE`) | S4 | Opus 4.8 |
@@ -268,19 +268,15 @@ Neue Metriken: `firefly_live_plots_ingested_total`, `firefly_live_tracks_current
 | **AP9.4c-5** | `firefly-replay-plots` Binary; Integration-Test: Replay aus `.ffplots` → gleicher CAT062-Strom wie Live-Lauf | S3 | Sonnet 4.6 |
 | **AP9.4c-6** | Tests (Fake-Producer, Replay-Regression), Milestone-Doku, ADR auf „akzeptiert" | S2 | Sonnet 4.6 |
 
-## Offene Fragen (vor/zur Freigabe)
+## Entschiedene Fragen (bei Freigabe)
 
-1. **Snapshot-Primitive:** `tokio::sync::watch` (in der Tokio-Abhängigkeit
-   enthalten, kein neuer Crate) vs. `arc-swap` (lock-frei, minimal). Empfehlung:
-   `watch` — keine neue Abhängigkeit, passt zum „letzter Wert gewinnt".
-2. **Modus-Schalter-Name:** `FIREFLY_MODE=live|replay` (explizit) vs. „Live an,
-   sobald `FIREFLY_OPENSKY_ENABLED=true`" (implizit). Empfehlung: expliziter
-   `FIREFLY_MODE`, damit der Betriebsmodus eindeutig und auditierbar ist.
-3. **Geo-Referenzpunkt im Live-Modus:** Der `LocalFrame`-Ursprung muss zur
-   konfigurierten OpenSky-Bounding-Box passen (verknüpft mit dem offenen Punkt
-   „Konfigurierbarer System-Referenzpunkt", Roadmap). Default: Box-Mittelpunkt.
-4. **Aufbewahrungspolitik `.ffplots`:** Maximale Dateigröße / Rotations-Intervall
-   konfigurierbar machen (`FIREFLY_PLOT_RECORD_MAX_MB`, Default z. B. 2048 MB)?
-   Oder zunächst einfach: immer in eine Datei, kein Auto-Rotate (Operator
-   verantwortlich)? Empfehlung: zunächst keine Auto-Rotation (YAGNI),
-   Konfigurierbarkeit als eigenes Vorhaben wenn Bedarf entsteht.
+1. **Snapshot-Primitive:** ✅ `tokio::sync::watch` — keine neue Abhängigkeit,
+   „letzter Wert gewinnt"-Semantik passt zum Live-Snapshot.
+2. **Modus-Schalter-Name:** ✅ expliziter `FIREFLY_MODE=live|replay` — der
+   Betriebsmodus ist eindeutig und auditierbar.
+3. **Geo-Referenzpunkt im Live-Modus:** ✅ Default = Mittelpunkt der
+   konfigurierten OpenSky-Bounding-Box (verknüpft mit „Konfigurierbarer
+   System-Referenzpunkt", Roadmap).
+4. **Aufbewahrungspolitik `.ffplots`:** ✅ zunächst keine Auto-Rotation (YAGNI),
+   eine Datei pro Lauf; Rotation/Größenlimit als eigenes Vorhaben, wenn der
+   operative Bedarf entsteht.
