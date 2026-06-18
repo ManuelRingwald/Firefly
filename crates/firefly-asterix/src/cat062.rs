@@ -1332,6 +1332,76 @@ mod tests {
         assert_eq!(block, expected);
     }
 
+    /// Byte-exact reference dump for a track that carries an **ADS-B hit**
+    /// (ICD 2.4.0, AP9.5/AP9.7) — the ground truth Wayfinder's decoder must
+    /// match (AP9.9). It is the [`single_track_matches_reference_dump`] vector
+    /// with `adsb_age_s = Some(3.0)`, which changes exactly one item:
+    ///
+    /// - I062/290 grows from `[0x40, 0x08]` (PSR only, 2 bytes) to
+    ///   `[0x48, 0x08, 0x0C]` (PSR + ES, 3 bytes): the primary subfield gains
+    ///   the ES bit `0x08` → `0x48`, the PSR age stays `0x08` (2 s), and the
+    ///   ES age `0x0C` (3 s = 12 quarter-seconds) is appended.
+    /// - the record grows by one byte (37 → 38), so LEN = 3 + 38 = 41 = 0x0029.
+    /// - **the FSPEC is unchanged** (`0x9F,0x0F,0x01,0x04`): ES-Age rides inside
+    ///   the already-present I062/290 (FRN 14), not a new FRN — the additive,
+    ///   non-breaking property ICD 2.4.0 promises.
+    ///
+    /// REQ: FR-IO-003, FR-TRK-032
+    #[test]
+    fn single_track_with_adsb_hit_matches_reference_dump() {
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let mut t = track(1);
+        t.adsb_age_s = Some(3.0); // ES age: 3 s → 12 quarter-seconds (0x0C)
+        let block = encoder.encode(Timestamp(12.0), &[t]);
+
+        let expected = vec![
+            0x3E, // CAT 62
+            0x00, 0x29, // LEN = 41 (one byte more than the radar-only dump)
+            0x9F, 0x0F, 0x01, 0x04, // FSPEC {1, 4, 5, 6, 7, 12, 13, 14, 27} — unchanged
+            0x19, 0x02, // I062/010 SAC/SIC
+            0x00, 0x06, 0x00, // I062/070 time = 1536 ticks
+            0x00, 0x80, 0x00, 0x00, // I062/105 latitude 45°
+            0x00, 0x20, 0x00, 0x00, // I062/105 longitude 11.25°
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // I062/100 X=0, Y=0 (reference point)
+            0x01, 0x90, // I062/185 Vx = 100 m/s
+            0xFF, 0x38, // I062/185 Vy = −50 m/s
+            0x00, 0x01, // I062/040 track number 1
+            0x00, // I062/080 confirmed, fresh
+            0x48, 0x08, 0x0C, // I062/290 PSR age = 2 s + ES age = 3 s (ICD 2.4.0)
+            0x80, 0x00, 0xC8, 0x00, 0xC8, // I062/500 APC = 100 m
+        ];
+        assert_eq!(block, expected);
+    }
+
+    /// A full record carrying an ADS-B hit round-trips through the decoder:
+    /// `adsb_age_s` comes back within the 1/4-second LSB, and the other items
+    /// decode correctly alongside the grown I062/290. The radar-only reference
+    /// track, by contrast, decodes `adsb_age_s == None`. REQ: FR-IO-003,
+    /// FR-IO-004, FR-TRK-032
+    #[test]
+    fn decode_recovers_adsb_age_when_present() {
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+
+        let mut t = track(1);
+        t.adsb_age_s = Some(3.0);
+        let block = encoder.encode(Timestamp(12.0), &[t]);
+
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records.len(), 1);
+        let es_age = records[0].adsb_age_s.expect("ES age present");
+        assert!((es_age - 3.0).abs() < 0.25, "ES age preserved to LSB");
+        // The PSR age and a neighbouring item still decode correctly.
+        assert_eq!(records[0].update_age, 2.0);
+        assert_eq!(records[0].position_uncertainty, 100.0);
+
+        // A radar-only track carries no ES age.
+        let radar_only = encoder.encode(Timestamp(12.0), &[track(1)]);
+        let radar_records = decode_data_block(&radar_only).unwrap();
+        assert_eq!(radar_records[0].adsb_age_s, None);
+    }
+
     /// LEN counts every byte of every record. Two tracks → two 37-byte records.
     /// REQ: FR-IO-003
     #[test]

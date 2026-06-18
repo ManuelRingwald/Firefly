@@ -7,7 +7,16 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.4b (OpenSky-Poller in `firefly-server` verdrahtet) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.7 (byte-genauer ES-Age-Referenz-Dump) abgeschlossen.**
+  Zwei neue Tests in `firefly-asterix::cat062` (49 statt 47): `single_track_with_adsb_hit_matches_reference_dump`
+  ist der byte-genaue Referenz-Vektor für einen Track **mit** ADS-B-Treffer (`adsb_age_s = Some(3.0)`) —
+  die Grundwahrheit, gegen die Wayfinders Decoder (AP9.9) prüfen muss. Belegt empirisch die additive,
+  nicht-brechende Eigenschaft von ICD 2.4.0: **FSPEC unverändert** (`0x9F,0x0F,0x01,0x04`), nur I062/290
+  wächst von `[0x40,0x08]` auf `[0x48,0x08,0x0C]` (+1 Byte), LEN 40→41. `decode_recovers_adsb_age_when_present`
+  prüft den vollen Record-Round-Trip (ES-Age zurückgewonnen; Radar-only-Track decodiert `None`). FR-TRK-032
+  + FR-IO-003 ergänzt. Alle Gates grün. S3 · Opus 4.8. **Nächster Schritt: AP9.9 (Wayfinder ES-Age-Decoder
+  + ADS-B-Badge, Wayfinder#21).**
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.4b (OpenSky-Poller in `firefly-server` verdrahtet) abgeschlossen.**
   `spawn_opensky_poller()` in `main.rs` liest `OpenSkyConfig::from_env()` — per Default deaktiviert,
   kein Netzverkehr ohne `FIREFLY_OPENSKY_ENABLED=true`. Wenn aktiv: Tokio-Task startet
   `OpenSkyPoller::new(config).run(|plots| tracing::info!(...))` — Batches werden geloggt.
