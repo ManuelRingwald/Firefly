@@ -1,44 +1,39 @@
-//! Binary entry point: build the demo scene, then serve it with graceful
-//! shutdown and structured logging.
+//! Binary entry point: build the demo scene or start the live tracker, then
+//! serve it with graceful shutdown and structured logging.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use firefly_asterix::Cat062Encoder;
+use firefly_core::Plot;
 use firefly_multicast::MulticastConfig;
 use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
-use firefly_server::{router, scene, AppState, FrameSource, Metrics, Scene, ServerConfig};
+use firefly_server::{
+    build_live_tracker, router, run_live_cat062, run_live_tracker, scene, AppState, FrameSource,
+    LiveSnapshot, LiveTracker, Metrics, Scene, ServerConfig, ServerMode, SnapshotRx,
+};
 use tokio::net::TcpListener;
+use tokio::sync::{mpsc, watch};
 
 #[tokio::main]
 async fn main() {
     init_tracing();
 
     let config = ServerConfig::from_env();
-    let frames = match config.scene {
-        Scene::Demo => scene::demo_frames(),
-        Scene::Frankfurt => scene::frankfurt_frames(),
-    };
     tracing::info!(
         port = config.port,
-        speed = config.speed,
-        scene = ?config.scene,
-        frames = frames.len(),
+        mode = ?config.mode,
         "starting Firefly server"
     );
 
     let metrics = Arc::new(Metrics::default());
 
-    spawn_cat062_multicast(config.speed, config.scene, Arc::clone(&metrics));
+    // CAT065 heartbeat runs in both modes: wall-clock liveness signal.
     spawn_cat065_heartbeat(Arc::clone(&metrics));
-    spawn_opensky_poller();
 
-    let state = AppState {
-        source: FrameSource::Replay {
-            frames: Arc::new(frames),
-            speed: config.speed,
-        },
-        metrics,
+    let state = match config.mode {
+        ServerMode::Replay => build_replay_state(config, metrics),
+        ServerMode::Live => build_live_state(config, metrics).await,
     };
 
     let listener = match TcpListener::bind(("0.0.0.0", config.port)).await {
@@ -63,11 +58,40 @@ async fn main() {
     tracing::info!("shutdown complete");
 }
 
-/// Spawn the CAT062 UDP-multicast feed alongside the web server, if enabled
-/// (`FIREFLY_CAT062_ENABLED=true`). It replays the same scan stream the web
-/// map shows — encoded as CAT062 and sent to the configured multicast group —
-/// paced into wall-clock at the same `speed` (ADR 0006). Disabled by default,
-/// so a plain `cargo run` never emits surprise network traffic.
+// ---------------------------------------------------------------------------
+// Replay mode
+// ---------------------------------------------------------------------------
+
+/// Build the `AppState` for the deterministic Replay mode: load the pre-computed
+/// scene, spawn the replay CAT062 feed, and optionally start the OpenSky poller
+/// in log-only mode if `FIREFLY_OPENSKY_ENABLED=true`.
+fn build_replay_state(config: ServerConfig, metrics: Arc<Metrics>) -> AppState {
+    let frames = match config.scene {
+        Scene::Demo => scene::demo_frames(),
+        Scene::Frankfurt => scene::frankfurt_frames(),
+    };
+    tracing::info!(
+        speed = config.speed,
+        scene = ?config.scene,
+        frames = frames.len(),
+        "replay mode"
+    );
+
+    spawn_cat062_multicast(config.speed, config.scene, Arc::clone(&metrics));
+    spawn_opensky_poller_log_only();
+
+    AppState {
+        source: FrameSource::Replay {
+            frames: Arc::new(frames),
+            speed: config.speed,
+        },
+        metrics,
+    }
+}
+
+/// Spawn the CAT062 UDP-multicast feed for Replay mode, if enabled
+/// (`FIREFLY_CAT062_ENABLED=true`). Replays the same scan stream the web map
+/// shows, paced into wall-clock at `speed` (ADR 0006). Disabled by default.
 fn spawn_cat062_multicast(speed: f64, scene: Scene, metrics: Arc<Metrics>) {
     let config = MulticastConfig::from_env();
     if !config.enabled {
@@ -78,11 +102,7 @@ fn spawn_cat062_multicast(speed: f64, scene: Scene, metrics: Arc<Metrics>) {
     }
 
     let destination = config.destination();
-    let encoder = Cat062Encoder::new(
-        config.data_source(),
-        config.reference_point,
-        0.0, // TODO: make this configurable per scenario (ADR 0014: UTC Time-of-Day)
-    );
+    let encoder = Cat062Encoder::new(config.data_source(), config.reference_point, 0.0);
     let scans = match scene {
         Scene::Demo => scene::demo_scans(),
         Scene::Frankfurt => scene::frankfurt_scans(),
@@ -121,13 +141,164 @@ fn spawn_cat062_multicast(speed: f64, scene: Scene, metrics: Arc<Metrics>) {
     });
 }
 
-/// Spawn the CAT065 SDPS-status **heartbeat** alongside the track feed, if both
-/// the multicast feed (`FIREFLY_CAT062_ENABLED`) and the heartbeat
-/// (`FIREFLY_CAT065_ENABLED`, default on) are enabled (ADR 0018). It sends one
-/// CAT065 status block to the **same** multicast group as CAT062, every
-/// `FIREFLY_CAT065_PERIOD` wall-clock seconds, so a consumer can distinguish an
-/// empty sky from a dead feed. The time of day (I065/030) is read from the wall
-/// clock at the delivery edge — the heartbeat is a real-time liveness signal.
+/// Optionally start the OpenSky poller in log-only mode (Replay mode only).
+/// Disabled unless `FIREFLY_OPENSKY_ENABLED=true`. Plots are logged but not
+/// fed into a tracker — this path is for diagnostics and manual inspection.
+fn spawn_opensky_poller_log_only() {
+    let config = OpenSkyConfig::from_env();
+    if !config.enabled {
+        tracing::info!(
+            "OpenSky ADS-B poller disabled \
+             (set FIREFLY_OPENSKY_ENABLED=true to enable, \
+              or use FIREFLY_MODE=live to start the live tracker)"
+        );
+        return;
+    }
+
+    tracing::info!(
+        lat_min = config.lat_min,
+        lat_max = config.lat_max,
+        lon_min = config.lon_min,
+        lon_max = config.lon_max,
+        poll_interval_secs = config.poll_interval_secs,
+        sensor_id = config.sensor_id.0,
+        "OpenSky ADS-B poller enabled (log-only; FIREFLY_MODE=live to track)"
+    );
+
+    tokio::spawn(async move {
+        let poller = OpenSkyPoller::new(config);
+        poller
+            .run(|plots| {
+                tracing::info!(count = plots.len(), "OpenSky plots received (log-only)");
+            })
+            .await;
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Live mode
+// ---------------------------------------------------------------------------
+
+/// Build the `AppState` for Live mode: create the tracker + channels, spawn the
+/// OpenSky poller (unconditional in Live mode — it is the plot source), spawn
+/// the live tracker task, and optionally start the live CAT062 feed.
+async fn build_live_state(_config: ServerConfig, metrics: Arc<Metrics>) -> AppState {
+    let opensky_config = OpenSkyConfig::from_env();
+    let sensor_id = opensky_config.sensor_id;
+    let output_period = Duration::from_secs(opensky_config.poll_interval_secs);
+
+    tracing::info!(
+        lat_min = opensky_config.lat_min,
+        lat_max = opensky_config.lat_max,
+        lon_min = opensky_config.lon_min,
+        lon_max = opensky_config.lon_max,
+        poll_interval_secs = opensky_config.poll_interval_secs,
+        sensor_id = sensor_id.0,
+        "live mode: starting ADS-B tracker"
+    );
+
+    // Channel: OpenSky poller → live tracker (bounded; drop batches if the
+    // tracker is busy rather than blocking the network callback).
+    let (plots_tx, plots_rx) = mpsc::channel::<Vec<Plot>>(32);
+
+    // Channel: live tracker → WS/CAT062 consumers ("last value wins" watch).
+    let (snapshot_tx, snapshot_rx) = watch::channel(LiveSnapshot::empty());
+
+    // Build and spawn the live tracker task.
+    let tracker = build_live_tracker(&opensky_config);
+    let live = LiveTracker::new(tracker, None); // recorder wired in AP9.4c-4
+    tokio::spawn(run_live_tracker(live, plots_rx, snapshot_tx, output_period));
+
+    // Spawn the OpenSky poller, feeding plots into the tracker via mpsc.
+    spawn_opensky_poller_live(opensky_config, plots_tx);
+
+    // Spawn the live CAT062 feed, if enabled.
+    spawn_cat062_live(Arc::clone(&metrics), snapshot_rx.clone());
+
+    AppState {
+        source: FrameSource::Live {
+            snapshots: snapshot_rx,
+            sensor: sensor_id,
+        },
+        metrics,
+    }
+}
+
+/// Spawn the OpenSky poller in Live mode: every batch of plots is sent into
+/// `plots_tx` so the tracker can consume it. If the channel is full, the batch
+/// is dropped and a warning is logged — availability over back-pressure.
+fn spawn_opensky_poller_live(config: OpenSkyConfig, plots_tx: mpsc::Sender<Vec<Plot>>) {
+    tracing::info!(
+        lat_min = config.lat_min,
+        lat_max = config.lat_max,
+        poll_interval_secs = config.poll_interval_secs,
+        "OpenSky ADS-B poller started (live mode)"
+    );
+    tokio::spawn(async move {
+        let poller = OpenSkyPoller::new(config);
+        poller
+            .run(move |plots| {
+                tracing::info!(count = plots.len(), "OpenSky plots received");
+                if let Err(e) = plots_tx.try_send(plots) {
+                    tracing::warn!("plot channel full; dropping batch: {e}");
+                }
+            })
+            .await;
+    });
+}
+
+/// Spawn the live CAT062 multicast feed, if enabled (`FIREFLY_CAT062_ENABLED`).
+/// Reads the watch channel published by the live tracker and encodes each
+/// snapshot as one CAT062 data block (ADR 0020, AP9.4c-3).
+fn spawn_cat062_live(metrics: Arc<Metrics>, mut snapshot_rx: SnapshotRx) {
+    let config = MulticastConfig::from_env();
+    if !config.enabled {
+        tracing::info!(
+            "CAT062 live multicast feed disabled (set FIREFLY_CAT062_ENABLED=true to enable)"
+        );
+        return;
+    }
+
+    let destination = config.destination();
+    let encoder = Cat062Encoder::new(config.data_source(), config.reference_point, 0.0);
+    tracing::info!(%destination, "CAT062 live multicast feed enabled");
+
+    tokio::spawn(async move {
+        let socket = match firefly_multicast::sender_socket().await {
+            Ok(socket) => socket,
+            Err(error) => {
+                tracing::error!(%error, "failed to open CAT062 live multicast socket");
+                return;
+            }
+        };
+        let result = run_live_cat062(&socket, destination, &encoder, &mut snapshot_rx, |n| {
+            metrics
+                .tracks_active
+                .store(n as u64, std::sync::atomic::Ordering::Relaxed);
+            metrics
+                .cat062_scans_sent_total
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        })
+        .await;
+        match result {
+            Ok(()) => tracing::info!("CAT062 live feed stopped"),
+            Err(error) => {
+                metrics
+                    .cat062_send_errors_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tracing::error!(%error, "CAT062 live feed error");
+            }
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Shared: CAT065 heartbeat, tracing, shutdown
+// ---------------------------------------------------------------------------
+
+/// Spawn the CAT065 SDPS-status heartbeat alongside the track feed, if both
+/// `FIREFLY_CAT062_ENABLED` and `FIREFLY_CAT065_ENABLED` (default on) are set
+/// (ADR 0018). Runs in both Replay and Live modes.
 fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) {
     let config = MulticastConfig::from_env();
     if !config.enabled || !config.heartbeat_enabled {
@@ -166,50 +337,7 @@ fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) {
     });
 }
 
-/// Spawn the OpenSky Network ADS-B poller as an optional background service
-/// (`FIREFLY_OPENSKY_ENABLED=true`). Disabled by default to prevent accidental
-/// outbound network traffic on a plain `cargo run` (ADR 0019, FR-NET-004).
-///
-/// When enabled, the poller polls `https://opensky-network.org/api/states/all`
-/// on the configured interval (default 10 s) and converts each batch of state
-/// vectors into [`Plot::adsb`](firefly_core::Plot) objects.  Received plots are
-/// logged here; feeding them into a live tracker is the next integration step
-/// (AP9.4c: live-tracker architecture).
-fn spawn_opensky_poller() {
-    let config = OpenSkyConfig::from_env();
-    if !config.enabled {
-        tracing::info!(
-            "OpenSky ADS-B poller disabled \
-             (set FIREFLY_OPENSKY_ENABLED=true to enable)"
-        );
-        return;
-    }
-
-    tracing::info!(
-        lat_min = config.lat_min,
-        lat_max = config.lat_max,
-        lon_min = config.lon_min,
-        lon_max = config.lon_max,
-        poll_interval_secs = config.poll_interval_secs,
-        sensor_id = config.sensor_id.0,
-        "OpenSky ADS-B poller enabled"
-    );
-
-    tokio::spawn(async move {
-        let poller = OpenSkyPoller::new(config);
-        poller
-            .run(|plots| {
-                tracing::info!(
-                    count = plots.len(),
-                    "OpenSky plots received (AP9.4c: live-tracker injection pending)"
-                );
-            })
-            .await;
-    });
-}
-
-/// The current UTC time of day in seconds since midnight, for I065/030. The
-/// heartbeat is a real-time liveness signal, so it reads the wall clock.
+/// The current UTC time of day in seconds since midnight, for I065/030.
 fn utc_time_of_day_secs() -> f64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()

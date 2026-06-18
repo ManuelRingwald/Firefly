@@ -1,4 +1,4 @@
-//! The live-tracker runtime (ADR 0020, AP9.4c-2).
+//! The live-tracker runtime (ADR 0020, AP9.4c-2/3).
 //!
 //! In **Live** mode Firefly is no longer a deterministic pre-computed replay: a
 //! long-lived [`Tracker`] runs in its own task, fed a stream of [`Plot`]s by the
@@ -15,32 +15,62 @@
 //!    re-runs the exact tracking session — the basis for reproducing a
 //!    production fault. Recording is source-agnostic: any [`Plot`] serialises
 //!    the same way (ADR 0020).
-//! 2. **Shared snapshot.** After each output tick the task publishes the current
-//!    air picture as a fresh `Vec<SystemTrack>` over a [`watch`] channel. The WS
-//!    pump and the CAT062 feed (wired in AP9.4c-3) read the latest snapshot
-//!    without ever blocking the tracker.
+//! 2. **Shared snapshot.** After each output tick the task publishes a
+//!    [`LiveSnapshot`] over a [`watch`] channel. Both the WS pump and the CAT062
+//!    live sender (AP9.4c-3) read the latest value without ever blocking the
+//!    tracker. The snapshot carries the data-time so consumers can build a
+//!    correctly-timestamped [`firefly_io::Frame`] or CAT062 block.
 //!
 //! This module deliberately contains **no** new tracking logic: the tracker core
 //! ([`firefly_track`]) can already be fed live (`process_plots`).
 
 use std::io::{self, BufWriter, Write};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use firefly_asterix::Cat062Encoder;
 use firefly_core::{Plot, SystemTrack, Timestamp};
 use firefly_geo::{LocalFrame, Wgs84};
 use firefly_opensky::OpenSkyConfig;
 use firefly_track::{ProcessNoise, SensorErrorModel, Tracker, TrackerConfig};
+use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
-/// The air-picture snapshot shared from the live tracker to its readers.
+/// The air-picture snapshot published by the live tracker after each output tick
+/// (ADR 0020, AP9.4c-3).
 ///
-/// An `Arc` so publishing and reading are an atomic pointer swap — the tracker
-/// is never blocked by a slow consumer, and consumers always see a consistent
-/// whole picture (never a half-updated one).
-pub type SnapshotRx = watch::Receiver<Arc<Vec<SystemTrack>>>;
+/// Carrying the data-time alongside the tracks lets both the WS pump and the
+/// CAT062 live sender build correctly-timestamped output without querying the
+/// tracker separately. Cheap to clone: the `Arc` only bumps a reference count.
+#[derive(Clone, Debug)]
+pub struct LiveSnapshot {
+    /// The latest data-time seen by the tracker — the instant the air picture
+    /// is projected to. `Timestamp(0.0)` in the initial empty value before the
+    /// first ADS-B poll arrives.
+    pub time: Timestamp,
+    /// The current confirmed and tentative tracks, plus any track-ended records
+    /// drained from the tracker's ended-buffer (carrying `ended = true` for the
+    /// CAT062 TSE signal, ADR 0016).
+    pub tracks: Arc<Vec<SystemTrack>>,
+}
+
+impl LiveSnapshot {
+    /// The initial, empty snapshot used to seed the `watch` channel before the
+    /// first ADS-B poll arrives.
+    pub fn empty() -> Self {
+        Self {
+            time: Timestamp(0.0),
+            tracks: Arc::new(Vec::new()),
+        }
+    }
+}
+
+/// Receiver half of the watch channel that carries [`LiveSnapshot`]s from the
+/// tracker task to its consumers (WS pump, CAT062 live sender).
+pub type SnapshotRx = watch::Receiver<LiveSnapshot>;
 
 /// The process-noise budget for the live ADS-B tracker (m²/s³-ish PSD knob),
 /// matching the showcase tuning ([`crate::scene`]). Airliners manoeuvre gently;
@@ -215,6 +245,13 @@ impl LiveTracker {
     pub fn records_written(&self) -> u64 {
         self.recorder.as_ref().map_or(0, PlotRecorder::written)
     }
+
+    /// The latest data-time seen by the tracker, or `None` before the first
+    /// plot arrives. Used by [`run_live_tracker`] to populate the data-time
+    /// field of the published [`LiveSnapshot`].
+    pub fn latest_data_time(&self) -> Option<Timestamp> {
+        self.latest_data_time.map(Timestamp)
+    }
 }
 
 /// Run the live-tracker task until its plot input closes.
@@ -223,16 +260,17 @@ impl LiveTracker {
 ///
 /// - **A batch of plots** arrives on `plots_rx`: it is recorded and fed to the
 ///   tracker ([`LiveTracker::ingest`]), stamped with the current wall-clock time.
-/// - **The output ticker fires** every `output_period`: the current snapshot is
-///   published over `snapshot_tx`. A send error (no receivers yet) is ignored —
-///   the snapshot is simply the latest value any future reader will see.
+/// - **The output ticker fires** every `output_period`: a [`LiveSnapshot`] (data
+///   time + tracks) is published over `snapshot_tx`. A send error (no receivers
+///   yet) is ignored — the snapshot is the latest value any future reader sees.
+///   Before the first poll the snapshot carries the empty sentinel.
 ///
 /// When every sender on `plots_rx` is dropped the recorder is flushed and the
 /// task returns, so a clean shutdown loses no recorded plots.
 pub async fn run_live_tracker(
     mut live: LiveTracker,
     mut plots_rx: mpsc::Receiver<Vec<Plot>>,
-    snapshot_tx: watch::Sender<Arc<Vec<SystemTrack>>>,
+    snapshot_tx: watch::Sender<LiveSnapshot>,
     output_period: Duration,
 ) {
     let mut ticker = tokio::time::interval(output_period);
@@ -259,7 +297,54 @@ pub async fn run_live_tracker(
                 }
             },
             _ = ticker.tick() => {
-                let _ = snapshot_tx.send(Arc::new(live.snapshot()));
+                let time = live.latest_data_time().unwrap_or(Timestamp(0.0));
+                let tracks = live.snapshot();
+                let _ = snapshot_tx.send(LiveSnapshot { time, tracks: Arc::new(tracks) });
+            }
+        }
+    }
+}
+
+/// Run the live CAT062 multicast sender until the snapshot channel closes.
+///
+/// On every new [`LiveSnapshot`] published by [`run_live_tracker`], encode the
+/// tracks as a CAT062 data block and send it to `destination`. Empty snapshots
+/// (before the first ADS-B poll) are skipped. A send error stops the feed; the
+/// caller (a spawned task) decides how to react.
+///
+/// `on_scan` is called after each successful send with the number of tracks in
+/// that scan — callers use this to update `tracks_active` and
+/// `cat062_scans_sent_total` Prometheus gauges/counters.
+pub async fn run_live_cat062<F: Fn(usize)>(
+    socket: &UdpSocket,
+    destination: SocketAddr,
+    encoder: &Cat062Encoder,
+    snapshot_rx: &mut SnapshotRx,
+    on_scan: F,
+) -> std::io::Result<()> {
+    loop {
+        if snapshot_rx.changed().await.is_err() {
+            info!("live snapshot channel closed; stopping CAT062 live feed");
+            return Ok(());
+        }
+        let snapshot = snapshot_rx.borrow_and_update().clone();
+        if snapshot.tracks.is_empty() {
+            continue;
+        }
+        let block = encoder.encode(snapshot.time, &snapshot.tracks);
+        match socket.send_to(&block, destination).await {
+            Ok(bytes) => {
+                tracing::debug!(
+                    bytes,
+                    tracks = snapshot.tracks.len(),
+                    %destination,
+                    "sent live CAT062 data block"
+                );
+                on_scan(snapshot.tracks.len());
+            }
+            Err(error) => {
+                tracing::error!(%destination, %error, "failed to send live CAT062 data block");
+                return Err(error);
             }
         }
     }
@@ -406,7 +491,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn task_publishes_snapshot_then_stops_on_close() {
         let (plots_tx, plots_rx) = mpsc::channel(8);
-        let (snapshot_tx, snapshot_rx) = watch::channel(Arc::new(Vec::new()));
+        let (snapshot_tx, snapshot_rx) = watch::channel(LiveSnapshot::empty());
         let live = LiveTracker::new(build_live_tracker(&config()), None);
         let handle = tokio::spawn(run_live_tracker(
             live,
@@ -428,7 +513,11 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(250)).await;
 
         let snapshot = snapshot_rx.borrow().clone();
-        assert_eq!(snapshot.len(), 1, "the confirmed track is published");
+        assert_eq!(snapshot.tracks.len(), 1, "the confirmed track is published");
+        assert!(
+            snapshot.time.as_secs() > 0.0,
+            "snapshot carries the data-time"
+        );
 
         // Closing the input ends the task.
         drop(plots_tx);

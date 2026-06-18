@@ -16,6 +16,25 @@ pub enum Scene {
     Frankfurt,
 }
 
+/// Whether the server runs a pre-computed replay or a live ADS-B tracker.
+///
+/// `FIREFLY_MODE=live` switches to the real-time path: the OpenSky Network ADS-B
+/// adapter feeds plots into a long-lived [`Tracker`](firefly_track::Tracker) and
+/// the resulting snapshots are distributed to WebSocket clients and the CAT062
+/// multicast feed (ADR 0020, AP9.4c-3). In `live` mode `FIREFLY_SCENE` and
+/// `FIREFLY_SPEED` are ignored; OpenSky bbox/credentials are read from
+/// `FIREFLY_OPENSKY_*` (see [`firefly_opensky::OpenSkyConfig`]).
+///
+/// [`Tracker`]: firefly_track::Tracker
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ServerMode {
+    /// Deterministic replay of a built-in scene, paced by `FIREFLY_SPEED`.
+    #[default]
+    Replay,
+    /// Real-time ADS-B tracking via the OpenSky Network adapter.
+    Live,
+}
+
 /// Startup configuration.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ServerConfig {
@@ -24,11 +43,15 @@ pub struct ServerConfig {
     /// Playback speed in **data-seconds per wall-second**. `FIREFLY_SPEED`,
     /// default `1.0`. `2.0` plays twice as fast. Clamped to be finite and
     /// strictly positive so the pacing maths can never divide by zero.
+    /// Ignored in Live mode.
     pub speed: f64,
     /// Which scene to replay. `FIREFLY_SCENE`, `"demo"` (default) or
     /// `"frankfurt"`. An unrecognised value falls back to the default rather
-    /// than stopping the demo from starting.
+    /// than stopping the demo from starting. Ignored in Live mode.
     pub scene: Scene,
+    /// Replay or live ADS-B tracker. `FIREFLY_MODE`, `"replay"` (default) or
+    /// `"live"`. Unrecognised values fall back to `Replay`.
+    pub mode: ServerMode,
 }
 
 impl Default for ServerConfig {
@@ -37,6 +60,7 @@ impl Default for ServerConfig {
             port: 8080,
             speed: 1.0,
             scene: Scene::default(),
+            mode: ServerMode::default(),
         }
     }
 }
@@ -64,7 +88,16 @@ impl ServerConfig {
             Some("frankfurt") => Scene::Frankfurt,
             _ => default.scene,
         };
-        Self { port, speed, scene }
+        let mode = match get("FIREFLY_MODE").as_deref() {
+            Some("live") => ServerMode::Live,
+            _ => default.mode,
+        };
+        Self {
+            port,
+            speed,
+            scene,
+            mode,
+        }
     }
 }
 
@@ -89,6 +122,21 @@ mod tests {
         });
         assert_eq!(config.port, 9000);
         assert!((config.speed - 4.0).abs() < 1e-12);
+    }
+
+    /// `FIREFLY_MODE=live` selects the live tracker; anything else falls back to
+    /// replay.
+    #[test]
+    fn mode_selects_live_or_falls_back_to_replay() {
+        let live = ServerConfig::from_lookup(|key| (key == "FIREFLY_MODE").then(|| "live".into()));
+        assert_eq!(live.mode, ServerMode::Live);
+
+        let unset = ServerConfig::from_lookup(|_| None);
+        assert_eq!(unset.mode, ServerMode::Replay);
+
+        let garbage =
+            ServerConfig::from_lookup(|key| (key == "FIREFLY_MODE").then(|| "unknown".into()));
+        assert_eq!(garbage.mode, ServerMode::Replay);
     }
 
     /// `FIREFLY_SCENE=frankfurt` selects the Frankfurt showcase; anything else

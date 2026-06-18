@@ -27,9 +27,12 @@ pub mod pacing;
 pub mod scene;
 
 pub use app::{router, AppState, FrameSource};
-pub use config::{Scene, ServerConfig};
+pub use config::{Scene, ServerConfig, ServerMode};
 pub use firefly_io::Frame;
-pub use live::{build_live_tracker, run_live_tracker, LiveTracker, PlotRecorder, SnapshotRx};
+pub use live::{
+    build_live_tracker, run_live_cat062, run_live_tracker, LiveSnapshot, LiveTracker, PlotRecorder,
+    SnapshotRx,
+};
 pub use metrics::Metrics;
 
 use tokio::net::TcpListener;

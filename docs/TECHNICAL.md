@@ -13,8 +13,9 @@
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
 | `FIREFLY_PORT` | u16 | `8080` | TCP-Port des HTTP/WebSocket-Servers |
-| `FIREFLY_SCENE` | string | `demo` | Szene: `demo` (2 Flugzeuge, 1 Radar) oder `frankfurt` (8 Flugzeuge, 3 Radare) |
-| `FIREFLY_SPEED` | f64 | `1.0` | Wiedergabe-Geschwindigkeit (Datensekunden / Wanduhrsekunde). `2.0` = doppelte Geschwindigkeit. Muss positiv und endlich sein. |
+| `FIREFLY_MODE` | string | `replay` | Betriebsmodus: `replay` (vorberechnete Szene) oder `live` (Echtzeit-ADS-B via OpenSky). `live` impliziert OpenSky als Plot-Quelle. |
+| `FIREFLY_SCENE` | string | `demo` | Szene (nur Replay-Modus): `demo` (2 Flugzeuge, 1 Radar) oder `frankfurt` (8 Flugzeuge, 3 Radare) |
+| `FIREFLY_SPEED` | f64 | `1.0` | Wiedergabe-Geschwindigkeit (nur Replay-Modus). `2.0` = doppelte Geschwindigkeit. Muss positiv und endlich sein. |
 
 ### 1.2 CAT062-Multicast-Feed (Wayfinder-Schnittstelle)
 

@@ -10,24 +10,29 @@ use axum::{
     routing::get,
     Router,
 };
+use firefly_core::SensorId;
 use firefly_io::Frame;
 
+use crate::live::SnapshotRx;
 use crate::metrics::{ConnectedClientGuard, Metrics};
 use crate::pacing::due_at;
 
 /// How the server obtains the frame stream served to WebSocket clients (ADR 0020).
 ///
 /// In `Replay` mode the stream is pre-computed once at startup (deterministic,
-/// data-time–driven, bit-exact reproducibility via the `.ffrec` recorder).  The
-/// `Live` variant is the placeholder for the live-tracker snapshot path wired in
-/// AP9.4c-2/3 — at that point a `tokio::sync::watch` receiver carries the
-/// current [`Frame`] produced by the real-time tracker.
+/// data-time–driven, bit-exact reproducibility via the `.ffrec` recorder).  In
+/// `Live` mode each newly published [`LiveSnapshot`](crate::live::LiveSnapshot)
+/// from the live tracker is forwarded to every connected client as a [`Frame`].
 #[derive(Clone)]
 pub enum FrameSource {
     /// Pre-computed scene replayed to every client at `speed` data-s / wall-s.
     Replay { frames: Arc<Vec<Frame>>, speed: f64 },
-    /// Live tracker snapshot (ADR 0020, AP9.4c-2/3 — not yet wired).
-    Live,
+    /// Live tracker: each new snapshot from the watch channel becomes a Frame.
+    /// `sensor` is stamped into the Frame as the reporting sensor id.
+    Live {
+        snapshots: SnapshotRx,
+        sensor: SensorId,
+    },
 }
 
 impl FrameSource {
@@ -35,7 +40,7 @@ impl FrameSource {
     pub fn frame_count(&self) -> usize {
         match self {
             FrameSource::Replay { frames, .. } => frames.len(),
-            FrameSource::Live => 0,
+            FrameSource::Live { .. } => 0,
         }
     }
 }
@@ -113,12 +118,41 @@ async fn pump_frames(socket: WebSocket, state: AppState) {
     let _client_guard = ConnectedClientGuard::new(&state.metrics);
 
     match state.source {
-        FrameSource::Replay { frames, speed } => {
-            pump_replay(socket, frames, speed).await;
+        FrameSource::Replay { frames, speed } => pump_replay(socket, frames, speed).await,
+        FrameSource::Live { snapshots, sensor } => pump_live(socket, snapshots, sensor).await,
+    }
+}
+
+/// Stream live-tracker snapshots to one WebSocket client (ADR 0020, AP9.4c-3).
+///
+/// On each new [`LiveSnapshot`](crate::live::LiveSnapshot) published by the
+/// tracker task, build a [`Frame`] (empty plot list — ADS-B plots are not
+/// available in the browser overlay in Live mode) and send it as JSON. The loop
+/// ends when the tracker shuts down (watch sender dropped) or the client
+/// disconnects.
+async fn pump_live(mut socket: WebSocket, mut rx: SnapshotRx, sensor: SensorId) {
+    tracing::info!("client connected; live tracker mode");
+    loop {
+        if rx.changed().await.is_err() {
+            tracing::info!("live tracker stopped; closing client");
+            let _ = socket.send(Message::Close(None)).await;
+            return;
         }
-        FrameSource::Live => {
-            // Live-tracker snapshot not yet wired (ADR 0020, AP9.4c-2/3).
-            tracing::warn!("Live mode not yet implemented; closing connection");
+        let snapshot = rx.borrow_and_update().clone();
+        if snapshot.tracks.is_empty() {
+            continue; // no tracks yet; wait for the first ADS-B poll
+        }
+        let frame = Frame::new(snapshot.time, sensor, &[], &snapshot.tracks);
+        let json = match frame.to_json() {
+            Ok(j) => j,
+            Err(error) => {
+                tracing::error!(%error, "failed to serialise live frame; skipping");
+                continue;
+            }
+        };
+        if socket.send(Message::Text(json.into())).await.is_err() {
+            tracing::info!("live client disconnected");
+            return;
         }
     }
 }
