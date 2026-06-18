@@ -11,6 +11,7 @@ members = [
     "crates/firefly-asterix",
     "crates/firefly-multicast",
     "crates/firefly-recorder",
+    "crates/firefly-opensky",
 ]
 
 [workspace.package]

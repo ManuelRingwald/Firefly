@@ -7,7 +7,26 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.5 + AP9.6 (ADS-B-Datenfluss & ES-Age-Subfeld) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.4 (`firefly-opensky` Crate) abgeschlossen.**
+  Neuer Crate `crates/firefly-opensky` (Ports & Adapters, ADR 0001): HTTP-Poller für die OpenSky
+  Network REST API, JSON-Deserialisierung der Zustandsvektoren, NaCp→σ-Mapping gemäß ADR 0019 und
+  `Plot::adsb`-Ausgabe.
+  - **`OpenSkyConfig`** (`src/config.rs`): 12-Factor-Konfiguration via
+    `from_lookup(get: impl Fn(&str) → Option<String>)` — `FIREFLY_OPENSKY_ENABLED/LAT_*/LON_*/
+    POLL_INTERVAL_SECS/USERNAME/PASSWORD/SENSOR_ID`; 4 Tests. FR-NET-004.
+  - **`parse_state` / `sigma_from_source`** (`src/api.rs`): Parst einen OpenSky-Zustandsvektor
+    (heterogenes JSON-Array) — ICAO24 aus Hex, Lon/Lat/Geo-Alt-Fallback-Kette, `on_ground`-Filter,
+    Callsign-Trim, Squawk-Octal; NaCp-Tabelle: ADS-B(0)→75 m, ASTERIX(1)/MLAT(2)→200 m, Default→300 m;
+    6 Tests.
+  - **`OpenSkyPoller`** (`src/poller.rs`): `reqwest::Client` (rustls-tls, 30 s Timeout, kein OpenSSL),
+    `poll() → Result<Vec<Plot>, PollError>`, `run(on_plots)` — Endlosschleife mit konfigurierbarem
+    Intervall; Transiente HTTP-Fehler werden gewarnt und übersprungen.
+  - **Workspace `Cargo.toml`**: `crates/firefly-opensky` als Member eingetragen.
+  Alle Gates grün: `cargo test --workspace`, `cargo clippy --workspace --all-targets` (0 Warnungen),
+  `cargo fmt`. S3 · Opus 4.8. **Nächster Schritt: Server-Integration (AP9.4b) —
+  `OpenSkyPoller` in `firefly-server/src/main.rs` als Background-Task verdrahten — erst ankündigen,
+  dann bauen.**
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.5 + AP9.6 (ADS-B-Datenfluss & ES-Age-Subfeld) abgeschlossen.**
   - **AP9.6:** `Track.adsb_last_hit_time: Option<f64>` (gesetzt im ICAO-Pre-Sort-Trefferpfad in
     `fuse_simultaneous_plots`); `SystemTrack.adsb_age_s: Option<f64>` berechnet in `system_track_from`
     als `(time - hit).max(0.0)`. Alle 6 `SystemTrack`-Struct-Literal-Stellen in 5 Dateien aktualisiert.
@@ -18,8 +37,6 @@
     `(psr_age, Option<es_age>)` zurück. `DecodedRecord.adsb_age_s: Option<f64>` ergänzt. 3 neue Tests
     (47 statt 44 in firefly-asterix). Referenz-Dump-Test unverändert grün (kein Wire-Break für Tracks ohne
     ADS-B). ICD → **2.4.0**. Alle Gates grün (`cargo test --workspace`, `clippy`, `fmt`). S3 · Opus 4.8.
-    **Nächster Schritt: AP9.8 (ADR 0019, Meilenstein-Doku, ICD-Changelog, Cross-Project-Issue)
-    oder AP9.4 (firefly-opensky Crate) — erst ankündigen, dann bauen.**
 - **Vorherige Aktualisierung:** 2026-06-18 — **AP9.3 (ICAO-Vorsortierung) abgeschlossen.**
   `fuse_simultaneous_plots` (der gemeinsame Kern beider Pfade: Batch + Async) erhält eine ICAO-Vorsortierstufe
   vor dem JPDA-Schritt. Plots mit bekannter ICAO-Adresse, die zu einem lebenden Track passen, werden direkt
