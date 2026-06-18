@@ -7,7 +7,16 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-16 — **Paket #10 / SDPS-005 „Legal
+- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.1 + AP9.2 (ADS-B-Eingang, Stufe 1) abgeschlossen.**
+  `firefly-core::Measurement`-Enum eingeführt (`Polar(Polar)` + `Geodetic { position: Wgs84, sigma_pos_m: f64 }`);
+  `Plot::adsb`-Konstruktor; alle sieben Aufrufstellen aktualisiert (Simulator, Player, Tracker-Batch- +
+  Async-Pfad, Demo, Tracking-Test). `tracking_measurement` in `firefly-track::measurement` dispatcht
+  auf die Enum-Variante: Polar-Pfad unverändert über `convert_plot` + `horizontal_from`; Geodetic-Pfad
+  WGS84 → ENU direkt, isotrope Kovarianz `R = σ² · I₂`. 3 neue Unit-Tests (Ursprung/Isotopie,
+  Nordrichtung, Sensor-Frame-Invarianz). FR-TRK-030 im Anforderungs-Register. Alle Gates grün
+  (`cargo test --workspace`, `clippy`, `fmt`). S3 · Opus 4.8. **Nächster Schritt: AP9.3
+  (ICAO-Vorsortierung im Tracker) — erst ankündigen, dann bauen.**
+- **Vorherige Aktualisierung:** 2026-06-16 — **Paket #10 / SDPS-005 „Legal
   Recording & Replay" abgeschlossen.** Neues Crate `firefly-recorder` mit zwei
   Binaries: `firefly-record` (Sidecar, tritt Multicast-Gruppe bei, schreibt
   Datagramme mit Unix-ns-Zeitstempel in `.ffrec`-Datei) und `firefly-replay`

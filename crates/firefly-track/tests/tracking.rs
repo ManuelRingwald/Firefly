@@ -72,7 +72,11 @@ fn filter_smooths_and_recovers_velocity() {
 
     for plot in &plots {
         let t = plot.time.as_secs();
-        let meas = convert_plot(&plot.measurement, &model);
+        let polar = match plot.measurement {
+            firefly_core::Measurement::Polar(p) => p,
+            firefly_core::Measurement::Geodetic { .. } => unreachable!("sim emits polar plots"),
+        };
+        let meas = convert_plot(&polar, &model);
 
         match kf.as_mut() {
             None => {

@@ -31,7 +31,7 @@ pub use gating::Gate;
 pub use imm::{Imm, ImmConfig};
 pub use jpda::joint_association_probabilities;
 pub use kalman::{LinearKalman, ProcessNoise};
-pub use measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};
+pub use measurement::{convert_plot, tracking_measurement, CartesianMeasurement, SensorErrorModel};
 pub use metrics::{Rmse, TrackContinuity};
 pub use motion::MotionModel;
 pub use pda::{association_probabilities, ClutterModel};

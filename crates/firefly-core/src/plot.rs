@@ -1,4 +1,4 @@
-use firefly_geo::Polar;
+use firefly_geo::{LocalFrame, Polar, Wgs84};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::SensorId;
@@ -68,10 +68,49 @@ pub struct ModeAC {
     pub callsign: Option<Callsign>,
 }
 
-/// A single radar detection ("plot") for one target on one scan of one sensor.
+/// Where a plot's position measurement comes from, and in which frame it lives.
 ///
-/// The measurement is stored in the sensor's native polar frame; converting it
-/// into a tracking frame is the tracker's job, because the choice of frame and
+/// A *radar* detection is **polar** in the sensor's own frame (range, azimuth,
+/// elevation): converting it into the tracking frame needs the sensor's geometry
+/// and a range-vs-angle noise model (the "cigar"). An *ADS-B* / Mode S Extended
+/// Squitter report is the aircraft's **own** WGS84 position — already
+/// world-referenced — with a self-declared accuracy derived from its NACp
+/// (Navigation Accuracy Category — Position). It needs no polar conversion and
+/// carries an isotropic position uncertainty, not a tilted radar ellipse.
+///
+/// Keeping the source in the plot (rather than splitting into two plot types)
+/// lets one association/fusion path serve both: the tracker dispatches on the
+/// variant only when turning the plot into a Cartesian measurement.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Measurement {
+    /// Radar polar reading (range/azimuth/elevation) in the sensor's local frame.
+    Polar(Polar),
+    /// ADS-B geodetic self-report: WGS84 position plus its 1σ horizontal
+    /// position accuracy (metres), derived from the transmitter's NACp.
+    Geodetic {
+        /// Reported WGS84 position.
+        position: Wgs84,
+        /// 1σ horizontal position accuracy, metres.
+        sigma_pos_m: f64,
+    },
+}
+
+impl Measurement {
+    /// The geodetic position of this measurement. A polar reading is lifted out
+    /// of the given sensor `frame`; an ADS-B report is already geodetic, so the
+    /// frame is ignored.
+    pub fn to_wgs84(&self, frame: &LocalFrame) -> Wgs84 {
+        match self {
+            Measurement::Polar(p) => frame.enu_to_geodetic(&p.to_enu()),
+            Measurement::Geodetic { position, .. } => *position,
+        }
+    }
+}
+
+/// A single detection ("plot") for one target on one scan of one sensor.
+///
+/// The measurement is stored in its native form ([`Measurement`]); converting it
+/// into the tracking frame is the tracker's job, because the choice of frame and
 /// the measurement-noise model belong to the estimator, not to the detection.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Plot {
@@ -79,8 +118,8 @@ pub struct Plot {
     pub sensor: SensorId,
     /// Time of detection.
     pub time: Timestamp,
-    /// Measured position in the sensor's polar frame.
-    pub measurement: Polar,
+    /// Measured position and its native frame/source.
+    pub measurement: Measurement,
     /// What kind of detection this is.
     pub kind: DetectionKind,
     /// Secondary-radar data, present when [`DetectionKind::has_secondary`].
@@ -88,14 +127,37 @@ pub struct Plot {
 }
 
 impl Plot {
-    /// Construct a bare primary plot (no SSR data).
+    /// Construct a bare primary radar plot (polar, no SSR data).
     pub fn primary(sensor: SensorId, time: Timestamp, measurement: Polar) -> Self {
         Self {
             sensor,
             time,
-            measurement,
+            measurement: Measurement::Polar(measurement),
             kind: DetectionKind::Primary,
             mode_ac: ModeAC::default(),
+        }
+    }
+
+    /// Construct an ADS-B plot: a geodetic self-report from a transponder with
+    /// its NACp-derived 1σ position accuracy and Mode S identity. ADS-B is a
+    /// secondary (transponder) source — never a primary skin paint — so its
+    /// detection kind is [`DetectionKind::Secondary`].
+    pub fn adsb(
+        sensor: SensorId,
+        time: Timestamp,
+        position: Wgs84,
+        sigma_pos_m: f64,
+        mode_ac: ModeAC,
+    ) -> Self {
+        Self {
+            sensor,
+            time,
+            measurement: Measurement::Geodetic {
+                position,
+                sigma_pos_m,
+            },
+            kind: DetectionKind::Secondary,
+            mode_ac,
         }
     }
 }

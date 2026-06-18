@@ -34,7 +34,8 @@
 //! frame. That is exactly right for the single-radar tracker of M2; a common
 //! frame for several radars is a later (M4) concern.
 
-use firefly_geo::Polar;
+use firefly_core::{Measurement, Plot};
+use firefly_geo::{LocalFrame, Polar};
 use nalgebra::{Matrix2, Vector2};
 use serde::{Deserialize, Serialize};
 
@@ -165,9 +166,58 @@ pub fn convert_plot(measurement: &Polar, model: &SensorErrorModel) -> CartesianM
     CartesianMeasurement { z, r }
 }
 
+/// Turn **any** plot into a Cartesian measurement expressed in the common
+/// `tracking_frame`, dispatching on its [`Measurement`] source.
+///
+/// - A **radar** polar reading goes through [`convert_plot`] in the sensor's own
+///   frame (range-vs-angle covariance), then is lifted into the tracking frame
+///   with [`LocalFrame::horizontal_from`] (height-correct multi-sensor fusion,
+///   ADR 0010). This reproduces exactly the pre-ADS-B path.
+/// - An **ADS-B** geodetic self-report is converted **directly** from WGS84 into
+///   the tracking frame (no polar math, no sensor geometry): its position is
+///   already world-referenced, and its uncertainty is *isotropic*
+///   `R = σ² · I₂` from the reported NACp accuracy — not a tilted radar ellipse.
+///   The sensor `frame`/`model` are unused for this variant.
+///
+/// REQ: FR-TRK-002, FR-TRK-030
+pub fn tracking_measurement(
+    plot: &Plot,
+    sensor_frame: &LocalFrame,
+    model: &SensorErrorModel,
+    tracking_frame: &LocalFrame,
+) -> CartesianMeasurement {
+    match &plot.measurement {
+        Measurement::Polar(polar) => {
+            let local = convert_plot(polar, model);
+            // `convert_plot` keeps only the ground-projected east/north; the
+            // target's height above the sensor's tangent plane is
+            // range·sin(elevation) — passing it lets `horizontal_from` lift the
+            // full 3-D point into the tracking frame (no height-offset ghost).
+            let height = polar.range * polar.elevation.sin();
+            let (z, r) = tracking_frame.horizontal_from(sensor_frame, local.z, height, local.r);
+            CartesianMeasurement { z, r }
+        }
+        Measurement::Geodetic {
+            position,
+            sigma_pos_m,
+        } => {
+            let enu = tracking_frame.geodetic_to_enu(position);
+            let z = Vector2::new(enu.east, enu.north);
+            let var = sigma_pos_m * sigma_pos_m;
+            // Isotropic horizontal covariance: ADS-B position error is (to first
+            // order) the same in every horizontal direction, unlike a radar's
+            // range/azimuth split.
+            let r = Matrix2::new(var, 0.0, 0.0, var);
+            CartesianMeasurement { z, r }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use firefly_core::{DetectionKind, ModeAC, SensorId, Timestamp};
+    use firefly_geo::Wgs84;
     use std::f64::consts::PI;
 
     fn model() -> SensorErrorModel {
@@ -282,5 +332,96 @@ mod tests {
         // Positive definite: positive diagonal and positive determinant.
         assert!(cm.r[(0, 0)] > 0.0 && cm.r[(1, 1)] > 0.0);
         assert!(cm.r.determinant() > 0.0);
+    }
+
+    fn adsb_plot(position: Wgs84, sigma_pos_m: f64) -> Plot {
+        Plot {
+            sensor: SensorId(200),
+            time: Timestamp(0.0),
+            measurement: Measurement::Geodetic {
+                position,
+                sigma_pos_m,
+            },
+            kind: DetectionKind::Secondary,
+            mode_ac: ModeAC::default(),
+        }
+    }
+
+    /// ADS-B at the tracking frame's own origin → position (0, 0), covariance σ²·I₂.
+    /// REQ: FR-TRK-030
+    #[test]
+    fn geodetic_at_origin_gives_zero_position_and_isotropic_covariance() {
+        let origin = Wgs84::from_degrees(48.0, 11.0, 0.0);
+        let frame = LocalFrame::new(origin);
+        let sigma = 30.0_f64;
+        let plot = adsb_plot(origin, sigma);
+        // sensor_frame and model are irrelevant for the Geodetic path
+        let dummy_model = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.1);
+
+        let cm = tracking_measurement(&plot, &frame, &dummy_model, &frame);
+
+        assert!(
+            cm.east().abs() < 1e-6,
+            "east should be 0, got {}",
+            cm.east()
+        );
+        assert!(
+            cm.north().abs() < 1e-6,
+            "north should be 0, got {}",
+            cm.north()
+        );
+        let expected_var = sigma * sigma;
+        assert!((cm.r[(0, 0)] - expected_var).abs() < 1e-9);
+        assert!((cm.r[(1, 1)] - expected_var).abs() < 1e-9);
+        // Isotropic: no east/north correlation.
+        assert!(cm.r[(0, 1)].abs() < 1e-9);
+    }
+
+    /// A target 0.1° north of the tracking origin maps to positive north, ~0 east.
+    /// REQ: FR-TRK-030
+    #[test]
+    fn geodetic_position_maps_north() {
+        let origin = Wgs84::from_degrees(48.0, 11.0, 0.0);
+        let frame = LocalFrame::new(origin);
+        // 0.1° latitude north ≈ 11.1 km
+        let north_pos = Wgs84::from_degrees(48.1, 11.0, 0.0);
+        let plot = adsb_plot(north_pos, 30.0);
+        let dummy_model = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.1);
+
+        let cm = tracking_measurement(&plot, &frame, &dummy_model, &frame);
+
+        assert!(
+            cm.north() > 10_000.0,
+            "expected ~11 km north, got {:.0}",
+            cm.north()
+        );
+        assert!(
+            cm.east().abs() < 100.0,
+            "east should be ~0 for same longitude, got {:.1}",
+            cm.east()
+        );
+    }
+
+    /// The Geodetic path ignores sensor_frame and model — two calls with
+    /// different dummies must produce identical output.
+    /// REQ: FR-TRK-030
+    #[test]
+    fn geodetic_output_independent_of_sensor_frame_and_model() {
+        let origin = Wgs84::from_degrees(48.0, 11.0, 0.0);
+        let frame = LocalFrame::new(origin);
+        let target = Wgs84::from_degrees(48.05, 11.05, 1000.0);
+        let plot = adsb_plot(target, 75.0);
+
+        let frame_a = LocalFrame::new(Wgs84::from_degrees(47.0, 10.0, 0.0));
+        let frame_b = LocalFrame::new(Wgs84::from_degrees(50.0, 15.0, 500.0));
+        let model_a = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.1);
+        let model_b = SensorErrorModel::from_range_and_azimuth_deg(200.0, 1.5);
+
+        let cm_a = tracking_measurement(&plot, &frame_a, &model_a, &frame);
+        let cm_b = tracking_measurement(&plot, &frame_b, &model_b, &frame);
+
+        assert!((cm_a.east() - cm_b.east()).abs() < 1e-9);
+        assert!((cm_a.north() - cm_b.north()).abs() < 1e-9);
+        assert!((cm_a.r[(0, 0)] - cm_b.r[(0, 0)]).abs() < 1e-9);
     }
 }

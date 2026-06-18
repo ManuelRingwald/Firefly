@@ -148,7 +148,7 @@ impl Radar {
         Some(Plot {
             sensor: self.sensor.id,
             time: Timestamp(plot_time),
-            measurement,
+            measurement: firefly_core::Measurement::Polar(measurement),
             kind,
             mode_ac,
         })

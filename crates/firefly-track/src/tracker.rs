@@ -29,7 +29,7 @@ use crate::gating::Gate;
 use crate::imm::ImmConfig;
 use crate::jpda::joint_association_probabilities;
 use crate::kalman::{LinearKalman, ProcessNoise};
-use crate::measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};
+use crate::measurement::{tracking_measurement, CartesianMeasurement, SensorErrorModel};
 use crate::pda::ClutterModel;
 use crate::track::{Track, TrackStatus};
 
@@ -418,19 +418,11 @@ impl Tracker {
         let mut by_sensor: BTreeMap<SensorId, Vec<(&Plot, CartesianMeasurement)>> = BTreeMap::new();
         for p in plots {
             if let Some(model) = self.config.sensors.get(&p.sensor) {
-                let local = convert_plot(&p.measurement, &model.error);
-                // `convert_plot` keeps only the ground-projected east/north; the
-                // target's height above the sensor's tangent plane is
-                // range·sin(elevation) — exactly the `up` it dropped. Passing it
-                // lets `horizontal_from` lift the *full 3-D* point into the
-                // tracking frame, so a second radar maps the same airborne target
-                // to the same horizontal point instead of a height-offset ghost.
-                let height = p.measurement.range * p.measurement.elevation.sin();
-                let (z, r) = tracking_frame.horizontal_from(&model.frame, local.z, height, local.r);
-                by_sensor
-                    .entry(p.sensor)
-                    .or_default()
-                    .push((p, CartesianMeasurement { z, r }));
+                // Dispatch on the plot's measurement source (radar polar vs.
+                // ADS-B geodetic) to produce a Cartesian measurement already in
+                // the common tracking frame (Häppchen AP9.2).
+                let cm = tracking_measurement(p, &model.frame, &model.error, &tracking_frame);
+                by_sensor.entry(p.sensor).or_default().push((p, cm));
             }
         }
 
@@ -625,14 +617,8 @@ impl Tracker {
             for &idx in &order[gi..gj] {
                 let p = &plots[idx];
                 if let Some(model) = self.config.sensors.get(&p.sensor) {
-                    let local = convert_plot(&p.measurement, &model.error);
-                    let height = p.measurement.range * p.measurement.elevation.sin();
-                    let (z, r) =
-                        tracking_frame.horizontal_from(&model.frame, local.z, height, local.r);
-                    by_sensor
-                        .entry(p.sensor)
-                        .or_default()
-                        .push((p, CartesianMeasurement { z, r }));
+                    let cm = tracking_measurement(p, &model.frame, &model.error, &tracking_frame);
+                    by_sensor.entry(p.sensor).or_default().push((p, cm));
                 }
             }
 
@@ -899,7 +885,7 @@ mod tests {
         Plot {
             sensor: SensorId(1),
             time: Timestamp(time),
-            measurement: Polar::new(range, az, 0.0),
+            measurement: firefly_core::Measurement::Polar(Polar::new(range, az, 0.0)),
             kind: DetectionKind::Combined,
             mode_ac: ModeAC {
                 mode_3a: Some(mode_3a),
@@ -1729,7 +1715,9 @@ mod tests {
         let crossing_plot = |t: f64, east: f64, north: f64, squawk: u16| Plot {
             sensor: SensorId(1),
             time: Timestamp(t),
-            measurement: firefly_geo::Enu::new(east, north, 0.0).to_polar(),
+            measurement: firefly_core::Measurement::Polar(
+                firefly_geo::Enu::new(east, north, 0.0).to_polar(),
+            ),
             kind: DetectionKind::Combined,
             mode_ac: ModeAC {
                 mode_3a: Some(squawk),
