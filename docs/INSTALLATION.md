@@ -153,10 +153,17 @@ docker run --rm \
 
 ---
 
-## 7. ADS-B-Echtbetrieb mit OpenSky Network
+## 7. ADS-B-Echtbetrieb mit OpenSky Network (`FIREFLY_MODE=live`)
 
-Der OpenSky-Adapter empfängt live ADS-B-Daten vom OpenSky Network REST API
-und speist sie in den Tracker (ADR 0019). Er ist standardmäßig deaktiviert.
+Im **Live-Modus** bezieht Firefly Echtzeit-ADS-B-Positionen vom OpenSky Network
+REST API, speist sie direkt in den Tracker und sendet kontinuierlich CAT062-
+und WebSocket-Daten an Wayfinder bzw. den Browser. Alle eingehenden Plots werden
+parallel in einer `.ffplots`-Datei aufgezeichnet (ADR 0020).
+
+> **Wichtig:** Der Live-Modus wird ausschließlich über `FIREFLY_MODE=live`
+> aktiviert — nicht über `FIREFLY_OPENSKY_ENABLED`. Letztere Variable aktiviert
+> den OpenSky-Poller nur als **Log-only**-Sonde im Replay-Modus (Plots werden
+> geloggt, aber nicht verarbeitet).
 
 ### Schritt 1: OpenSky-Account anlegen (optional, empfohlen)
 
@@ -173,7 +180,6 @@ Standardwert: Deutschland (47°N–55°N, 5°O–16°O).
 Für den Raum Frankfurt (enger Ausschnitt):
 
 ```bash
-export FIREFLY_OPENSKY_ENABLED=true
 export FIREFLY_OPENSKY_LAT_MIN=49.0
 export FIREFLY_OPENSKY_LAT_MAX=51.0
 export FIREFLY_OPENSKY_LON_MIN=7.0
@@ -191,10 +197,10 @@ export FIREFLY_OPENSKY_POLL_INTERVAL_SECS=5   # mit Account: 5 s möglich
 > **Sicherheitshinweis:** Passwörter nie direkt in Shell-Skripten hartkodieren.
 > Im Produktionsbetrieb über Kubernetes Secrets oder ein Vault-System injizieren.
 
-### Schritt 4: Starten
+### Schritt 4: Im Live-Modus starten
 
 ```bash
-FIREFLY_OPENSKY_ENABLED=true \
+FIREFLY_MODE=live \
 FIREFLY_OPENSKY_LAT_MIN=49.0 \
 FIREFLY_OPENSKY_LAT_MAX=51.0 \
 FIREFLY_OPENSKY_LON_MIN=7.0 \
@@ -205,9 +211,14 @@ FIREFLY_OPENSKY_LON_MAX=10.0 \
 Im Log erscheinen dann Meldungen wie:
 
 ```
-INFO OpenSky ADS-B poller enabled lat_min=49 lat_max=51 lon_min=7 lon_max=10 ...
-INFO OpenSky plots received count=42
+INFO firefly starting mode=live
+INFO OpenSky ADS-B poller started lat_min=49 lat_max=51 lon_min=7 lon_max=10
+INFO live tracker tick tracks=12 plots_ingested=47
 ```
+
+Die Readiness-Probe (`/ready`) gibt `503` zurück, bis der erste OpenSky-Poll
+erfolgreich war — danach `200 ready`. Wayfinder zeigt Tracks sobald `/ready`
+positiv antwortet.
 
 ---
 
