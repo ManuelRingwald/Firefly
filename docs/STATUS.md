@@ -7,16 +7,27 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.3 (ICAO-Vorsortierung) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.5 + AP9.6 (ADS-B-Datenfluss & ES-Age-Subfeld) abgeschlossen.**
+  - **AP9.6:** `Track.adsb_last_hit_time: Option<f64>` (gesetzt im ICAO-Pre-Sort-Trefferpfad in
+    `fuse_simultaneous_plots`); `SystemTrack.adsb_age_s: Option<f64>` berechnet in `system_track_from`
+    als `(time - hit).max(0.0)`. Alle 6 `SystemTrack`-Struct-Literal-Stellen in 5 Dateien aktualisiert.
+    S2 · Opus 4.8.
+  - **AP9.5:** I062/290 ES-Age-Subfeld kodiert (`AGE_ES_PRESENT = 0x08`). `encode_update_ages` hängt bei
+    vorhandenem `adsb_age_s` das Bit `0x08` in das primäre Subfeld-Oktett und fügt das ES-Age-Byte an.
+    `take_update_ages` im Cursor liest variable Länge (`count_ones`). `decode_update_ages` gibt
+    `(psr_age, Option<es_age>)` zurück. `DecodedRecord.adsb_age_s: Option<f64>` ergänzt. 3 neue Tests
+    (47 statt 44 in firefly-asterix). Referenz-Dump-Test unverändert grün (kein Wire-Break für Tracks ohne
+    ADS-B). ICD → **2.4.0**. Alle Gates grün (`cargo test --workspace`, `clippy`, `fmt`). S3 · Opus 4.8.
+    **Nächster Schritt: AP9.8 (ADR 0019, Meilenstein-Doku, ICD-Changelog, Cross-Project-Issue)
+    oder AP9.4 (firefly-opensky Crate) — erst ankündigen, dann bauen.**
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.3 (ICAO-Vorsortierung) abgeschlossen.**
   `fuse_simultaneous_plots` (der gemeinsame Kern beider Pfade: Batch + Async) erhält eine ICAO-Vorsortierstufe
   vor dem JPDA-Schritt. Plots mit bekannter ICAO-Adresse, die zu einem lebenden Track passen, werden direkt
   zugeordnet (β=1, kein Mahalanobis-Gate). Plots ohne Match gehen unverändert in den JPDA-Pool. Die
   gefrorene Referenz (ADR 0011) wird vor der Vorsortierung gebaut → Ghost-Suppression unberührt. Zwei neue
   Tests: `icao_match_bypasses_kinematic_gate` (Plot 111 km außerhalb des Gates → wird trotzdem assoziiert)
   und `icao_no_match_falls_through_to_jpda` (unbekannte ICAO → normaler JPDA-Initiierungspfad). FR-TRK-031.
-  Alle Gates grün (`cargo test --workspace`, `clippy`, `fmt`). S4 · Opus 4.8. **Nächster Schritt:
-  AP9.6 (`adsb_last_hit_time` auf Track + SystemTrack) oder AP9.5 (I062/290 ES-Age-Subfeld) —
-  erst ankündigen, dann bauen.**
+  Alle Gates grün (`cargo test --workspace`, `clippy`, `fmt`). S4 · Opus 4.8.
 - **Vorherige Aktualisierung:** 2026-06-18 — **AP9.1 + AP9.2 (ADS-B-Eingang, Stufe 1) abgeschlossen.**
   `firefly-core::Measurement`-Enum eingeführt (`Polar(Polar)` + `Geodetic { position: Wgs84, sigma_pos_m: f64 }`);
   `Plot::adsb`-Konstruktor; alle sieben Aufrufstellen aktualisiert (Simulator, Player, Tracker-Batch- +

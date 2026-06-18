@@ -754,6 +754,7 @@ impl Tracker {
                 self.tracks[ti].mark_hit(t);
                 self.tracks[ti].record_hit_from(sensor);
                 self.tracks[ti].update_identity(&plot.mode_ac);
+                self.tracks[ti].adsb_last_hit_time = Some(t);
                 handled[mi] = true;
             }
         }
@@ -879,6 +880,7 @@ fn system_track_from(
         flight_level_ft: track.flight_level_ft(),
         callsign: track.callsign(),
         contributing_sensors: track.contributing_sensors().iter().copied().collect(),
+        adsb_age_s: track.adsb_last_hit_time().map(|hit| (time - hit).max(0.0)),
     }
 }
 

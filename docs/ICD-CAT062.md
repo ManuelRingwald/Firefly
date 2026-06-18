@@ -34,6 +34,7 @@ demselben Multicast-Strom (ADR 0018). Konsument dispatcht am CAT-Oktett.
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 2.4.0 | 2026-06-18 | **Additiv (AP9.5).** I062/290 (System Track Update Ages) trägt jetzt optional das **ES-Age-Subfeld** (Extended Squitter / ADS-B): Bit `0x08` im primären Subfeld-Oktett signalisiert, dass ein ES-Age-Byte folgt. Das ES-Age-Byte kodiert das ADS-B-Trefferalter in 1/4-Sekunden (identisch zum PSR-Age). Ist `0x08` nicht gesetzt, fehlt das Byte und das Item ist weiterhin 2 Byte lang (Subfeld + PSR-Age). Für Tracks ohne ADS-B-Treffer: kein Unterschied zum bisherigen Wire-Format. **Konsument (Wayfinder): kein Breaking Change** — vorhandene Decoder müssen I062/290 als variabel lang behandeln (bisher in der Praxis immer 2 Byte; robust implementiert wenn der Decoder `bytes.len()` prüft). Die ES-Age-Präsenz signalisiert „dieser Track hat mindestens einen ADS-B-Update erhalten" und kann von Wayfinder als ADS-B-Badge genutzt werden (AP9.9). |
 | 2.3.0 | 2026-06-15 | **Additiv (ADR 0018).** Neue Kategorie **CAT065** (SDPS Service Status, „Heartbeat") auf **derselben** Multicast-Gruppe/Port wie CAT062. Periodische SDPS-Status-Meldung (I065/000 = 1) mit I065/010, I065/000, I065/015, I065/030 (Time of Day), I065/040 (NOGO operationell/degradiert). Wall-clock-getaktet (Default 1 s, `FIREFLY_CAT065_PERIOD`). **Konsument muss am führenden CAT-Oktett dispatchen** (`0x3E` → Track, `0x41` → Status) und unbekannte Kategorien überspringen — die robuste-Decoder-Regel verlangte das ohnehin. Kein Eingriff in das CAT062-Record-Format. Details: Abschnitt 8. |
 | 2.2.0 | 2026-06-15 | **Additiv (ADR 0016).** I062/080 (Track Status) trägt jetzt das **TSE-Bit** (*Track Service End*, Oktett 2, Bit 7, `0x40`): es markiert die **letzte** Meldung für einen Track (er wird gelöscht). Erscheint nur bei gelöschten Tracks; ein gelöschter Track wird damit **genau einmal** mit gesetztem TSE gemeldet und danach nicht mehr. I062/080 ist bereits ein variabel langes FX-Item (FRN 13, in jedem Record) — kein FSPEC-Wachstum, kein Breaking Change. **Konsument muss TSE als „Track entfernen" interpretieren** (sonst Ein-Frame-Geist). |
 | 2.1.0 | 2026-06-15 | **Additiv (AP7).** Neues optionales Item **I062/245** (Target Identification / Callsign, FRN 10, 7 Oktette: STI/spare-Oktett + 8 × 6-Bit-IA-5-Zeichen) — nur wenn der Track jemals eine Mode-S-Kennung getragen hat (sticky wie Mode 3/A). FRN 10 liegt im bereits vorhandenen 2. FSPEC-Oktett — kein Wachstum der FSPEC-Länge, kein Breaking Change für bestehende Decoder. |
@@ -148,12 +149,22 @@ in Oktett 4 desselben Records.
 ### 4.2 I062/290 — System Track Update Ages
 
 Compound Item: Primary Subfield (1 Oktett) + Subfelder je gesetztem Bit.
+Seit ICD 2.4.0 ist das Item **variabel lang**: PSR-Age ist immer vorhanden
+(1 primäres Subfeld-Byte + 1 Byte); das optionale ES-Age-Byte folgt, wenn
+Bit `0x08` gesetzt ist.
 
-| Primary-Subfield-Bit | Subfeld | Länge | Kodierung |
-|----------------------|---------|-------|-----------|
-| Bit 7 (spec Bit 15, `0x40`, "PSR") | PSR-Age | 1 Oktett | u8, LSB = 0,25 s |
+| Primary-Subfield-Bit | Subfeld | Länge | Kodierung | Quelle |
+|----------------------|---------|-------|-----------|--------|
+| Bit 7 (`0x40`, "PSR") | PSR-Age | 1 Oktett | u8, LSB = 0,25 s | `SystemTrack.update_age` |
+| Bit 4 (`0x08`, "ES") | ES-Age (Extended Squitter / ADS-B) | 1 Oktett (nur wenn Bit gesetzt) | u8, LSB = 0,25 s | `SystemTrack.adsb_age_s` (ICD 2.4.0) |
 
-Aktuell wird nur das PSR-Age-Subfeld kodiert, aus `SystemTrack.update_age`.
+Das ES-Age-Byte ist nur vorhanden, wenn `SystemTrack.adsb_age_s` `Some` ist
+(d. h. der Track hat mindestens einen ADS-B-Treffer erhalten). Fehlt das Bit,
+ist das Item 2 Byte lang (bisheriges Wire-Format, keine Änderung für
+Radar-only-Tracks). **Konsument**: I062/290 robust als variabel langes Item
+dekodieren (Länge aus dem Primary-Subfield bestimmen, nicht hardcoded auf 2
+Byte). Die Präsenz des ES-Subfelds signalisiert „ADS-B-Anteil vorhanden" →
+kann als ADS-B-Badge in der Lageanzeige genutzt werden.
 
 ### 4.3 I062/500 — Estimated Accuracies
 

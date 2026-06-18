@@ -160,6 +160,7 @@ mod tests {
             flight_level_ft: None,
             callsign: None,
             contributing_sensors: Vec::new(),
+            adsb_age_s: None,
         }
     }
 

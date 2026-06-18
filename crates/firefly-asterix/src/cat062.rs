@@ -129,6 +129,10 @@ const STATUS_CST_COASTING: u8 = 0x80;
 /// I062/290 primary subfield, bit 7 (spec bit-15, "PSR"): the PSR-age subfield
 /// is present. Verified against SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.20.
 const AGE_PSR_PRESENT: u8 = 0x40;
+/// I062/290 primary subfield, bit 4 (spec "ES"): the Extended Squitter / ADS-B
+/// age subfield is present. ICD 2.4.0 (AP9.5). Signals "this track has been
+/// updated by at least one ADS-B measurement" to downstream consumers.
+const AGE_ES_PRESENT: u8 = 0x08;
 /// I062/500 primary subfield, bit 8 (spec bit-16, "APC"): the Cartesian
 /// position-accuracy subfield is present. Verified against
 /// SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.26.
@@ -414,13 +418,19 @@ fn encode_track_status(track: &SystemTrack) -> Vec<u8> {
 /// I062/290 — System Track Update Ages, a compound item: a primary subfield
 /// (which ages follow) plus the present age octets, each in 1/4-second steps.
 ///
-/// For the single-radar demo the tracker's generic "time since the last
-/// measurement" maps to the **PSR age** subfield (age of the last primary
-/// detection used to update the track). Per-technology ages (SSR, Mode S, ADS-B)
-/// arrive with multi-sensor provenance in M4.
+/// Always encodes the PSR-age subfield. If the track carries an ADS-B hit
+/// time (`adsb_age_s` is `Some`), the ES-age subfield is appended as well
+/// (ICD 2.4.0, AP9.5). Subfield order in the primary byte (MSB→LSB):
+/// TRK(0x80) PSR(0x40) SSR(0x20) MDA(0x10) MFL(0x10) M50(0x04) ES(0x08) FX(0x01).
 fn encode_update_ages(track: &SystemTrack) -> Vec<u8> {
-    let age = scaled_u8(track.update_age, AGE_LSB_SECONDS);
-    vec![AGE_PSR_PRESENT, age]
+    let psr_age = scaled_u8(track.update_age, AGE_LSB_SECONDS);
+    match track.adsb_age_s {
+        None => vec![AGE_PSR_PRESENT, psr_age],
+        Some(es_age_s) => {
+            let es_age = scaled_u8(es_age_s, AGE_LSB_SECONDS);
+            vec![AGE_PSR_PRESENT | AGE_ES_PRESENT, psr_age, es_age]
+        }
+    }
 }
 
 /// I062/500 — Estimated Accuracies, a compound item. We carry the **APC**
@@ -495,6 +505,10 @@ pub struct DecodedRecord {
     pub ended: bool,
     /// I062/290 PSR age, seconds.
     pub update_age: f64,
+    /// I062/290 ES (Extended Squitter / ADS-B) age, seconds. `Some` when the
+    /// ES subfield is present — signals that the track has an ADS-B
+    /// contribution. ICD 2.4.0 (AP9.5).
+    pub adsb_age_s: Option<f64>,
     /// I062/500 APC, 1σ position uncertainty in metres.
     pub position_uncertainty: f64,
     /// I062/060, if the track carries an SSR identity.
@@ -579,6 +593,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
     let mut track_number = None;
     let mut status = None;
     let mut update_age = None;
+    let mut adsb_age_s = None;
     let mut position_uncertainty = None;
     let mut mode_3a = None;
     let mut callsign = None;
@@ -601,7 +616,11 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
             }
             uap::TRACK_NUMBER => track_number = Some(decode_track_number(cursor.take(2)?)),
             uap::TRACK_STATUS => status = Some(decode_track_status(cursor.take_track_status()?)),
-            uap::UPDATE_AGES => update_age = Some(decode_update_ages(cursor.take(2)?)),
+            uap::UPDATE_AGES => {
+                let (psr, es) = decode_update_ages(cursor.take_update_ages()?);
+                update_age = Some(psr);
+                adsb_age_s = es;
+            }
             uap::MEASURED_FLIGHT_LEVEL => {
                 flight_level_ft = Some(decode_measured_flight_level(cursor.take(2)?))
             }
@@ -627,6 +646,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         coasting,
         ended,
         update_age: update_age.ok_or(DecodeError::MissingItem(uap::UPDATE_AGES))?,
+        adsb_age_s,
         position_uncertainty: position_uncertainty
             .ok_or(DecodeError::MissingItem(uap::ESTIMATED_ACCURACIES))?,
         mode_3a,
@@ -776,10 +796,18 @@ fn decode_track_status(bytes: &[u8]) -> (bool, bool, bool) {
     (confirmed, coasting, ended)
 }
 
-/// I062/290 — the inverse of [`encode_update_ages`]: our encoder always
-/// carries exactly the PSR-age subfield, so the second octet is the age.
-fn decode_update_ages(bytes: &[u8]) -> f64 {
-    bytes[1] as f64 * AGE_LSB_SECONDS
+/// I062/290 — the inverse of [`encode_update_ages`]: returns the PSR age and,
+/// if the ES subfield bit is set in the primary-subfield octet, the ADS-B age.
+fn decode_update_ages(bytes: &[u8]) -> (f64, Option<f64>) {
+    let subfield = bytes[0];
+    let psr_age = bytes[1] as f64 * AGE_LSB_SECONDS;
+    // ES age byte follows PSR age byte (PSR=0x40 is the only higher-priority bit we use).
+    let adsb_age_s = if subfield & AGE_ES_PRESENT != 0 && bytes.len() >= 3 {
+        Some(bytes[2] as f64 * AGE_LSB_SECONDS)
+    } else {
+        None
+    };
+    (psr_age, adsb_age_s)
 }
 
 /// I062/500 — the inverse of [`encode_accuracies`]: our encoder always
@@ -827,6 +855,16 @@ impl<'a> Cursor<'a> {
         Ok(frns)
     }
 
+    /// Take I062/290's variable-length field: one primary-subfield octet whose
+    /// set bits indicate how many age octets follow (one per set bit).
+    fn take_update_ages(&mut self) -> Result<&'a [u8], DecodeError> {
+        let start = self.pos;
+        let subfield = self.take(1)?[0];
+        let age_count = subfield.count_ones() as usize;
+        self.take(age_count)?;
+        Ok(&self.bytes[start..self.pos])
+    }
+
     /// Take I062/080's FX-chained octets: the first octet, plus any further
     /// octets while the FX bit (`0x01`) is set.
     fn take_track_status(&mut self) -> Result<&'a [u8], DecodeError> {
@@ -866,6 +904,7 @@ mod tests {
             flight_level_ft: None,
             callsign: None,
             contributing_sensors: Vec::new(),
+            adsb_age_s: None,
         }
     }
 
@@ -1129,6 +1168,46 @@ mod tests {
 
         t.update_age = 1_000.0; // far beyond 63.75 s → saturates
         assert_eq!(encode_update_ages(&t), vec![0x40, 0xFF]);
+    }
+
+    /// When the track carries an ADS-B hit, the ES-Age subfield (bit 0x08 in
+    /// the primary subfield, ICD 2.4.0) is appended after the PSR-Age byte.
+    /// REQ: FR-IO-003
+    #[test]
+    fn update_ages_appends_es_subfield_when_adsb_age_present() {
+        let mut t = track_at(1, 0.0, 0.0, 0.0, 0.0);
+        t.update_age = 2.0; // PSR age: 2 s → 8 quarter-seconds
+        t.adsb_age_s = Some(3.0); // ES age: 3 s → 12 quarter-seconds
+                                  // Primary subfield: PSR (0x40) | ES (0x08) = 0x48; PSR=0x08; ES=0x0C
+        assert_eq!(encode_update_ages(&t), vec![0x48, 0x08, 0x0C]);
+    }
+
+    /// The ES-Age encode/decode round-trip preserves values to within the
+    /// 1/4-second LSB. REQ: FR-IO-003
+    #[test]
+    fn update_ages_es_round_trip() {
+        let mut t = track(1);
+        t.adsb_age_s = Some(4.0); // 4 s → 16 quarter-seconds
+
+        let encoded = encode_update_ages(&t);
+        let (psr_age, es_age) = decode_update_ages(&encoded);
+        assert!((psr_age - t.update_age).abs() < 0.25, "PSR age preserved");
+        assert!(
+            es_age.is_some(),
+            "ES subfield present when adsb_age_s is Some"
+        );
+        assert!((es_age.unwrap() - 4.0).abs() < 0.25, "ES age preserved");
+    }
+
+    /// Without an ADS-B hit, the ES subfield is absent and the decoder returns
+    /// `None` for `adsb_age_s`. REQ: FR-IO-003
+    #[test]
+    fn update_ages_no_es_subfield_when_adsb_age_absent() {
+        let t = track(1); // adsb_age_s: None
+        let encoded = encode_update_ages(&t);
+        assert_eq!(encoded.len(), 2, "only PSR: 1 subfield byte + 1 age byte");
+        let (_, es_age) = decode_update_ages(&encoded);
+        assert!(es_age.is_none(), "no ES subfield → None");
     }
 
     /// Estimated accuracies: the APC subfield is present (0x80); the 1σ
