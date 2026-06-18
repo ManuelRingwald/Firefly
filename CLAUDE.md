@@ -138,6 +138,11 @@ Ein Schritt gilt erst als fertig, wenn:
       (`docs/requirements/`) eingetragen und mit Code/Test rückverfolgbar.
 - [ ] Bei Änderung der CAT062-Ausgabe: Schnittstellen-Doku aktualisiert,
       Auswirkung auf Wayfinder bewertet (Abschnitt 9).
+- [ ] **`docs/INSTALLATION.md` auf Aktualität geprüft** — neue Umgebungsvariablen,
+      geänderte Startbefehle oder neue Voraussetzungen müssen eingetragen sein.
+- [ ] **`docs/TECHNICAL.md` auf Aktualität geprüft** — neue Metriken,
+      geänderte Env-Variablen, neue Betriebsmodi oder Einschränkungen müssen
+      dokumentiert sein.
 - [ ] Die zugehörige Doku wurde aktualisiert.
 - [ ] Der Commit hat eine klare, beschreibende Nachricht.
 
