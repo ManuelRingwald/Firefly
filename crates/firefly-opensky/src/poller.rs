@@ -47,12 +47,15 @@ impl From<reqwest::Error> for PollError {
 /// # async fn main() {
 /// let config = OpenSkyConfig::from_env();
 /// let poller = OpenSkyPoller::new(config);
-/// poller.run(|plots| {
-///     for plot in plots {
-///         // hand to tracker
-///         drop(plot);
-///     }
-/// }).await;
+/// poller.run(
+///     |plots| {
+///         for plot in plots {
+///             // hand to tracker
+///             drop(plot);
+///         }
+///     },
+///     |e| eprintln!("poll error: {e}"),
+/// ).await;
 /// # }
 /// ```
 pub struct OpenSkyPoller {
@@ -115,21 +118,26 @@ impl OpenSkyPoller {
     }
 
     /// Run the polling loop indefinitely, calling `on_plots` after each
-    /// successful poll that returns at least one airborne aircraft.
+    /// successful poll that returns at least one airborne aircraft, and
+    /// `on_error` after each failed poll.
     ///
     /// Transient HTTP errors (network hiccup, rate-limit 429, OpenSky downtime)
     /// are logged as warnings and skipped; the loop continues at the configured
     /// interval.  This method never returns.
-    pub async fn run<F>(&self, mut on_plots: F)
+    pub async fn run<F, E>(&self, mut on_plots: F, mut on_error: E)
     where
         F: FnMut(Vec<Plot>),
+        E: FnMut(&PollError),
     {
         let interval = Duration::from_secs(self.config.poll_interval_secs);
         loop {
             match self.poll().await {
                 Ok(plots) if !plots.is_empty() => on_plots(plots),
                 Ok(_) => debug!("OpenSky poll returned no airborne aircraft"),
-                Err(e) => warn!("OpenSky poll failed: {e}"),
+                Err(e) => {
+                    warn!("OpenSky poll failed: {e}");
+                    on_error(&e);
+                }
             }
             tokio::time::sleep(interval).await;
         }

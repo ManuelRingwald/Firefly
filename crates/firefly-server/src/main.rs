@@ -168,9 +168,14 @@ fn spawn_opensky_poller_log_only() {
     tokio::spawn(async move {
         let poller = OpenSkyPoller::new(config);
         poller
-            .run(|plots| {
-                tracing::info!(count = plots.len(), "OpenSky plots received (log-only)");
-            })
+            .run(
+                |plots| {
+                    tracing::info!(count = plots.len(), "OpenSky plots received (log-only)");
+                },
+                |e| {
+                    tracing::warn!(%e, "OpenSky poll error (log-only mode)");
+                },
+            )
             .await;
     });
 }
@@ -207,10 +212,24 @@ async fn build_live_state(_config: ServerConfig, metrics: Arc<Metrics>) -> AppSt
     // Build and spawn the live tracker task.
     let tracker = build_live_tracker(&opensky_config);
     let live = LiveTracker::new(tracker, None); // recorder wired in AP9.4c-4
-    tokio::spawn(run_live_tracker(live, plots_rx, snapshot_tx, output_period));
+    {
+        let m = Arc::clone(&metrics);
+        tokio::spawn(run_live_tracker(
+            live,
+            plots_rx,
+            snapshot_tx,
+            output_period,
+            move |plots, records| {
+                m.live_plots_ingested_total
+                    .store(plots, std::sync::atomic::Ordering::Relaxed);
+                m.plot_records_written_total
+                    .store(records, std::sync::atomic::Ordering::Relaxed);
+            },
+        ));
+    }
 
     // Spawn the OpenSky poller, feeding plots into the tracker via mpsc.
-    spawn_opensky_poller_live(opensky_config, plots_tx);
+    spawn_opensky_poller_live(opensky_config, plots_tx, Arc::clone(&metrics));
 
     // Spawn the live CAT062 feed, if enabled.
     spawn_cat062_live(Arc::clone(&metrics), snapshot_rx.clone());
@@ -227,7 +246,15 @@ async fn build_live_state(_config: ServerConfig, metrics: Arc<Metrics>) -> AppSt
 /// Spawn the OpenSky poller in Live mode: every batch of plots is sent into
 /// `plots_tx` so the tracker can consume it. If the channel is full, the batch
 /// is dropped and a warning is logged — availability over back-pressure.
-fn spawn_opensky_poller_live(config: OpenSkyConfig, plots_tx: mpsc::Sender<Vec<Plot>>) {
+///
+/// Sets `metrics.live_ready = true` on the first successful poll (AP9.4c-4):
+/// until then `/ready` returns 503. Increments `opensky_poll_errors_total` on
+/// each HTTP/network failure.
+fn spawn_opensky_poller_live(
+    config: OpenSkyConfig,
+    plots_tx: mpsc::Sender<Vec<Plot>>,
+    metrics: Arc<Metrics>,
+) {
     tracing::info!(
         lat_min = config.lat_min,
         lat_max = config.lat_max,
@@ -236,13 +263,26 @@ fn spawn_opensky_poller_live(config: OpenSkyConfig, plots_tx: mpsc::Sender<Vec<P
     );
     tokio::spawn(async move {
         let poller = OpenSkyPoller::new(config);
+        let metrics_err = Arc::clone(&metrics);
         poller
-            .run(move |plots| {
-                tracing::info!(count = plots.len(), "OpenSky plots received");
-                if let Err(e) = plots_tx.try_send(plots) {
-                    tracing::warn!("plot channel full; dropping batch: {e}");
-                }
-            })
+            .run(
+                move |plots| {
+                    tracing::info!(count = plots.len(), "OpenSky plots received");
+                    // Mark the server as ready on the first successful poll.
+                    metrics
+                        .live_ready
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    if let Err(e) = plots_tx.try_send(plots) {
+                        tracing::warn!("plot channel full; dropping batch: {e}");
+                    }
+                },
+                move |e| {
+                    tracing::warn!(%e, "OpenSky poll error (counted in metrics)");
+                    metrics_err
+                        .opensky_poll_errors_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                },
+            )
             .await;
     });
 }

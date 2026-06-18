@@ -6,7 +6,7 @@
 //! metrics is small and fixed, and a hand-rolled exposition keeps the
 //! dependency surface minimal.
 
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 
 /// Process-wide counters/gauges, shared via [`crate::AppState`] and the
 /// CAT062 multicast task.
@@ -26,6 +26,22 @@ pub struct Metrics {
     /// SDPS-006). Updated after each successful multicast send via the on_scan
     /// callback in firefly_multicast::run. Stays at 0 until the first scan.
     pub tracks_active: AtomicU64,
+
+    // --- Live-mode metrics (ADR 0020, AP9.4c-4) ---
+    /// Whether the Live-mode server has received at least one successful
+    /// OpenSky poll (i.e. at least one airborne aircraft was returned). Used
+    /// by the `/ready` probe: the server is not ready until the first real
+    /// air picture arrives. Always `false` in Replay mode.
+    pub live_ready: AtomicBool,
+    /// Total number of plots ingested by the live tracker (counter). Stays 0
+    /// in Replay mode.
+    pub live_plots_ingested_total: AtomicU64,
+    /// Total number of `.ffplots` input-recording records written (counter).
+    /// Stays 0 when recording is disabled or in Replay mode.
+    pub plot_records_written_total: AtomicU64,
+    /// Total number of OpenSky poll errors (HTTP / network failures, counter).
+    /// Stays 0 in Replay mode (OpenSky poller not started).
+    pub opensky_poll_errors_total: AtomicU64,
 }
 
 /// A guard that increments `ws_clients_connected` (and `ws_clients_total`) on
@@ -104,6 +120,27 @@ pub fn render(metrics: &Metrics, frames_total: usize) -> String {
         "Number of tracks in the most recently sent CAT062 scan (SDPS-006).",
         metrics.tracks_active.load(Ordering::Relaxed) as f64,
     );
+    write_metric(
+        &mut out,
+        "firefly_live_plots_ingested_total",
+        "counter",
+        "Total number of plots ingested by the live tracker (Live mode only).",
+        metrics.live_plots_ingested_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_plot_records_written_total",
+        "counter",
+        "Total number of .ffplots input-recording records written (Live mode only).",
+        metrics.plot_records_written_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_opensky_poll_errors_total",
+        "counter",
+        "Total number of OpenSky REST API poll errors (Live mode only).",
+        metrics.opensky_poll_errors_total.load(Ordering::Relaxed) as f64,
+    );
     out
 }
 
@@ -130,6 +167,15 @@ mod tests {
             .cat065_heartbeats_sent_total
             .store(13, Ordering::Relaxed);
         metrics.tracks_active.store(7, Ordering::Relaxed);
+        metrics
+            .live_plots_ingested_total
+            .store(100, Ordering::Relaxed);
+        metrics
+            .plot_records_written_total
+            .store(100, Ordering::Relaxed);
+        metrics
+            .opensky_poll_errors_total
+            .store(3, Ordering::Relaxed);
 
         let text = render(&metrics, 9);
 
@@ -140,9 +186,14 @@ mod tests {
         assert!(text.contains("firefly_cat062_send_errors_total 1"));
         assert!(text.contains("firefly_cat065_heartbeats_sent_total 13"));
         assert!(text.contains("firefly_tracks_active 7"));
+        assert!(text.contains("firefly_live_plots_ingested_total 100"));
+        assert!(text.contains("firefly_plot_records_written_total 100"));
+        assert!(text.contains("firefly_opensky_poll_errors_total 3"));
         assert!(text.contains("# TYPE firefly_ws_clients_connected gauge"));
         assert!(text.contains("# TYPE firefly_cat062_scans_sent_total counter"));
         assert!(text.contains("# TYPE firefly_tracks_active gauge"));
+        assert!(text.contains("# TYPE firefly_live_plots_ingested_total counter"));
+        assert!(text.contains("# TYPE firefly_opensky_poll_errors_total counter"));
     }
 
     /// The connected-client guard increments on creation and decrements again

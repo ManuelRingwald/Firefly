@@ -133,6 +133,9 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_cat062_send_errors_total` | counter | Fehlgeschlagene CAT062-Sends |
 | `firefly_cat065_heartbeats_sent_total` | counter | Gesendete CAT065-Heartbeats |
 | `firefly_tracks_active` | gauge | Tracks im zuletzt gesendeten CAT062-Scan |
+| `firefly_live_plots_ingested_total` | counter | **Live-Modus:** Plots insgesamt in den Tracker eingespeist |
+| `firefly_plot_records_written_total` | counter | **Live-Modus:** In `.ffplots`-Datei geschriebene Records |
+| `firefly_opensky_poll_errors_total` | counter | **Live-Modus:** HTTP/Netz-Fehler beim OpenSky-Poll |
 
 ### 3.3 Prometheus scrape-Konfiguration
 
@@ -185,11 +188,21 @@ livenessProbe:
 
 ### 4.2 Readiness-Probe (`/ready`)
 
-Prüft, ob der Server Traffic verarbeiten kann:
+Prüft, ob der Server Traffic verarbeiten kann.
+
+- **Replay-Modus:** Immer `200 ready` — die Szene ist beim Start vollständig geladen.
+- **Live-Modus:** `503 not ready` bis zum ersten erfolgreichen OpenSky-Poll (d. h.
+  mindestens ein Luftfahrzeug gemeldet). Danach `200 ready`. Kubernetes sendet damit
+  keinen Traffic an einen Pod, der noch kein Luftlagebild hat (ADR 0020, AP9.4c-4).
 
 ```bash
+# Replay-Modus oder nach erstem Poll im Live-Modus:
 curl http://localhost:8080/ready
-# → {"status":"ready"}
+# → ready  (HTTP 200)
+
+# Live-Modus vor erstem Poll:
+curl -o /dev/null -w "%{http_code}" http://localhost:8080/ready
+# → 503
 ```
 
 Kubernetes-Konfiguration:

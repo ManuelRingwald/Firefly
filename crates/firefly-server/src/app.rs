@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::State,
+    http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
     Router,
@@ -73,10 +74,29 @@ async fn health() -> impl IntoResponse {
     "ok"
 }
 
-/// Readiness probe: ready to accept load. The frame stream is built before the
-/// listener binds, so answering at all means we are ready. ADR 0003.
-async fn ready() -> impl IntoResponse {
-    "ready"
+/// Readiness probe: ready to accept load.
+///
+/// In Replay mode the frame stream is fully built at startup, so the server is
+/// always ready. In Live mode the server is only ready after the first
+/// successful OpenSky poll has delivered at least one airborne aircraft — until
+/// then `/ready` returns 503 so Kubernetes will not route traffic to a pod that
+/// has no air picture yet (ADR 0020, AP9.4c-4).
+async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    let is_ready = match &state.source {
+        FrameSource::Replay { .. } => true,
+        FrameSource::Live { .. } => state
+            .metrics
+            .live_ready
+            .load(std::sync::atomic::Ordering::Relaxed),
+    };
+    if is_ready {
+        (StatusCode::OK, "ready")
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "not ready: waiting for first ADS-B poll",
+        )
+    }
 }
 
 /// Prometheus text exposition of operational counters (NFR-OBS-001).
@@ -266,10 +286,65 @@ mod tests {
         assert_eq!(get_status("/health").await, StatusCode::OK);
     }
 
-    /// The readiness probe answers 200. REQ: FR-NET-001
+    /// The readiness probe answers 200 in Replay mode. REQ: FR-NET-001
     #[tokio::test]
     async fn ready_probe_is_ok() {
         assert_eq!(get_status("/ready").await, StatusCode::OK);
+    }
+
+    /// In Live mode, `/ready` returns 503 until the first ADS-B poll succeeds
+    /// (ADR 0020, AP9.4c-4). The server should not report ready to Kubernetes
+    /// while it has no air picture yet.
+    #[tokio::test]
+    async fn ready_probe_returns_503_in_live_mode_before_first_poll() {
+        use tokio::sync::watch;
+        let (_tx, rx) = watch::channel(crate::live::LiveSnapshot::empty());
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        // live_ready is false by default
+        let live_state = AppState {
+            source: FrameSource::Live {
+                snapshots: rx,
+                sensor: firefly_core::SensorId(200),
+            },
+            metrics,
+        };
+        let response = router(live_state)
+            .oneshot(
+                Request::builder()
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Once `live_ready` is set the probe returns 200 (ADR 0020, AP9.4c-4).
+    #[tokio::test]
+    async fn ready_probe_returns_ok_in_live_mode_after_first_poll() {
+        use std::sync::atomic::Ordering;
+        use tokio::sync::watch;
+        let (_tx, rx) = watch::channel(crate::live::LiveSnapshot::empty());
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        metrics.live_ready.store(true, Ordering::Relaxed);
+        let live_state = AppState {
+            source: FrameSource::Live {
+                snapshots: rx,
+                sensor: firefly_core::SensorId(200),
+            },
+            metrics,
+        };
+        let response = router(live_state)
+            .oneshot(
+                Request::builder()
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     /// The metrics endpoint answers 200 with a Prometheus exposition of the

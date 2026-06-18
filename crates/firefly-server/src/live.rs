@@ -264,15 +264,20 @@ impl LiveTracker {
 ///   time + tracks) is published over `snapshot_tx`. A send error (no receivers
 ///   yet) is ignored — the snapshot is the latest value any future reader sees.
 ///   Before the first poll the snapshot carries the empty sentinel.
+///   `on_tick` is called after each tick with `(plots_ingested, records_written)`
+///   so callers can update Prometheus counters (AP9.4c-4).
 ///
 /// When every sender on `plots_rx` is dropped the recorder is flushed and the
 /// task returns, so a clean shutdown loses no recorded plots.
-pub async fn run_live_tracker(
+pub async fn run_live_tracker<F>(
     mut live: LiveTracker,
     mut plots_rx: mpsc::Receiver<Vec<Plot>>,
     snapshot_tx: watch::Sender<LiveSnapshot>,
     output_period: Duration,
-) {
+    on_tick: F,
+) where
+    F: Fn(u64, u64),
+{
     let mut ticker = tokio::time::interval(output_period);
     // A delayed tick should not fire a burst of catch-up ticks afterwards.
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -300,6 +305,7 @@ pub async fn run_live_tracker(
                 let time = live.latest_data_time().unwrap_or(Timestamp(0.0));
                 let tracks = live.snapshot();
                 let _ = snapshot_tx.send(LiveSnapshot { time, tracks: Arc::new(tracks) });
+                on_tick(live.plots_ingested(), live.records_written());
             }
         }
     }
@@ -498,6 +504,7 @@ mod tests {
             plots_rx,
             snapshot_tx,
             Duration::from_millis(100),
+            |_, _| {},
         ));
 
         // Feed enough hits to confirm a track.
