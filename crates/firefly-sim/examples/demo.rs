@@ -90,13 +90,18 @@ fn main() {
             DetectionKind::Secondary => "SSR",
             DetectionKind::Combined => "PSR+SSR",
         };
+        // The simulator only ever emits polar radar plots.
+        let (range_km, az_deg) = match plot.measurement {
+            firefly_core::Measurement::Polar(p) => (p.range / 1000.0, p.azimuth_deg()),
+            firefly_core::Measurement::Geodetic { .. } => (f64::NAN, f64::NAN),
+        };
         println!(
             "{:>8.1}  {:>6}  {:>9}  {:>10.2}  {:>8.2}  {:>8}",
             plot.time.as_secs(),
             plot.sensor.0,
             kind,
-            plot.measurement.range / 1000.0,
-            plot.measurement.azimuth_deg(),
+            range_km,
+            az_deg,
             fl,
         );
     }

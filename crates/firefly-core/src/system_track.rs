@@ -92,6 +92,12 @@ pub struct SystemTrack {
     /// Replaces the single-sensor `update_age` simplification for CAT062
     /// I062/290 (track ages are reported per contributing sensor).
     pub contributing_sensors: Vec<SensorId>,
+    /// Data-time elapsed since the last ADS-B (Extended Squitter) hit, seconds.
+    /// `None` if the track has never been updated by an ADS-B measurement.
+    /// When `Some`, drives the ES-Age subfield of CAT062 I062/290 (ICD 2.4.0,
+    /// AP9.5/AP9.6); its presence signals "this track has an ADS-B contribution"
+    /// to Wayfinder.
+    pub adsb_age_s: Option<f64>,
 }
 
 impl SystemTrack {
@@ -140,6 +146,7 @@ mod tests {
             flight_level_ft: None,
             callsign: None,
             contributing_sensors: Vec::new(),
+            adsb_age_s: None,
         }
     }
 

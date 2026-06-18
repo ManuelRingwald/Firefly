@@ -34,6 +34,7 @@ fn track(id: u32) -> SystemTrack {
         flight_level_ft: Some(35_000.0),
         callsign: Some(Callsign::new("DLH123")),
         contributing_sensors: Vec::new(),
+        adsb_age_s: None,
     }
 }
 

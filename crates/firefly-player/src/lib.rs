@@ -122,7 +122,7 @@ impl Player {
                 .iter()
                 .filter_map(|p| {
                     let sensor_model = self.tracker.config().sensors.get(&p.sensor)?;
-                    let position = sensor_model.frame.enu_to_geodetic(&p.measurement.to_enu());
+                    let position = p.measurement.to_wgs84(&sensor_model.frame);
                     Some(FramePlot::from_plot(
                         position.lat_deg(),
                         position.lon_deg(),
@@ -223,7 +223,7 @@ impl Player {
                 .iter()
                 .filter_map(|p| {
                     let sensor_model = self.tracker.config().sensors.get(&p.sensor)?;
-                    let position = sensor_model.frame.enu_to_geodetic(&p.measurement.to_enu());
+                    let position = p.measurement.to_wgs84(&sensor_model.frame);
                     Some(FramePlot::from_plot(
                         position.lat_deg(),
                         position.lon_deg(),

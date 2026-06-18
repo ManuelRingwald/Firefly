@@ -85,6 +85,10 @@ pub struct Track {
     /// `mode_3a`/`icao_address` this is not sticky, since it answers "who sees
     /// it *right now*", not "who has ever seen it".
     contributing_sensors: BTreeSet<SensorId>,
+    /// Data time of the last ADS-B hit (ICAO address match, AP9.3/AP9.6), seconds.
+    /// `None` if the track has never been updated by an ADS-B measurement. Used to
+    /// compute the ES-Age subfield of CAT062 I062/290 (ICD 2.4.0, AP9.5).
+    pub(crate) adsb_last_hit_time: Option<f64>,
 }
 
 impl Track {
@@ -103,6 +107,7 @@ impl Track {
             flight_level_ft: None,
             callsign: None,
             contributing_sensors: BTreeSet::new(),
+            adsb_last_hit_time: None,
         }
     }
 
@@ -232,6 +237,11 @@ impl Track {
     /// Sensors that contributed a hit in the most recent scan.
     pub fn contributing_sensors(&self) -> &BTreeSet<SensorId> {
         &self.contributing_sensors
+    }
+
+    /// Data time of the last ADS-B (ICAO address match) hit, seconds, if any.
+    pub fn adsb_last_hit_time(&self) -> Option<f64> {
+        self.adsb_last_hit_time
     }
 
     /// Clear the contributing-sensor set at the start of a new scan; sensors

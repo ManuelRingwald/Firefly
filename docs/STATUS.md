@@ -7,7 +7,148 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-16 — **Paket #10 / SDPS-005 „Legal
+- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.4c-3 (Live-Modus vollständig verdrahtet) abgeschlossen.**
+  `FIREFLY_MODE=live` startet Firefly jetzt im echten Echtzeit-Betrieb.
+  - **`LiveSnapshot`** — neuer Typ (`time: Timestamp` + `tracks: Arc<Vec<SystemTrack>>`); ersetzt
+    `Arc<Vec<SystemTrack>>` als Payload des `watch`-Kanals. Beide Konsumenten (WS-Pump + CAT062-Sender)
+    bekommen Datenzeit + Tracks in einem Schritt.
+  - **`FrameSource::Live { snapshots: SnapshotRx, sensor: SensorId }`** — Platzhalter-Variante ist
+    verdrahtet: `pump_live()` in `app.rs` abonniert den `watch`-Kanal und sendet jeden neuen Snapshot
+    als JSON-Frame an den Browser.
+  - **`run_live_cat062()`** — neuer Async-Dispatcher in `live.rs`: liest den `watch`-Kanal,
+    encodiert jeden Snapshot als CAT062-Block und sendet ihn per UDP-Multicast. Ausgelöst durch den
+    Tracker-Ausgabetakt; kein eigenes Pacing nötig.
+  - **`ServerMode::Replay | Live`** in `config.rs` — `FIREFLY_MODE=live|replay`, Default `replay`.
+    `FIREFLY_MODE=live` impliziert OpenSky als Plot-Quelle (kein separates `FIREFLY_OPENSKY_ENABLED`
+    nötig); in Replay-Mode bleibt `FIREFLY_OPENSKY_ENABLED` für den Log-only-Pfad.
+  - **`main.rs` Modus-Schalter** — `build_replay_state()` / `build_live_state()`: in Live-Mode
+    werden `mpsc`-Kanal + `watch`-Kanal aufgespannt, `run_live_tracker` gestartet,
+    `spawn_opensky_poller_live()` verdrahtet (plots → mpsc → Tracker), `spawn_cat062_live()`
+    gestartet (watch → CAT062). CAT065-Heartbeat läuft in beiden Modi.
+  Alle Qualitäts-Gates grün (26 `firefly-server`-Tests, gesamtes Workspace, Clippy, fmt). S4 · Opus 4.8.
+  **Nächster Schritt: AP9.4c-4** (Readiness-Probe im Live-Modus + Live-Metriken — S3 · Sonnet 4.6).
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.4c-2 (LiveTracker-Task + Plot-Aufzeichnung) abgeschlossen.**
+  Neues Modul `firefly-server/src/live.rs` (ADR 0020): der Live-Modus-Laufzeitkern.
+  - **`PlotRecorder`** — dünner, gepufferter Adapter über `firefly-recorder`; schreibt jeden Plot
+    als `.ffplots`-Record (wall-clock ns + JSON), zählt Records, flusht pro Batch. Generisch über
+    `Box<dyn Write + Send>` (test- und dateifähig).
+  - **`build_live_tracker(&OpenSkyConfig)`** — baut den Live-`Tracker`; Tracking-Frame im
+    Mittelpunkt der OpenSky-Bounding-Box, ADS-B-Sensor registriert (Geodetic-Pfad ignoriert das
+    Fehlermodell), Scan-Periode = Poll-Intervall.
+  - **`LiveTracker`** (synchroner Kern) — `ingest(plots, recv_ns)` zeichnet **zuerst** auf, dann
+    `process_plots` (datenzeit-getrieben); `snapshot()` projiziert auf die jüngste Datenzeit
+    (`snapshot_at`) + drainte Ended-Tracks (TSE). Schreibfehler deaktivieren nur den Recorder, nicht
+    das Tracking (Verfügbarkeit vor Aufzeichnung).
+  - **`run_live_tracker(...)`** (async Task) — `tokio::select!` über `mpsc`-Plot-Eingang +
+    `interval`-Ausgabetakt; veröffentlicht Snapshots via `tokio::sync::watch`; sauberer Stop bei
+    Kanal-Schluss (flush).
+  - **Bit-genauer Replay-Fix:** `serde_json`-`float_roundtrip`-Feature workspace-weit aktiviert —
+    der Parser gewinnt f64 sonst nur näherungsweise zurück (1-ULP-Drift), was den `.ffplots`-
+    Determinismus verletzt hätte. (Ein Test deckte das auf.)
+  - `firefly-recorder` als Abhängigkeit von `firefly-server` (+ Workspace-Dep) eingetragen;
+    `tokio`-`test-util` für `start_paused`-Tests.
+  5 neue Tests (`live::*`: leerer Snapshot, ein/zwei Tracks, Recorder-Round-Trip, async Task mit
+  pausierter Zeit). FR-OPS-007 im Register; FR-OPS-006 um `float_roundtrip` ergänzt. Alle Gates grün
+  (`cargo test --workspace`, `clippy --workspace --all-targets`, `fmt`). S4 · Opus 4.8.
+  **Nächster Schritt: AP9.4c-3** (WS-Pump + CAT062-Feed lesen Live-Snapshot; Modus-Schalter
+  `FIREFLY_MODE` in `main.rs` — S4 · Opus 4.8).
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.4c-1 (`FrameSource`-Abstraktion) abgeschlossen.**
+  `firefly-server` ist jetzt modusfähig: neues `FrameSource`-Enum (`Replay { frames, speed }`
+  | `Live`) in `app.rs`; `AppState` hält statt `frames`+`speed` ein einziges `source: FrameSource`-Feld.
+  Replay-Pfad ist unverändert (gleiche `pump_replay`-Logik, keine semantischen Änderungen).
+  `Live`-Variante ist vorerst Platzhalter (logt `warn!`, schließt Connection) — wird in AP9.4c-2/3
+  verdrahtet. `lib.rs` re-exportiert `FrameSource`. Integration-Tests (`tests/websocket.rs`)
+  und Unit-Tests (`app.rs`) auf neue Struct-Syntax umgestellt. Alle Gates grün. S3 · Sonnet 4.6.
+- **Vorherige Aktualisierung:** 2026-06-18 — **ADR 0020 akzeptiert + AP9.4c-0 (`.ffplots`-Eingangs-Aufzeichnung) abgeschlossen.**
+  ADR 0020 („Live-Tracker-Modus und Plot-Aufzeichnung") legt fest: zwei sich
+  ausschließende Betriebsmodi (deterministischer **Replay** vs. echtzeit **Live**,
+  `FIREFLY_MODE`), und — auf Wunsch des Projektverantwortlichen — eine **Eingangs-
+  Aufzeichnungsebene**: alle eingehenden Plots (ADS-B, künftig PSR/SSR, FLARM)
+  werden vor dem Tracker mitgeschrieben, sodass jeder Produktions-Lauf
+  reproduzierbar ist (nicht-deterministisch im Timing ≠ nicht-reproduzierbar).
+  **AP9.4c-0** baut das `.ffplots`-Format in `firefly-recorder`: teilt das
+  Record-Framing von `.ffrec` (`[u64 ts_ns][u16 len][payload]`), Magic
+  `FFPLOTS\x00`, Payload = `serde_json(Plot)`. `firefly-core::Plot` (+ `DetectionKind`/
+  `Measurement`/`ModeAC`) leiten jetzt `Serialize`/`Deserialize` ab (additiv).
+  Neue API: `write_plot_file_header`/`read_plot_file_header`,
+  `write_plot_record`/`read_plot_record`; robuster Reader (`ReadError::PlotDeserialize`
+  statt Panic). Quellenagnostisch über den `Plot`-Typ. 6 neue Tests
+  (Round-Trip ADS-B + Radar gemischt, Magic-Abgrenzung zu `.ffrec`, EOF,
+  malformed JSON). FR-OPS-006 im Register. Alle Gates grün. S2 · Opus 4.8.
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.9 (Wayfinder ES-Age-Decoder + ADS-B-Badge) abgeschlossen.**
+  Wayfinder-Seite von AP9 ist fertig: `UpdateAge.ESAge *float64` (nil = Radar-only), Fall 14 als
+  bit-walking Loop (tolerant gegenüber zukünftigen I062/290-Subfeldern), `TrackMessage.AdsbAgeS`,
+  `isAdsbFresh`-Helper + `◆`-Badge im Track-Label (≤ 30 s). Byte-exakte Tests gegen Fireflys
+  Referenz-Dump. **Wayfinder#21 (`from-firefly`) geschlossen.** `todo-for-wayfinder.md` aktualisiert.
+  Gates grün (`go test ./...`, `go vet ./...`, `gofmt`, `node --check app.js`).
+  Commit `05d22b8`, Branch `claude/beautiful-dijkstra-e7ityj`.
+  **AP9.1–AP9.7 (Firefly) + AP9.9 (Wayfinder) sind beidseitig abgeschlossen.**
+  Ausstehend: AP9.4c (Live-Tracker-Architektur, S4 — erfordert separate Abstimmung + ADR).
+  Nächster Schritt: nächstes Roadmap-Paket nach Abstimmung.
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.7 (byte-genauer ES-Age-Referenz-Dump) abgeschlossen.**
+  Zwei neue Tests in `firefly-asterix::cat062` (49 statt 47): `single_track_with_adsb_hit_matches_reference_dump`
+  ist der byte-genaue Referenz-Vektor für einen Track **mit** ADS-B-Treffer (`adsb_age_s = Some(3.0)`) —
+  die Grundwahrheit, gegen die Wayfinders Decoder (AP9.9) prüfen muss. Belegt empirisch die additive,
+  nicht-brechende Eigenschaft von ICD 2.4.0: **FSPEC unverändert** (`0x9F,0x0F,0x01,0x04`), nur I062/290
+  wächst von `[0x40,0x08]` auf `[0x48,0x08,0x0C]` (+1 Byte), LEN 40→41. `decode_recovers_adsb_age_when_present`
+  prüft den vollen Record-Round-Trip (ES-Age zurückgewonnen; Radar-only-Track decodiert `None`). FR-TRK-032
+  + FR-IO-003 ergänzt. Alle Gates grün. S3 · Opus 4.8.
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.4b (OpenSky-Poller in `firefly-server` verdrahtet) abgeschlossen.**
+  `spawn_opensky_poller()` in `main.rs` liest `OpenSkyConfig::from_env()` — per Default deaktiviert,
+  kein Netzverkehr ohne `FIREFLY_OPENSKY_ENABLED=true`. Wenn aktiv: Tokio-Task startet
+  `OpenSkyPoller::new(config).run(|plots| tracing::info!(...))` — Batches werden geloggt.
+  `firefly-opensky` als Abhängigkeit in `firefly-server/Cargo.toml` und als `workspace.dependency`
+  in Root `Cargo.toml` eingetragen. Nächster Schritt (AP9.4c): Live-Tracker-Architektur, damit
+  ADS-B-Plots tatsächlich in den Tracker fließen statt nur geloggt zu werden. Alle Gates grün.
+  S2 · Sonnet 4.6.
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.4 (`firefly-opensky` Crate) abgeschlossen.**
+  Neuer Crate `crates/firefly-opensky` (Ports & Adapters, ADR 0001): HTTP-Poller für die OpenSky
+  Network REST API, JSON-Deserialisierung der Zustandsvektoren, NaCp→σ-Mapping gemäß ADR 0019 und
+  `Plot::adsb`-Ausgabe.
+  - **`OpenSkyConfig`** (`src/config.rs`): 12-Factor-Konfiguration via
+    `from_lookup(get: impl Fn(&str) → Option<String>)` — `FIREFLY_OPENSKY_ENABLED/LAT_*/LON_*/
+    POLL_INTERVAL_SECS/USERNAME/PASSWORD/SENSOR_ID`; 4 Tests. FR-NET-004.
+  - **`parse_state` / `sigma_from_source`** (`src/api.rs`): Parst einen OpenSky-Zustandsvektor
+    (heterogenes JSON-Array) — ICAO24 aus Hex, Lon/Lat/Geo-Alt-Fallback-Kette, `on_ground`-Filter,
+    Callsign-Trim, Squawk-Octal; NaCp-Tabelle: ADS-B(0)→75 m, ASTERIX(1)/MLAT(2)→200 m, Default→300 m;
+    6 Tests.
+  - **`OpenSkyPoller`** (`src/poller.rs`): `reqwest::Client` (rustls-tls, 30 s Timeout, kein OpenSSL),
+    `poll() → Result<Vec<Plot>, PollError>`, `run(on_plots)` — Endlosschleife mit konfigurierbarem
+    Intervall; Transiente HTTP-Fehler werden gewarnt und übersprungen.
+  - **Workspace `Cargo.toml`**: `crates/firefly-opensky` als Member eingetragen.
+  Alle Gates grün: `cargo test --workspace`, `cargo clippy --workspace --all-targets` (0 Warnungen),
+  `cargo fmt`. S3 · Opus 4.8. **Nächster Schritt: Server-Integration (AP9.4b) —
+  `OpenSkyPoller` in `firefly-server/src/main.rs` als Background-Task verdrahten — erst ankündigen,
+  dann bauen.**
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.5 + AP9.6 (ADS-B-Datenfluss & ES-Age-Subfeld) abgeschlossen.**
+  - **AP9.6:** `Track.adsb_last_hit_time: Option<f64>` (gesetzt im ICAO-Pre-Sort-Trefferpfad in
+    `fuse_simultaneous_plots`); `SystemTrack.adsb_age_s: Option<f64>` berechnet in `system_track_from`
+    als `(time - hit).max(0.0)`. Alle 6 `SystemTrack`-Struct-Literal-Stellen in 5 Dateien aktualisiert.
+    S2 · Opus 4.8.
+  - **AP9.5:** I062/290 ES-Age-Subfeld kodiert (`AGE_ES_PRESENT = 0x08`). `encode_update_ages` hängt bei
+    vorhandenem `adsb_age_s` das Bit `0x08` in das primäre Subfeld-Oktett und fügt das ES-Age-Byte an.
+    `take_update_ages` im Cursor liest variable Länge (`count_ones`). `decode_update_ages` gibt
+    `(psr_age, Option<es_age>)` zurück. `DecodedRecord.adsb_age_s: Option<f64>` ergänzt. 3 neue Tests
+    (47 statt 44 in firefly-asterix). Referenz-Dump-Test unverändert grün (kein Wire-Break für Tracks ohne
+    ADS-B). ICD → **2.4.0**. Alle Gates grün (`cargo test --workspace`, `clippy`, `fmt`). S3 · Opus 4.8.
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.3 (ICAO-Vorsortierung) abgeschlossen.**
+  `fuse_simultaneous_plots` (der gemeinsame Kern beider Pfade: Batch + Async) erhält eine ICAO-Vorsortierstufe
+  vor dem JPDA-Schritt. Plots mit bekannter ICAO-Adresse, die zu einem lebenden Track passen, werden direkt
+  zugeordnet (β=1, kein Mahalanobis-Gate). Plots ohne Match gehen unverändert in den JPDA-Pool. Die
+  gefrorene Referenz (ADR 0011) wird vor der Vorsortierung gebaut → Ghost-Suppression unberührt. Zwei neue
+  Tests: `icao_match_bypasses_kinematic_gate` (Plot 111 km außerhalb des Gates → wird trotzdem assoziiert)
+  und `icao_no_match_falls_through_to_jpda` (unbekannte ICAO → normaler JPDA-Initiierungspfad). FR-TRK-031.
+  Alle Gates grün (`cargo test --workspace`, `clippy`, `fmt`). S4 · Opus 4.8.
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.1 + AP9.2 (ADS-B-Eingang, Stufe 1) abgeschlossen.**
+  `firefly-core::Measurement`-Enum eingeführt (`Polar(Polar)` + `Geodetic { position: Wgs84, sigma_pos_m: f64 }`);
+  `Plot::adsb`-Konstruktor; alle sieben Aufrufstellen aktualisiert (Simulator, Player, Tracker-Batch- +
+  Async-Pfad, Demo, Tracking-Test). `tracking_measurement` in `firefly-track::measurement` dispatcht
+  auf die Enum-Variante: Polar-Pfad unverändert über `convert_plot` + `horizontal_from`; Geodetic-Pfad
+  WGS84 → ENU direkt, isotrope Kovarianz `R = σ² · I₂`. 3 neue Unit-Tests (Ursprung/Isotopie,
+  Nordrichtung, Sensor-Frame-Invarianz). FR-TRK-030 im Anforderungs-Register. Alle Gates grün
+  (`cargo test --workspace`, `clippy`, `fmt`). S3 · Opus 4.8. **Nächster Schritt: AP9.3
+  (ICAO-Vorsortierung im Tracker) — erst ankündigen, dann bauen.**
+- **Vorherige Aktualisierung:** 2026-06-16 — **Paket #10 / SDPS-005 „Legal
   Recording & Replay" abgeschlossen.** Neues Crate `firefly-recorder` mit zwei
   Binaries: `firefly-record` (Sidecar, tritt Multicast-Gruppe bei, schreibt
   Datagramme mit Unix-ns-Zeitstempel in `.ffrec`-Datei) und `firefly-replay`

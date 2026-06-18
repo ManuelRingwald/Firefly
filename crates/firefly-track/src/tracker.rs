@@ -29,7 +29,7 @@ use crate::gating::Gate;
 use crate::imm::ImmConfig;
 use crate::jpda::joint_association_probabilities;
 use crate::kalman::{LinearKalman, ProcessNoise};
-use crate::measurement::{convert_plot, CartesianMeasurement, SensorErrorModel};
+use crate::measurement::{tracking_measurement, CartesianMeasurement, SensorErrorModel};
 use crate::pda::ClutterModel;
 use crate::track::{Track, TrackStatus};
 
@@ -418,19 +418,11 @@ impl Tracker {
         let mut by_sensor: BTreeMap<SensorId, Vec<(&Plot, CartesianMeasurement)>> = BTreeMap::new();
         for p in plots {
             if let Some(model) = self.config.sensors.get(&p.sensor) {
-                let local = convert_plot(&p.measurement, &model.error);
-                // `convert_plot` keeps only the ground-projected east/north; the
-                // target's height above the sensor's tangent plane is
-                // range·sin(elevation) — exactly the `up` it dropped. Passing it
-                // lets `horizontal_from` lift the *full 3-D* point into the
-                // tracking frame, so a second radar maps the same airborne target
-                // to the same horizontal point instead of a height-offset ghost.
-                let height = p.measurement.range * p.measurement.elevation.sin();
-                let (z, r) = tracking_frame.horizontal_from(&model.frame, local.z, height, local.r);
-                by_sensor
-                    .entry(p.sensor)
-                    .or_default()
-                    .push((p, CartesianMeasurement { z, r }));
+                // Dispatch on the plot's measurement source (radar polar vs.
+                // ADS-B geodetic) to produce a Cartesian measurement already in
+                // the common tracking frame (Häppchen AP9.2).
+                let cm = tracking_measurement(p, &model.frame, &model.error, &tracking_frame);
+                by_sensor.entry(p.sensor).or_default().push((p, cm));
             }
         }
 
@@ -625,14 +617,8 @@ impl Tracker {
             for &idx in &order[gi..gj] {
                 let p = &plots[idx];
                 if let Some(model) = self.config.sensors.get(&p.sensor) {
-                    let local = convert_plot(&p.measurement, &model.error);
-                    let height = p.measurement.range * p.measurement.elevation.sin();
-                    let (z, r) =
-                        tracking_frame.horizontal_from(&model.frame, local.z, height, local.r);
-                    by_sensor
-                        .entry(p.sensor)
-                        .or_default()
-                        .push((p, CartesianMeasurement { z, r }));
+                    let cm = tracking_measurement(p, &model.frame, &model.error, &tracking_frame);
+                    by_sensor.entry(p.sensor).or_default().push((p, cm));
                 }
             }
 
@@ -681,6 +667,20 @@ impl Tracker {
     /// Pre-conditions the caller must establish: every track is already
     /// predicted to `time` and has had its contributing-sensor set reset.
     ///
+    /// **ICAO pre-sort (FR-TRK-031):** before the kinematic JPDA step, any plot
+    /// whose `mode_ac.icao_address` matches a live track's known address is
+    /// directly associated with that track — no gate check. The Mode S ICAO-24
+    /// address is a globally unique aircraft identifier, so an address match is
+    /// authoritative; ADS-B position self-reports are typically far more precise
+    /// than a kinematic gate would demand. Matched plots are excluded from the
+    /// JPDA pool. Tracks updated by ICAO pre-sort still appear in the frozen
+    /// `reference` with their **pre-update** estimates, so ghost-suppression for
+    /// the remaining JPDA plots is unaffected (ADR 0011).
+    ///
+    /// **Security note (ADR 0019):** ICAO addresses are not cryptographically
+    /// authenticated here. Network-level isolation (ADR 0017) is the primary
+    /// defence; spoofing-resistant cross-checks are a planned future refinement.
+    ///
     /// Sensors are fused in deterministic id order against one reference
     /// **frozen here**: folding a plot tightens a track's covariance, so gating
     /// the next sensor against the tightened estimate would push a second
@@ -712,8 +712,71 @@ impl Tracker {
         // own. It stays index-aligned with `self.tracks`, both growing together.
         let mut reference: Vec<LinearKalman> = self.tracks.iter().map(|tr| tr.estimate()).collect();
 
+        // ICAO pre-sort (FR-TRK-031): build a per-sensor, per-plot boolean mask
+        // that marks plots already directly associated via ICAO address. These
+        // are excluded from the JPDA pool below. We do this AFTER building
+        // `reference` so that the frozen reference (used for ghost suppression)
+        // reflects the pre-update state of all tracks — including those about to
+        // receive an ICAO-matched update.
+        //
+        // A plot is matched if *both* conditions hold:
+        //   (a) its mode_ac.icao_address is Some(icao), and
+        //   (b) exactly one live track carries that icao address.
+        // If two tracks somehow share the same ICAO (should not happen for valid
+        // data, but is defensive), the plot falls through to JPDA rather than
+        // being silently mis-associated.
+        let mut icao_handled: BTreeMap<SensorId, Vec<bool>> = by_sensor
+            .keys()
+            .map(|&s| (s, vec![false; by_sensor[&s].len()]))
+            .collect();
+
         for (&sensor, items) in by_sensor {
-            let measurements: Vec<CartesianMeasurement> = items.iter().map(|(_, m)| *m).collect();
+            let handled = icao_handled.get_mut(&sensor).unwrap();
+            for (mi, (plot, cm)) in items.iter().enumerate() {
+                let Some(icao) = plot.mode_ac.icao_address else {
+                    continue;
+                };
+                // Find the (unique) track with this ICAO address.
+                let matching: Vec<usize> = self
+                    .tracks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, tr)| tr.icao_address() == Some(icao))
+                    .map(|(ti, _)| ti)
+                    .collect();
+                let [ti] = matching[..] else {
+                    // Zero matches (unknown aircraft) or >1 (ambiguous) — skip
+                    // and let JPDA sort it out kinematically.
+                    continue;
+                };
+                // Certain association: β_0 = 0 (no-detection), β_1 = 1.0.
+                self.tracks[ti].imm.update_pda(&[*cm], &[0.0, 1.0]);
+                self.tracks[ti].mark_hit(t);
+                self.tracks[ti].record_hit_from(sensor);
+                self.tracks[ti].update_identity(&plot.mode_ac);
+                self.tracks[ti].adsb_last_hit_time = Some(t);
+                handled[mi] = true;
+            }
+        }
+
+        for (&sensor, items) in by_sensor {
+            let handled = &icao_handled[&sensor];
+
+            // Build the JPDA measurement list from the non-ICAO-handled plots,
+            // keeping their original index in `items` for identity look-up.
+            let non_icao: Vec<(usize, CartesianMeasurement)> = items
+                .iter()
+                .enumerate()
+                .filter(|(mi, _)| !handled[*mi])
+                .map(|(mi, (_, cm))| (mi, *cm))
+                .collect();
+            let measurements: Vec<CartesianMeasurement> =
+                non_icao.iter().map(|(_, m)| *m).collect();
+
+            if measurements.is_empty() {
+                continue;
+            }
+
             let betas = joint_association_probabilities(&reference, &measurements, &gate, &clutter);
 
             for (ti, track_betas) in betas.iter().enumerate() {
@@ -743,7 +806,9 @@ impl Tracker {
                 self.tracks[ti].mark_hit(t);
                 self.tracks[ti].record_hit_from(sensor);
                 if let Some((mi, _)) = best {
-                    self.tracks[ti].update_identity(&items[mi].0.mode_ac);
+                    // Translate JPDA measurement index → original items index.
+                    let orig_mi = non_icao[mi].0;
+                    self.tracks[ti].update_identity(&items[orig_mi].0.mode_ac);
                 }
             }
 
@@ -755,7 +820,7 @@ impl Tracker {
             // appended only *after* the loop, so they veto the *next* sensor's
             // plots, not their own siblings.
             let mut newborn = Vec::new();
-            for (mi, m) in measurements.iter().enumerate() {
+            for &(orig_mi, ref m) in &non_icao {
                 // Suppress initiation with the wider `init_gate`: a plot near an
                 // existing track is its own (outlier) detection, not a new
                 // aircraft — this is what stops a 3σ-tail plot of a tracked
@@ -771,7 +836,7 @@ impl Tracker {
                 let id = TrackId(self.next_id);
                 self.next_id += 1;
                 let mut track = Track::new(id, imm, t);
-                track.update_identity(&items[mi].0.mode_ac);
+                track.update_identity(&items[orig_mi].0.mode_ac);
                 track.record_hit_from(sensor);
                 newborn.push(track.estimate());
                 self.tracks.push(track);
@@ -815,6 +880,7 @@ fn system_track_from(
         flight_level_ft: track.flight_level_ft(),
         callsign: track.callsign(),
         contributing_sensors: track.contributing_sensors().iter().copied().collect(),
+        adsb_age_s: track.adsb_last_hit_time().map(|hit| (time - hit).max(0.0)),
     }
 }
 
@@ -872,7 +938,7 @@ fn should_delete_continuous(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use firefly_core::{DetectionKind, ModeAC, Plot, SensorId};
+    use firefly_core::{DetectionKind, Measurement, ModeAC, Plot, SensorId};
     use firefly_geo::{Polar, Wgs84};
 
     /// The common test frame; the single test sensor sits here too.
@@ -899,7 +965,7 @@ mod tests {
         Plot {
             sensor: SensorId(1),
             time: Timestamp(time),
-            measurement: Polar::new(range, az, 0.0),
+            measurement: firefly_core::Measurement::Polar(Polar::new(range, az, 0.0)),
             kind: DetectionKind::Combined,
             mode_ac: ModeAC {
                 mode_3a: Some(mode_3a),
@@ -1729,7 +1795,9 @@ mod tests {
         let crossing_plot = |t: f64, east: f64, north: f64, squawk: u16| Plot {
             sensor: SensorId(1),
             time: Timestamp(t),
-            measurement: firefly_geo::Enu::new(east, north, 0.0).to_polar(),
+            measurement: firefly_core::Measurement::Polar(
+                firefly_geo::Enu::new(east, north, 0.0).to_polar(),
+            ),
             kind: DetectionKind::Combined,
             mode_ac: ModeAC {
                 mode_3a: Some(squawk),
@@ -1966,5 +2034,85 @@ mod tests {
     fn snapshot_at_on_empty_tracker_is_empty() {
         let tracker = Tracker::new(config());
         assert!(tracker.snapshot_at(Timestamp(5.0)).is_empty());
+    }
+
+    /// A plot whose ICAO address matches a live track is directly associated
+    /// even when it lies well outside the kinematic gate — the identity match
+    /// is authoritative, bypassing the Mahalanobis distance check.
+    /// REQ: FR-TRK-031
+    #[test]
+    fn icao_match_bypasses_kinematic_gate() {
+        let mut tracker = Tracker::new(config());
+        let icao: u32 = 0x3C_65_AC;
+
+        // Build a confirmed northbound track with a known ICAO address.
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[plot_with_identity(t, 50_000.0, 0.0, 0o1234, icao)],
+            );
+        }
+        assert_eq!(tracker.confirmed_count(), 1);
+        let track_id = tracker.tracks()[0].id();
+
+        // Send a plot ~111 km away (far outside the kinematic gate) but carrying
+        // the matching ICAO address. Using range=100 km due east (az = π/2).
+        let far_plot =
+            plot_with_identity(12.0, 100_000.0, std::f64::consts::PI / 2.0, 0o1234, icao);
+        tracker.process_scan(Timestamp(12.0), &[far_plot]);
+
+        // The ICAO pre-sort must have associated the far plot directly:
+        // track still alive, same id, not coasting.
+        assert_eq!(
+            tracker.tracks().len(),
+            1,
+            "no ghost should appear from the ICAO-handled plot"
+        );
+        assert_eq!(
+            tracker.tracks()[0].id(),
+            track_id,
+            "original track survives"
+        );
+        assert!(
+            !tracker.tracks()[0].is_coasting(),
+            "ICAO-matched plot counts as a hit"
+        );
+    }
+
+    /// A plot whose ICAO address does not match any live track falls through
+    /// to the normal JPDA pool and can initiate a new tentative track.
+    /// REQ: FR-TRK-031
+    #[test]
+    fn icao_no_match_falls_through_to_jpda() {
+        let mut tracker = Tracker::new(config());
+
+        // ADS-B geodetic plot with an ICAO address that no track knows yet.
+        let adsb_plot = Plot {
+            sensor: SensorId(1),
+            time: Timestamp(0.0),
+            measurement: Measurement::Geodetic {
+                position: Wgs84::from_degrees(47.09, 8.0, 500.0), // ~10 km north
+                sigma_pos_m: 30.0,
+            },
+            kind: DetectionKind::Secondary,
+            mode_ac: ModeAC {
+                icao_address: Some(0xAB_CD_EF),
+                ..ModeAC::default()
+            },
+        };
+        tracker.process_scan(Timestamp(0.0), &[adsb_plot]);
+
+        // No matching track → JPDA initiates a tentative track as normal.
+        assert_eq!(
+            tracker.tracks().len(),
+            1,
+            "ADS-B with unknown ICAO should still initiate a track"
+        );
+        assert_eq!(
+            tracker.tracks()[0].icao_address(),
+            Some(0xAB_CD_EF),
+            "ICAO address propagated to the new track"
+        );
     }
 }

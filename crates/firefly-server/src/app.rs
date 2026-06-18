@@ -6,26 +6,54 @@ use std::time::{Duration, Instant};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::State,
+    http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
     Router,
 };
+use firefly_core::SensorId;
 use firefly_io::Frame;
 
+use crate::live::SnapshotRx;
 use crate::metrics::{ConnectedClientGuard, Metrics};
 use crate::pacing::due_at;
 
+/// How the server obtains the frame stream served to WebSocket clients (ADR 0020).
+///
+/// In `Replay` mode the stream is pre-computed once at startup (deterministic,
+/// data-time–driven, bit-exact reproducibility via the `.ffrec` recorder).  In
+/// `Live` mode each newly published [`LiveSnapshot`](crate::live::LiveSnapshot)
+/// from the live tracker is forwarded to every connected client as a [`Frame`].
+#[derive(Clone)]
+pub enum FrameSource {
+    /// Pre-computed scene replayed to every client at `speed` data-s / wall-s.
+    Replay { frames: Arc<Vec<Frame>>, speed: f64 },
+    /// Live tracker: each new snapshot from the watch channel becomes a Frame.
+    /// `sensor` is stamped into the Frame as the reporting sensor id.
+    Live {
+        snapshots: SnapshotRx,
+        sensor: SensorId,
+    },
+}
+
+impl FrameSource {
+    /// Number of pre-computed frames, for the Prometheus gauge. Zero in Live mode.
+    pub fn frame_count(&self) -> usize {
+        match self {
+            FrameSource::Replay { frames, .. } => frames.len(),
+            FrameSource::Live { .. } => 0,
+        }
+    }
+}
+
 /// Shared, read-only application state handed to every request.
 ///
-/// The frame stream is built **once** at startup (deterministically, by the
-/// Player) and replayed to each client; nothing here is mutated per request, so
-/// the state is cheap to clone (an `Arc` bump) as axum requires.
+/// The state is cheap to clone (an `Arc` bump inside [`FrameSource`]) as axum
+/// requires.  Nothing here is mutated per request.
 #[derive(Clone)]
 pub struct AppState {
-    /// The precomputed frame stream to replay.
-    pub frames: Arc<Vec<Frame>>,
-    /// Playback speed: data-seconds per wall-second.
-    pub speed: f64,
+    /// Where frames come from: a pre-computed replay or a live tracker.
+    pub source: FrameSource,
     /// Operational counters exposed via `/metrics` (NFR-OBS-001).
     pub metrics: Arc<Metrics>,
 }
@@ -46,17 +74,36 @@ async fn health() -> impl IntoResponse {
     "ok"
 }
 
-/// Readiness probe: ready to accept load. The frame stream is built before the
-/// listener binds, so answering at all means we are ready. ADR 0003.
-async fn ready() -> impl IntoResponse {
-    "ready"
+/// Readiness probe: ready to accept load.
+///
+/// In Replay mode the frame stream is fully built at startup, so the server is
+/// always ready. In Live mode the server is only ready after the first
+/// successful OpenSky poll has delivered at least one airborne aircraft — until
+/// then `/ready` returns 503 so Kubernetes will not route traffic to a pod that
+/// has no air picture yet (ADR 0020, AP9.4c-4).
+async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    let is_ready = match &state.source {
+        FrameSource::Replay { .. } => true,
+        FrameSource::Live { .. } => state
+            .metrics
+            .live_ready
+            .load(std::sync::atomic::Ordering::Relaxed),
+    };
+    if is_ready {
+        (StatusCode::OK, "ready")
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "not ready: waiting for first ADS-B poll",
+        )
+    }
 }
 
 /// Prometheus text exposition of operational counters (NFR-OBS-001).
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     (
         [("Content-Type", "text/plain; version=0.0.4; charset=utf-8")],
-        crate::metrics::render(&state.metrics, state.frames.len()),
+        crate::metrics::render(&state.metrics, state.source.frame_count()),
     )
 }
 
@@ -87,26 +134,66 @@ pub const DELAY_TRIGGER_PAUSE: Duration = Duration::from_secs(5);
 /// notice is sent and the wait is extended by [`DELAY_TRIGGER_PAUSE`] — a
 /// deliberately paused *delivery* that demonstrates the tracks resume exactly
 /// where data-time says they should (NFR-CLOUD-004).
-async fn pump_frames(mut socket: WebSocket, state: AppState) {
+async fn pump_frames(socket: WebSocket, state: AppState) {
     let _client_guard = ConnectedClientGuard::new(&state.metrics);
-    tracing::info!(
-        frames = state.frames.len(),
-        "client connected; replaying scene"
-    );
+
+    match state.source {
+        FrameSource::Replay { frames, speed } => pump_replay(socket, frames, speed).await,
+        FrameSource::Live { snapshots, sensor } => pump_live(socket, snapshots, sensor).await,
+    }
+}
+
+/// Stream live-tracker snapshots to one WebSocket client (ADR 0020, AP9.4c-3).
+///
+/// On each new [`LiveSnapshot`](crate::live::LiveSnapshot) published by the
+/// tracker task, build a [`Frame`] (empty plot list — ADS-B plots are not
+/// available in the browser overlay in Live mode) and send it as JSON. The loop
+/// ends when the tracker shuts down (watch sender dropped) or the client
+/// disconnects.
+async fn pump_live(mut socket: WebSocket, mut rx: SnapshotRx, sensor: SensorId) {
+    tracing::info!("client connected; live tracker mode");
+    loop {
+        if rx.changed().await.is_err() {
+            tracing::info!("live tracker stopped; closing client");
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        }
+        let snapshot = rx.borrow_and_update().clone();
+        if snapshot.tracks.is_empty() {
+            continue; // no tracks yet; wait for the first ADS-B poll
+        }
+        let frame = Frame::new(snapshot.time, sensor, &[], &snapshot.tracks);
+        let json = match frame.to_json() {
+            Ok(j) => j,
+            Err(error) => {
+                tracing::error!(%error, "failed to serialise live frame; skipping");
+                continue;
+            }
+        };
+        if socket.send(Message::Text(json.into())).await.is_err() {
+            tracing::info!("live client disconnected");
+            return;
+        }
+    }
+}
+
+/// Pump a pre-computed Replay frame sequence to one WebSocket client.
+async fn pump_replay(mut socket: WebSocket, frames: Arc<Vec<Frame>>, speed: f64) {
+    tracing::info!(frames = frames.len(), "client connected; replaying scene");
     // Absolute pacing: every frame's due time is measured from this fixed
     // origin and the stream's first data-time, so a delivery hiccup is caught
     // up afterwards instead of shifting the whole schedule (see `crate::pacing`).
     let origin = Instant::now();
-    let first = state.frames.first().map(|f| f.time.as_secs());
+    let first = frames.first().map(|f| f.time.as_secs());
     let mut sent = 0usize;
 
-    for frame in state.frames.iter() {
+    for frame in frames.iter() {
         let delay = match first {
-            Some(first) => due_at(origin, first, frame.time.as_secs(), state.speed)
+            Some(first) => due_at(origin, first, frame.time.as_secs(), speed)
                 .saturating_duration_since(Instant::now()),
             None => Duration::ZERO,
         };
-        if !wait_or_handle_delay_trigger(&mut socket, delay, state.speed).await {
+        if !wait_or_handle_delay_trigger(&mut socket, delay, speed).await {
             tracing::info!(sent, "client disconnected mid-stream");
             return;
         }
@@ -177,8 +264,10 @@ mod tests {
 
     fn state() -> AppState {
         AppState {
-            frames: Arc::new(crate::scene::demo_frames()),
-            speed: 1.0,
+            source: FrameSource::Replay {
+                frames: Arc::new(crate::scene::demo_frames()),
+                speed: 1.0,
+            },
             metrics: Arc::new(crate::metrics::Metrics::default()),
         }
     }
@@ -197,10 +286,65 @@ mod tests {
         assert_eq!(get_status("/health").await, StatusCode::OK);
     }
 
-    /// The readiness probe answers 200. REQ: FR-NET-001
+    /// The readiness probe answers 200 in Replay mode. REQ: FR-NET-001
     #[tokio::test]
     async fn ready_probe_is_ok() {
         assert_eq!(get_status("/ready").await, StatusCode::OK);
+    }
+
+    /// In Live mode, `/ready` returns 503 until the first ADS-B poll succeeds
+    /// (ADR 0020, AP9.4c-4). The server should not report ready to Kubernetes
+    /// while it has no air picture yet.
+    #[tokio::test]
+    async fn ready_probe_returns_503_in_live_mode_before_first_poll() {
+        use tokio::sync::watch;
+        let (_tx, rx) = watch::channel(crate::live::LiveSnapshot::empty());
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        // live_ready is false by default
+        let live_state = AppState {
+            source: FrameSource::Live {
+                snapshots: rx,
+                sensor: firefly_core::SensorId(200),
+            },
+            metrics,
+        };
+        let response = router(live_state)
+            .oneshot(
+                Request::builder()
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Once `live_ready` is set the probe returns 200 (ADR 0020, AP9.4c-4).
+    #[tokio::test]
+    async fn ready_probe_returns_ok_in_live_mode_after_first_poll() {
+        use std::sync::atomic::Ordering;
+        use tokio::sync::watch;
+        let (_tx, rx) = watch::channel(crate::live::LiveSnapshot::empty());
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        metrics.live_ready.store(true, Ordering::Relaxed);
+        let live_state = AppState {
+            source: FrameSource::Live {
+                snapshots: rx,
+                sensor: firefly_core::SensorId(200),
+            },
+            metrics,
+        };
+        let response = router(live_state)
+            .oneshot(
+                Request::builder()
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     /// The metrics endpoint answers 200 with a Prometheus exposition of the
