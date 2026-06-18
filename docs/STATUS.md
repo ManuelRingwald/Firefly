@@ -7,7 +7,17 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.1 + AP9.2 (ADS-B-Eingang, Stufe 1) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.3 (ICAO-Vorsortierung) abgeschlossen.**
+  `fuse_simultaneous_plots` (der gemeinsame Kern beider Pfade: Batch + Async) erhält eine ICAO-Vorsortierstufe
+  vor dem JPDA-Schritt. Plots mit bekannter ICAO-Adresse, die zu einem lebenden Track passen, werden direkt
+  zugeordnet (β=1, kein Mahalanobis-Gate). Plots ohne Match gehen unverändert in den JPDA-Pool. Die
+  gefrorene Referenz (ADR 0011) wird vor der Vorsortierung gebaut → Ghost-Suppression unberührt. Zwei neue
+  Tests: `icao_match_bypasses_kinematic_gate` (Plot 111 km außerhalb des Gates → wird trotzdem assoziiert)
+  und `icao_no_match_falls_through_to_jpda` (unbekannte ICAO → normaler JPDA-Initiierungspfad). FR-TRK-031.
+  Alle Gates grün (`cargo test --workspace`, `clippy`, `fmt`). S4 · Opus 4.8. **Nächster Schritt:
+  AP9.6 (`adsb_last_hit_time` auf Track + SystemTrack) oder AP9.5 (I062/290 ES-Age-Subfeld) —
+  erst ankündigen, dann bauen.**
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.1 + AP9.2 (ADS-B-Eingang, Stufe 1) abgeschlossen.**
   `firefly-core::Measurement`-Enum eingeführt (`Polar(Polar)` + `Geodetic { position: Wgs84, sigma_pos_m: f64 }`);
   `Plot::adsb`-Konstruktor; alle sieben Aufrufstellen aktualisiert (Simulator, Player, Tracker-Batch- +
   Async-Pfad, Demo, Tracking-Test). `tracking_measurement` in `firefly-track::measurement` dispatcht
