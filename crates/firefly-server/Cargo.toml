@@ -16,6 +16,7 @@ firefly-io = { workspace = true }
 firefly-player = { workspace = true }
 firefly-asterix = { workspace = true }
 firefly-multicast = { workspace = true }
+firefly-opensky = { workspace = true }
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = [
     "rt-multi-thread",

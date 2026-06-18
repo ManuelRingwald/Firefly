@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use firefly_asterix::Cat062Encoder;
 use firefly_multicast::MulticastConfig;
+use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
 use firefly_server::{router, scene, AppState, Metrics, Scene, ServerConfig};
 use tokio::net::TcpListener;
 
@@ -30,6 +31,7 @@ async fn main() {
 
     spawn_cat062_multicast(config.speed, config.scene, Arc::clone(&metrics));
     spawn_cat065_heartbeat(Arc::clone(&metrics));
+    spawn_opensky_poller();
 
     let state = AppState {
         frames: Arc::new(frames),
@@ -159,6 +161,48 @@ fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) {
         if let Err(error) = result {
             tracing::error!(%error, "CAT065 heartbeat stopped");
         }
+    });
+}
+
+/// Spawn the OpenSky Network ADS-B poller as an optional background service
+/// (`FIREFLY_OPENSKY_ENABLED=true`). Disabled by default to prevent accidental
+/// outbound network traffic on a plain `cargo run` (ADR 0019, FR-NET-004).
+///
+/// When enabled, the poller polls `https://opensky-network.org/api/states/all`
+/// on the configured interval (default 10 s) and converts each batch of state
+/// vectors into [`Plot::adsb`](firefly_core::Plot) objects.  Received plots are
+/// logged here; feeding them into a live tracker is the next integration step
+/// (AP9.4c: live-tracker architecture).
+fn spawn_opensky_poller() {
+    let config = OpenSkyConfig::from_env();
+    if !config.enabled {
+        tracing::info!(
+            "OpenSky ADS-B poller disabled \
+             (set FIREFLY_OPENSKY_ENABLED=true to enable)"
+        );
+        return;
+    }
+
+    tracing::info!(
+        lat_min = config.lat_min,
+        lat_max = config.lat_max,
+        lon_min = config.lon_min,
+        lon_max = config.lon_max,
+        poll_interval_secs = config.poll_interval_secs,
+        sensor_id = config.sensor_id.0,
+        "OpenSky ADS-B poller enabled"
+    );
+
+    tokio::spawn(async move {
+        let poller = OpenSkyPoller::new(config);
+        poller
+            .run(|plots| {
+                tracing::info!(
+                    count = plots.len(),
+                    "OpenSky plots received (AP9.4c: live-tracker injection pending)"
+                );
+            })
+            .await;
     });
 }
 

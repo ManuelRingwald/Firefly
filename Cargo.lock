@@ -298,6 +298,7 @@ dependencies = [
  "firefly-geo",
  "firefly-io",
  "firefly-multicast",
+ "firefly-opensky",
  "firefly-player",
  "firefly-sim",
  "firefly-track",

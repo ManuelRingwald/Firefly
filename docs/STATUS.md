@@ -7,7 +7,15 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.4 (`firefly-opensky` Crate) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.4b (OpenSky-Poller in `firefly-server` verdrahtet) abgeschlossen.**
+  `spawn_opensky_poller()` in `main.rs` liest `OpenSkyConfig::from_env()` — per Default deaktiviert,
+  kein Netzverkehr ohne `FIREFLY_OPENSKY_ENABLED=true`. Wenn aktiv: Tokio-Task startet
+  `OpenSkyPoller::new(config).run(|plots| tracing::info!(...))` — Batches werden geloggt.
+  `firefly-opensky` als Abhängigkeit in `firefly-server/Cargo.toml` und als `workspace.dependency`
+  in Root `Cargo.toml` eingetragen. Nächster Schritt (AP9.4c): Live-Tracker-Architektur, damit
+  ADS-B-Plots tatsächlich in den Tracker fließen statt nur geloggt zu werden. Alle Gates grün.
+  S2 · Sonnet 4.6.
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.4 (`firefly-opensky` Crate) abgeschlossen.**
   Neuer Crate `crates/firefly-opensky` (Ports & Adapters, ADR 0001): HTTP-Poller für die OpenSky
   Network REST API, JSON-Deserialisierung der Zustandsvektoren, NaCp→σ-Mapping gemäß ADR 0019 und
   `Plot::adsb`-Ausgabe.
