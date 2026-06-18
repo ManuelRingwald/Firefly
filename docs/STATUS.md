@@ -7,7 +7,18 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-18 — **ADR 0020 akzeptiert + AP9.4c-0 (`.ffplots`-Eingangs-Aufzeichnung) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.4c-1 (`FrameSource`-Abstraktion) abgeschlossen.**
+  `firefly-server` ist jetzt modusfähig: neues `FrameSource`-Enum (`Replay { frames, speed }`
+  | `Live`) in `app.rs`; `AppState` hält statt `frames`+`speed` ein einziges `source: FrameSource`-Feld.
+  Replay-Pfad ist unverändert (gleiche `pump_replay`-Logik, keine semantischen Änderungen).
+  `Live`-Variante ist vorerst Platzhalter (logt `warn!`, schließt Connection) — wird in AP9.4c-2/3
+  verdrahtet. `lib.rs` re-exportiert `FrameSource`. Integration-Tests (`tests/websocket.rs`)
+  und Unit-Tests (`app.rs`) auf neue Struct-Syntax umgestellt. Alle Gates grün: `cargo test
+  --workspace` (38 Suites / alle ok), `clippy --workspace --all-targets` (0 Warnungen), `fmt`.
+  S3 · Sonnet 4.6.
+  **Nächster Schritt: AP9.4c-2** (LiveTracker-Task; Channel vom Poller; `process_plots`
+  datenzeit-getrieben; Snapshot-Publish via `watch`; `PlotRecorder` parallel — S4 · Opus 4.8).
+- **Vorherige Aktualisierung:** 2026-06-18 — **ADR 0020 akzeptiert + AP9.4c-0 (`.ffplots`-Eingangs-Aufzeichnung) abgeschlossen.**
   ADR 0020 („Live-Tracker-Modus und Plot-Aufzeichnung") legt fest: zwei sich
   ausschließende Betriebsmodi (deterministischer **Replay** vs. echtzeit **Live**,
   `FIREFLY_MODE`), und — auf Wunsch des Projektverantwortlichen — eine **Eingangs-
@@ -22,10 +33,7 @@
   `write_plot_record`/`read_plot_record`; robuster Reader (`ReadError::PlotDeserialize`
   statt Panic). Quellenagnostisch über den `Plot`-Typ. 6 neue Tests
   (Round-Trip ADS-B + Radar gemischt, Magic-Abgrenzung zu `.ffrec`, EOF,
-  malformed JSON). FR-OPS-006 im Register. Alle Gates grün (`cargo test
-  --workspace`, `clippy --workspace --all-targets`, `fmt`). S2 · Opus 4.8.
-  **Nächster Schritt: AP9.4c-1** (`FrameSource`-Abstraktion + `AppState`
-  modusfähig, Replay-Pfad unverändert grün — S3 · Sonnet 4.6).
+  malformed JSON). FR-OPS-006 im Register. Alle Gates grün. S2 · Opus 4.8.
 - **Vorherige Aktualisierung:** 2026-06-18 — **AP9.9 (Wayfinder ES-Age-Decoder + ADS-B-Badge) abgeschlossen.**
   Wayfinder-Seite von AP9 ist fertig: `UpdateAge.ESAge *float64` (nil = Radar-only), Fall 14 als
   bit-walking Loop (tolerant gegenüber zukünftigen I062/290-Subfeldern), `TrackMessage.AdsbAgeS`,

@@ -15,17 +15,39 @@ use firefly_io::Frame;
 use crate::metrics::{ConnectedClientGuard, Metrics};
 use crate::pacing::due_at;
 
+/// How the server obtains the frame stream served to WebSocket clients (ADR 0020).
+///
+/// In `Replay` mode the stream is pre-computed once at startup (deterministic,
+/// data-time–driven, bit-exact reproducibility via the `.ffrec` recorder).  The
+/// `Live` variant is the placeholder for the live-tracker snapshot path wired in
+/// AP9.4c-2/3 — at that point a `tokio::sync::watch` receiver carries the
+/// current [`Frame`] produced by the real-time tracker.
+#[derive(Clone)]
+pub enum FrameSource {
+    /// Pre-computed scene replayed to every client at `speed` data-s / wall-s.
+    Replay { frames: Arc<Vec<Frame>>, speed: f64 },
+    /// Live tracker snapshot (ADR 0020, AP9.4c-2/3 — not yet wired).
+    Live,
+}
+
+impl FrameSource {
+    /// Number of pre-computed frames, for the Prometheus gauge. Zero in Live mode.
+    pub fn frame_count(&self) -> usize {
+        match self {
+            FrameSource::Replay { frames, .. } => frames.len(),
+            FrameSource::Live => 0,
+        }
+    }
+}
+
 /// Shared, read-only application state handed to every request.
 ///
-/// The frame stream is built **once** at startup (deterministically, by the
-/// Player) and replayed to each client; nothing here is mutated per request, so
-/// the state is cheap to clone (an `Arc` bump) as axum requires.
+/// The state is cheap to clone (an `Arc` bump inside [`FrameSource`]) as axum
+/// requires.  Nothing here is mutated per request.
 #[derive(Clone)]
 pub struct AppState {
-    /// The precomputed frame stream to replay.
-    pub frames: Arc<Vec<Frame>>,
-    /// Playback speed: data-seconds per wall-second.
-    pub speed: f64,
+    /// Where frames come from: a pre-computed replay or a live tracker.
+    pub source: FrameSource,
     /// Operational counters exposed via `/metrics` (NFR-OBS-001).
     pub metrics: Arc<Metrics>,
 }
@@ -56,7 +78,7 @@ async fn ready() -> impl IntoResponse {
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     (
         [("Content-Type", "text/plain; version=0.0.4; charset=utf-8")],
-        crate::metrics::render(&state.metrics, state.frames.len()),
+        crate::metrics::render(&state.metrics, state.source.frame_count()),
     )
 }
 
@@ -87,26 +109,37 @@ pub const DELAY_TRIGGER_PAUSE: Duration = Duration::from_secs(5);
 /// notice is sent and the wait is extended by [`DELAY_TRIGGER_PAUSE`] — a
 /// deliberately paused *delivery* that demonstrates the tracks resume exactly
 /// where data-time says they should (NFR-CLOUD-004).
-async fn pump_frames(mut socket: WebSocket, state: AppState) {
+async fn pump_frames(socket: WebSocket, state: AppState) {
     let _client_guard = ConnectedClientGuard::new(&state.metrics);
-    tracing::info!(
-        frames = state.frames.len(),
-        "client connected; replaying scene"
-    );
+
+    match state.source {
+        FrameSource::Replay { frames, speed } => {
+            pump_replay(socket, frames, speed).await;
+        }
+        FrameSource::Live => {
+            // Live-tracker snapshot not yet wired (ADR 0020, AP9.4c-2/3).
+            tracing::warn!("Live mode not yet implemented; closing connection");
+        }
+    }
+}
+
+/// Pump a pre-computed Replay frame sequence to one WebSocket client.
+async fn pump_replay(mut socket: WebSocket, frames: Arc<Vec<Frame>>, speed: f64) {
+    tracing::info!(frames = frames.len(), "client connected; replaying scene");
     // Absolute pacing: every frame's due time is measured from this fixed
     // origin and the stream's first data-time, so a delivery hiccup is caught
     // up afterwards instead of shifting the whole schedule (see `crate::pacing`).
     let origin = Instant::now();
-    let first = state.frames.first().map(|f| f.time.as_secs());
+    let first = frames.first().map(|f| f.time.as_secs());
     let mut sent = 0usize;
 
-    for frame in state.frames.iter() {
+    for frame in frames.iter() {
         let delay = match first {
-            Some(first) => due_at(origin, first, frame.time.as_secs(), state.speed)
+            Some(first) => due_at(origin, first, frame.time.as_secs(), speed)
                 .saturating_duration_since(Instant::now()),
             None => Duration::ZERO,
         };
-        if !wait_or_handle_delay_trigger(&mut socket, delay, state.speed).await {
+        if !wait_or_handle_delay_trigger(&mut socket, delay, speed).await {
             tracing::info!(sent, "client disconnected mid-stream");
             return;
         }
@@ -177,8 +210,10 @@ mod tests {
 
     fn state() -> AppState {
         AppState {
-            frames: Arc::new(crate::scene::demo_frames()),
-            speed: 1.0,
+            source: FrameSource::Replay {
+                frames: Arc::new(crate::scene::demo_frames()),
+                speed: 1.0,
+            },
             metrics: Arc::new(crate::metrics::Metrics::default()),
         }
     }

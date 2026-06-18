@@ -23,7 +23,7 @@ pub mod metrics;
 pub mod pacing;
 pub mod scene;
 
-pub use app::{router, AppState};
+pub use app::{router, AppState, FrameSource};
 pub use config::{Scene, ServerConfig};
 pub use firefly_io::Frame;
 pub use metrics::Metrics;

@@ -7,7 +7,7 @@ use std::time::Duration;
 use firefly_asterix::Cat062Encoder;
 use firefly_multicast::MulticastConfig;
 use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
-use firefly_server::{router, scene, AppState, Metrics, Scene, ServerConfig};
+use firefly_server::{router, scene, AppState, FrameSource, Metrics, Scene, ServerConfig};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -34,8 +34,10 @@ async fn main() {
     spawn_opensky_poller();
 
     let state = AppState {
-        frames: Arc::new(frames),
-        speed: config.speed,
+        source: FrameSource::Replay {
+            frames: Arc::new(frames),
+            speed: config.speed,
+        },
         metrics,
     };
 
