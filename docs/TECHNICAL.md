@@ -292,17 +292,23 @@ Kubernetes-Empfehlung: `terminationGracePeriodSeconds: 30` im Pod-Spec.
 
 ---
 
-## 8. Betriebsmodus: Replay vs. Live (ab AP9.4c-3)
+## 8. Betriebsmodus: Replay vs. Live (AP9.4c-0…4, ✅ implementiert)
 
 | Modus | Beschreibung | Aktivierung |
 |-------|--------------|-------------|
-| **Replay** (Standard) | Vorberechnete Szene (`demo` oder `frankfurt`) in Wanduhrzeit abgespielt | kein `FIREFLY_OPENSKY_ENABLED` |
-| **Live** (geplant) | OpenSky ADS-B-Daten, Tracker läuft in Echtzeit | `FIREFLY_OPENSKY_ENABLED=true` + `FIREFLY_MODE=live` |
+| **Replay** (Standard) | Vorberechnete Szene (`demo` oder `frankfurt`) in Wanduhrzeit abgespielt | `FIREFLY_MODE=replay` (Default, auch wenn `FIREFLY_MODE` nicht gesetzt) |
+| **Live** ✅ | OpenSky ADS-B-Daten, Tracker läuft in Echtzeit; CAT062 + WebSocket-Feed live | `FIREFLY_MODE=live` (impliziert OpenSky als Plot-Quelle) |
 
-> **Stand AP9.4c-2:** Der Live-Tracker-Kern (`LiveTracker`, `run_live_tracker`,
-> `PlotRecorder`) ist implementiert. Die Integration in den Server-Hauptpfad
-> (AP9.4c-3) ist noch ausstehend. OpenSky-Plots werden bereits abgerufen und
-> geloggt.
+Im Live-Modus startet Firefly ohne vorberechnete Szene. OpenSky-Plots werden
+in den Tracker eingespeist, Snapshots über `watch`-Kanal an den WebSocket-
+und CAT062-Ausgang geliefert. Gleichzeitig werden alle Plots in eine
+`.ffplots`-Datei aufgezeichnet (ADR 0020) — für deterministisches Replay und
+Debugging.
+
+> **Hinweis:** `FIREFLY_OPENSKY_ENABLED=true` aktiviert den OpenSky-Poller
+> im Replay-Modus als **Log-only**-Pfad (Plots werden geloggt, aber nicht in
+> den Tracker eingespeist). Für echten Live-Betrieb ausschließlich
+> `FIREFLY_MODE=live` verwenden.
 
 ---
 
@@ -400,7 +406,6 @@ spec:
 
 | Einschränkung | ADR / Issue | Geplante Lösung |
 |---------------|-------------|-----------------|
-| Live-Tracker noch nicht an Server-Hauptpfad angeschlossen | ADR 0020, AP9.4c-3 | Nächster Implementierungsschritt |
 | CAT062-Referenzpunkt fest (Frankfurt-Demo-Ursprung) | ADR 0006 | Konfigurierbarer System-Referenzpunkt |
 | Multicast ohne Authentifizierung | ADR 0017 | Netz-Isolation + anwendungsseitige Absicherung |
 | OpenSky-Passwort nur via Env-Variable | ADR 0003 | Kubernetes Secret (bereits empfohlen) |
