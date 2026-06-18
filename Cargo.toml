@@ -30,7 +30,10 @@ firefly-track = { path = "crates/firefly-track" }
 firefly-player = { path = "crates/firefly-player" }
 firefly-asterix = { path = "crates/firefly-asterix" }
 firefly-multicast = { path = "crates/firefly-multicast" }
+firefly-recorder = { path = "crates/firefly-recorder" }
 firefly-opensky = { path = "crates/firefly-opensky" }
 nalgebra = "0.33"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip`: the parser recovers f64 bit-for-bit (the serializer already
+# uses ryu). Required for bit-exact `.ffplots`/`.ffrec` replay (ADR 0020).
+serde_json = { version = "1", features = ["float_roundtrip"] }

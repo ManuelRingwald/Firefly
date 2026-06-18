@@ -303,6 +303,7 @@ dependencies = [
  "firefly-multicast",
  "firefly-opensky",
  "firefly-player",
+ "firefly-recorder",
  "firefly-sim",
  "firefly-track",
  "futures-util",

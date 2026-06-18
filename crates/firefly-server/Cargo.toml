@@ -16,6 +16,7 @@ firefly-io = { workspace = true }
 firefly-player = { workspace = true }
 firefly-asterix = { workspace = true }
 firefly-multicast = { workspace = true }
+firefly-recorder = { workspace = true }
 firefly-opensky = { workspace = true }
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = [
@@ -30,7 +31,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "net",
+    "time",
+    "test-util",
+] }
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 tower = { version = "0.5", features = ["util"] }

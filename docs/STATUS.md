@@ -7,17 +7,38 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.4c-1 (`FrameSource`-Abstraktion) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.4c-2 (LiveTracker-Task + Plot-Aufzeichnung) abgeschlossen.**
+  Neues Modul `firefly-server/src/live.rs` (ADR 0020): der Live-Modus-Laufzeitkern.
+  - **`PlotRecorder`** — dünner, gepufferter Adapter über `firefly-recorder`; schreibt jeden Plot
+    als `.ffplots`-Record (wall-clock ns + JSON), zählt Records, flusht pro Batch. Generisch über
+    `Box<dyn Write + Send>` (test- und dateifähig).
+  - **`build_live_tracker(&OpenSkyConfig)`** — baut den Live-`Tracker`; Tracking-Frame im
+    Mittelpunkt der OpenSky-Bounding-Box, ADS-B-Sensor registriert (Geodetic-Pfad ignoriert das
+    Fehlermodell), Scan-Periode = Poll-Intervall.
+  - **`LiveTracker`** (synchroner Kern) — `ingest(plots, recv_ns)` zeichnet **zuerst** auf, dann
+    `process_plots` (datenzeit-getrieben); `snapshot()` projiziert auf die jüngste Datenzeit
+    (`snapshot_at`) + drainte Ended-Tracks (TSE). Schreibfehler deaktivieren nur den Recorder, nicht
+    das Tracking (Verfügbarkeit vor Aufzeichnung).
+  - **`run_live_tracker(...)`** (async Task) — `tokio::select!` über `mpsc`-Plot-Eingang +
+    `interval`-Ausgabetakt; veröffentlicht Snapshots via `tokio::sync::watch`; sauberer Stop bei
+    Kanal-Schluss (flush).
+  - **Bit-genauer Replay-Fix:** `serde_json`-`float_roundtrip`-Feature workspace-weit aktiviert —
+    der Parser gewinnt f64 sonst nur näherungsweise zurück (1-ULP-Drift), was den `.ffplots`-
+    Determinismus verletzt hätte. (Ein Test deckte das auf.)
+  - `firefly-recorder` als Abhängigkeit von `firefly-server` (+ Workspace-Dep) eingetragen;
+    `tokio`-`test-util` für `start_paused`-Tests.
+  5 neue Tests (`live::*`: leerer Snapshot, ein/zwei Tracks, Recorder-Round-Trip, async Task mit
+  pausierter Zeit). FR-OPS-007 im Register; FR-OPS-006 um `float_roundtrip` ergänzt. Alle Gates grün
+  (`cargo test --workspace`, `clippy --workspace --all-targets`, `fmt`). S4 · Opus 4.8.
+  **Nächster Schritt: AP9.4c-3** (WS-Pump + CAT062-Feed lesen Live-Snapshot; Modus-Schalter
+  `FIREFLY_MODE` in `main.rs` — S4 · Opus 4.8).
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.4c-1 (`FrameSource`-Abstraktion) abgeschlossen.**
   `firefly-server` ist jetzt modusfähig: neues `FrameSource`-Enum (`Replay { frames, speed }`
   | `Live`) in `app.rs`; `AppState` hält statt `frames`+`speed` ein einziges `source: FrameSource`-Feld.
   Replay-Pfad ist unverändert (gleiche `pump_replay`-Logik, keine semantischen Änderungen).
   `Live`-Variante ist vorerst Platzhalter (logt `warn!`, schließt Connection) — wird in AP9.4c-2/3
   verdrahtet. `lib.rs` re-exportiert `FrameSource`. Integration-Tests (`tests/websocket.rs`)
-  und Unit-Tests (`app.rs`) auf neue Struct-Syntax umgestellt. Alle Gates grün: `cargo test
-  --workspace` (38 Suites / alle ok), `clippy --workspace --all-targets` (0 Warnungen), `fmt`.
-  S3 · Sonnet 4.6.
-  **Nächster Schritt: AP9.4c-2** (LiveTracker-Task; Channel vom Poller; `process_plots`
-  datenzeit-getrieben; Snapshot-Publish via `watch`; `PlotRecorder` parallel — S4 · Opus 4.8).
+  und Unit-Tests (`app.rs`) auf neue Struct-Syntax umgestellt. Alle Gates grün. S3 · Sonnet 4.6.
 - **Vorherige Aktualisierung:** 2026-06-18 — **ADR 0020 akzeptiert + AP9.4c-0 (`.ffplots`-Eingangs-Aufzeichnung) abgeschlossen.**
   ADR 0020 („Live-Tracker-Modus und Plot-Aufzeichnung") legt fest: zwei sich
   ausschließende Betriebsmodi (deterministischer **Replay** vs. echtzeit **Live**,
