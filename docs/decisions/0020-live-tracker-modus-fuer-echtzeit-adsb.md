@@ -270,7 +270,7 @@ Neue Metriken: `firefly_live_plots_ingested_total`, `firefly_live_tracks_current
 | **AP9.4c-0** ✅ | `.ffplots`-Format in `firefly-recorder`: `write_plot_file_header`/`write_plot_record`/`read_plot_record`; `Plot` serde-fähig; 6 Round-Trip-Tests | S2 | Opus 4.8 |
 | **AP9.4c-1** ✅ | `FrameSource`-Abstraktion + `AppState` modusfähig; Replay-Pfad unverändert grün | S3 | Sonnet 4.6 |
 | **AP9.4c-2** ✅ | LiveTracker-Task: Channel vom Poller, `process_plots` nach Datenzeit, Snapshot-Publish (`watch`); `PlotRecorder` schreibt parallel | S4 | Opus 4.8 |
-| **AP9.4c-3** | WS-Pump + CAT062-Feed lesen Live-Snapshot; Mode-Switch in `main.rs` (`FIREFLY_MODE`) | S4 | Opus 4.8 |
+| **AP9.4c-3** ✅ | WS-Pump + CAT062-Feed lesen Live-Snapshot; Mode-Switch in `main.rs` (`FIREFLY_MODE`) | S4 | Opus 4.8 |
 | **AP9.4c-4** | Readiness/Metriken im Live-Modus; Robustheit bei OpenSky-Ausfall | S3 | Sonnet 4.6 |
 | **AP9.4c-5** | `firefly-replay-plots` Binary; Integration-Test: Replay aus `.ffplots` → gleicher CAT062-Strom wie Live-Lauf | S3 | Sonnet 4.6 |
 | **AP9.4c-6** | Tests (Fake-Producer, Replay-Regression), Milestone-Doku, ADR auf „akzeptiert" | S2 | Sonnet 4.6 |
