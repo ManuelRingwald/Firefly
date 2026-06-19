@@ -86,6 +86,20 @@ pub struct SensorModel {
     /// rotating radar's azimuth-spread plot times (Häppchen 13.6) made too
     /// short (it captured sub-revolution plot gaps, not the revolution itself).
     pub scan_period: f64,
+    /// Inner (minimum) detection range, metres.  Zero means no inner dead zone.
+    ///
+    /// Purely informational — the tracker does not use it for gating.  It is
+    /// carried here so that operators and display systems (e.g. Wayfinder's
+    /// coverage-ring overlay) have access to the full sensor geometry without
+    /// requiring a second configuration source.
+    #[serde(default)]
+    pub min_range_m: f64,
+    /// Outer (maximum) detection range, metres.  Zero means unspecified.
+    ///
+    /// Same informational role as [`min_range_m`]: the tracker ignores it for
+    /// gating; it exists so the declared sensor geometry is self-documenting.
+    #[serde(default)]
+    pub max_range_m: f64,
 }
 
 /// Tunable parameters of the tracker plus the sensor geometry it fuses.
@@ -173,14 +187,37 @@ impl TrackerConfig {
                 frame,
                 error,
                 scan_period,
+                min_range_m: 0.0,
+                max_range_m: 0.0,
             },
         );
+        self
+    }
+
+    /// Set the inner/outer detection range on an already-registered sensor.
+    ///
+    /// These values are informational (the tracker does not use them for
+    /// gating); they let display systems read the full sensor geometry from one
+    /// place.  Silently no-ops if `id` is not registered.  Chainable.
+    pub fn with_sensor_coverage(
+        mut self,
+        id: SensorId,
+        min_range_m: f64,
+        max_range_m: f64,
+    ) -> Self {
+        if let Some(sensor) = self.sensors.get_mut(&id) {
+            sensor.min_range_m = min_range_m;
+            sensor.max_range_m = max_range_m;
+        }
         self
     }
 
     /// Single-sensor convenience: the tracking frame *is* the sensor's own frame
     /// (so the lift into the common frame is the identity). This reproduces the
     /// pre-M4 single-radar behaviour.
+    ///
+    /// Range fields default to 0.0 (unspecified); call
+    /// [`TrackerConfig::with_sensor_coverage`] afterwards to set them.
     pub fn single_sensor(
         id: SensorId,
         frame: LocalFrame,
