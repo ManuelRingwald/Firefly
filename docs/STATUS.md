@@ -7,7 +7,15 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-19 — **Roadmap-Paket 4 (Konfigurierbarer System-Referenzpunkt) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-19 — **Roadmap-Paket 5 (Out-of-Order-Eingang) abgeschlossen.**
+  `data_time_watermark: Option<f64>` als High-Water-Mark im `Tracker`; beide Eingabe-Pfade geschützt:
+  - **`process_plots`**: Eingabe wird intern aufsteigend nach Datenzeit sortiert (Eingabe-Reihenfolge-Unabhängigkeit). Jede Gruppe mit `t < watermark` wird verworfen + `tracing::warn!`-Log.
+  - **`process_scan`**: Scan mit `t ≤ watermark` wird verworfen + `tracing::warn!`-Log.
+  - **Invariant-Absicherungen**: `debug_assert!(dt >= 0.0)` in `kalman::predict_with`; `debug_assert` auf `recent_hits` in `track::hits_within`.
+  - **3 neue Tests** in `timing.rs` (FR-TRK-033): `unsorted_plot_batch_gives_same_result_as_sorted_batch`, `late_plot_batch_is_dropped_gracefully`, `backward_scan_is_dropped_gracefully`.
+  Alle Qualitäts-Gates grün. S3 · Sonnet 4.6.
+  Nächster Schritt: nächstes Roadmap-Paket nach Abstimmung (z. B. Paket 6 Coverage-Werkzeug).
+- **Vorherige Aktualisierung:** 2026-06-19 — **Roadmap-Paket 4 (Konfigurierbarer System-Referenzpunkt) abgeschlossen.**
   Ein **System-Referenzpunkt** als Single Source of Truth (ADR 0021, FR-GEO-005): er ist zugleich
   Tracking-Frame-Ursprung **und** I062/100-Projektionsreferenz, sodass die System-Stereografisch-Ebene
   immer kohärent mit der Track-Berechnung ist.

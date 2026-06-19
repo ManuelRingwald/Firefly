@@ -212,6 +212,13 @@ pub struct Tracker {
     /// once as a CAT062 I062/080 TSE record. Filled at the deletion sites,
     /// drained by the output stage via [`take_ended_tracks`](Self::take_ended_tracks).
     ended_tracks: Vec<SystemTrack>,
+    /// High-water mark of processed data time (seconds). Any scan or plot group
+    /// at or before this instant is stale and must be dropped rather than fused
+    /// without a proper forward prediction — backward Kalman prediction is
+    /// undefined and would corrupt the track state (Robustheit Paket 5).
+    /// `None` before the first input. Updated by both [`process_scan`] and
+    /// [`process_plots`].
+    data_time_watermark: Option<f64>,
 }
 
 impl Tracker {
@@ -224,6 +231,7 @@ impl Tracker {
             sensor_last_scan: BTreeMap::new(),
             sensor_period: BTreeMap::new(),
             ended_tracks: Vec::new(),
+            data_time_watermark: None,
         }
     }
 
@@ -397,6 +405,21 @@ impl Tracker {
         let delete_confirmed = self.config.delete_misses_confirmed;
         let tracking_frame = self.config.tracking_frame;
         let t = time.as_secs();
+
+        // Guard: a scan that does not advance data time cannot be correctly
+        // integrated — backward Kalman prediction is undefined, and equal-time
+        // scans are idempotent noise. Drop with a warning (Robustheit Paket 5).
+        if let Some(watermark) = self.data_time_watermark {
+            if t <= watermark {
+                tracing::warn!(
+                    scan_time = t,
+                    watermark,
+                    "late scan dropped: data time did not advance (out-of-order input)"
+                );
+                return;
+            }
+        }
+        self.data_time_watermark = Some(t);
 
         // 1. Predict every existing track's IMM forward to the scan time (mixing
         //    + per-model prediction), and clear last scan's sensor provenance
@@ -608,6 +631,26 @@ impl Tracker {
             // Represent the opportunity at its latest instant — predicting a
             // track forward (never backward) to the freshest plot in the group.
             let t = plots[order[gj - 1]].time.as_secs();
+
+            // Guard: a group strictly in the past cannot be correctly integrated
+            // — the tracks have already been predicted forward past this instant,
+            // and backward Kalman prediction is undefined. Drop the group with a
+            // warning (Robustheit Paket 5). Equal-time groups are allowed: they
+            // have dt = 0 for all tracks, prediction is a no-op, and the
+            // measurement is still folded in (simultaneous multi-sensor hit).
+            if let Some(watermark) = self.data_time_watermark {
+                if t < watermark {
+                    tracing::warn!(
+                        plots = gj - gi,
+                        group_time = t,
+                        watermark,
+                        "late plots dropped: data time went backward (out-of-order input)"
+                    );
+                    gi = gj;
+                    continue;
+                }
+            }
+            self.data_time_watermark = Some(t);
 
             // Convert each plot to a Cartesian measurement in the common frame
             // and group by sensor (deterministic order); drop plots from an

@@ -205,6 +205,10 @@ impl Track {
 
     /// How many recent hits fall within the last `window` seconds (up to `now`).
     pub(crate) fn hits_within(&self, window: f64, now: f64) -> usize {
+        debug_assert!(
+            self.recent_hits.windows(2).all(|w| w[0] <= w[1]),
+            "recent_hits must be sorted ascending; invariant violated"
+        );
         let cutoff = now - window;
         self.recent_hits.iter().filter(|&&h| h >= cutoff).count()
     }
