@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::State,
-    http::StatusCode,
-    response::{Html, IntoResponse},
+    extract::{Query, State},
+    http::{HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Response},
     routing::get,
     Router,
 };
@@ -56,6 +56,22 @@ pub struct AppState {
     pub source: FrameSource,
     /// Operational counters exposed via `/metrics` (NFR-OBS-001).
     pub metrics: Arc<Metrics>,
+    /// If `Some`, the `/ws` endpoint requires `Authorization: Bearer <token>`
+    /// or `?token=<value>`. Missing or wrong token → 401 (NFR-SEC-001).
+    pub ws_token: Option<String>,
+    /// If `Some`, the `Origin` header on the `/ws` upgrade must exactly match
+    /// this value. Wrong origin → 403 (NFR-SEC-001, ADR 0017).
+    pub ws_allowed_origin: Option<String>,
+}
+
+/// Query parameters accepted on the `/ws` upgrade request.
+///
+/// The browser's `WebSocket` API does not support custom request headers, so
+/// token-based auth is also available via the `?token=` query parameter.
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct WsQuery {
+    token: Option<String>,
 }
 
 /// Build the router with every route wired to `state`.
@@ -113,9 +129,53 @@ async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
 
+/// Validate a WebSocket upgrade request against the configured auth rules.
+///
+/// Returns `Ok(())` when auth is satisfied (or not configured), `Err(StatusCode)`
+/// when the request should be rejected. Extracted so the pure auth logic can be
+/// unit-tested without a live hyper connection (NFR-SEC-001, ADR 0017).
+fn authorize_ws(
+    headers: &HeaderMap,
+    token_query: Option<&str>,
+    state: &AppState,
+) -> Result<(), StatusCode> {
+    if let Some(required) = &state.ws_token {
+        let from_header = headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        let provided = from_header.or(token_query);
+        if provided != Some(required.as_str()) {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    }
+    if let Some(allowed) = &state.ws_allowed_origin {
+        let origin = headers.get("origin").and_then(|v| v.to_str().ok());
+        if origin != Some(allowed.as_str()) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+    Ok(())
+}
+
 /// Upgrade the connection and start pumping frames to this client.
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
+///
+/// Auth is checked before the WebSocket upgrade via [`authorize_ws`]:
+/// - If [`AppState::ws_token`] is set, the request must carry it via
+///   `Authorization: Bearer <token>` or `?token=<value>` → 401 if absent/wrong.
+/// - If [`AppState::ws_allowed_origin`] is set, the `Origin` header must match
+///   exactly → 403 if wrong (NFR-SEC-001, ADR 0017).
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    Query(query): Query<WsQuery>,
+    State(state): State<AppState>,
+) -> Response {
+    if let Err(status) = authorize_ws(&headers, query.token.as_deref(), &state) {
+        return status.into_response();
+    }
     ws.on_upgrade(move |socket| pump_frames(socket, state))
+        .into_response()
 }
 
 /// Wall-clock pause inserted when a client asks to see the "delay" demo
@@ -269,6 +329,8 @@ mod tests {
                 speed: 1.0,
             },
             metrics: Arc::new(crate::metrics::Metrics::default()),
+            ws_token: None,
+            ws_allowed_origin: None,
         }
     }
 
@@ -307,6 +369,8 @@ mod tests {
                 sensor: firefly_core::SensorId(200),
             },
             metrics,
+            ws_token: None,
+            ws_allowed_origin: None,
         };
         let response = router(live_state)
             .oneshot(
@@ -334,6 +398,8 @@ mod tests {
                 sensor: firefly_core::SensorId(200),
             },
             metrics,
+            ws_token: None,
+            ws_allowed_origin: None,
         };
         let response = router(live_state)
             .oneshot(
@@ -410,5 +476,110 @@ mod tests {
             INDEX_HTML.contains("delay_triggered"),
             "shows the delay banner on the server's notice"
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // WebSocket auth tests (NFR-SEC-001, ADR 0017)
+    //
+    // These test `authorize_ws` directly rather than going through the full
+    // HTTP stack. `WebSocketUpgrade` requires `hyper::upgrade::OnUpgrade` in
+    // request extensions, which only exists in a live hyper connection — not in
+    // `tower::ServiceExt::oneshot`. Auth is pure logic; a direct function call
+    // is the right level to test it.
+    // ---------------------------------------------------------------------------
+
+    fn state_with_token(token: &str) -> AppState {
+        AppState {
+            source: FrameSource::Replay {
+                frames: Arc::new(crate::scene::demo_frames()),
+                speed: 1.0,
+            },
+            metrics: Arc::new(crate::metrics::Metrics::default()),
+            ws_token: Some(token.to_string()),
+            ws_allowed_origin: None,
+        }
+    }
+
+    fn state_with_origin(origin: &str) -> AppState {
+        AppState {
+            source: FrameSource::Replay {
+                frames: Arc::new(crate::scene::demo_frames()),
+                speed: 1.0,
+            },
+            metrics: Arc::new(crate::metrics::Metrics::default()),
+            ws_token: None,
+            ws_allowed_origin: Some(origin.to_string()),
+        }
+    }
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut m = HeaderMap::new();
+        for &(k, v) in pairs {
+            m.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                axum::http::HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        m
+    }
+
+    /// No auth configured → any request is allowed. REQ: NFR-SEC-001
+    #[test]
+    fn ws_no_auth_configured_accepts_upgrade() {
+        assert!(authorize_ws(&HeaderMap::new(), None, &state()).is_ok());
+    }
+
+    /// Token configured, no token provided → 401. REQ: NFR-SEC-001
+    #[test]
+    fn ws_missing_token_is_rejected_with_401() {
+        assert_eq!(
+            authorize_ws(&HeaderMap::new(), None, &state_with_token("secret")),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+    }
+
+    /// Token configured, wrong Authorization header → 401. REQ: NFR-SEC-001
+    #[test]
+    fn ws_wrong_token_is_rejected_with_401() {
+        let h = headers(&[("authorization", "Bearer wrong")]);
+        assert_eq!(
+            authorize_ws(&h, None, &state_with_token("secret")),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+    }
+
+    /// Token configured, correct Authorization header → allowed. REQ: NFR-SEC-001
+    #[test]
+    fn ws_correct_bearer_token_is_accepted() {
+        let h = headers(&[("authorization", "Bearer secret")]);
+        assert!(authorize_ws(&h, None, &state_with_token("secret")).is_ok());
+    }
+
+    /// Token via query param `?token=` is also accepted. REQ: NFR-SEC-001
+    #[test]
+    fn ws_correct_query_token_is_accepted() {
+        assert!(authorize_ws(
+            &HeaderMap::new(),
+            Some("secret"),
+            &state_with_token("secret")
+        )
+        .is_ok());
+    }
+
+    /// Origin configured, wrong Origin header → 403. REQ: NFR-SEC-001
+    #[test]
+    fn ws_wrong_origin_is_rejected_with_403() {
+        let h = headers(&[("origin", "https://evil.example.com")]);
+        assert_eq!(
+            authorize_ws(&h, None, &state_with_origin("https://app.example.com")),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    /// Origin configured, correct Origin header → allowed. REQ: NFR-SEC-001
+    #[test]
+    fn ws_correct_origin_is_accepted() {
+        let h = headers(&[("origin", "https://app.example.com")]);
+        assert!(authorize_ws(&h, None, &state_with_origin("https://app.example.com")).is_ok());
     }
 }

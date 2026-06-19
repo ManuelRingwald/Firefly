@@ -27,6 +27,7 @@ firefly-multicast = { workspace = true }
 firefly-recorder = { workspace = true }
 firefly-opensky = { workspace = true }
 axum = { version = "0.8", features = ["ws"] }
+serde = { workspace = true }
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "macros",

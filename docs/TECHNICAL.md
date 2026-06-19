@@ -51,7 +51,21 @@
 | `FIREFLY_OPENSKY_PASSWORD` | string | — | HTTP-Basic-Auth Passwort (optional) |
 | `FIREFLY_OPENSKY_SENSOR_ID` | u16 | `200` | Sensor-ID, die ADS-B-Plots im Tracker zugeordnet werden |
 
-### 1.5 Logging
+### 1.5 WebSocket-Zugangskontrolle (NFR-SEC-001, ADR 0017)
+
+Beide Variablen sind **opt-in** — ohne Konfiguration ist kein Schutz aktiv
+(geeignet für lokales Demo/Entwicklung). Für Produktionsbetrieb wird mindestens
+ein Token empfohlen.
+
+| Variable | Typ | Standard | Bedeutung |
+|----------|-----|----------|-----------|
+| `FIREFLY_WS_TOKEN` | string | — | Wenn gesetzt, muss jede `/ws`-Verbindung den Token via `Authorization: Bearer <token>` oder `?token=<wert>` vorlegen. Fehlend oder falsch → 401 |
+| `FIREFLY_WS_ALLOWED_ORIGIN` | string | — | Wenn gesetzt, muss der `Origin`-Header exakt mit diesem Wert übereinstimmen. Fehlt oder stimmt nicht → 403. Ergänzt Token-Auth (fail-closed) |
+
+**Hinweis Browser-API:** `WebSocket` im Browser unterstützt keine Custom-Header.
+Für Browser-Clients daher den `?token=`-Queryparameter verwenden.
+
+### 1.6 Logging
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
