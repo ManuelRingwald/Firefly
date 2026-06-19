@@ -28,12 +28,30 @@ async fn main() {
 
     let metrics = Arc::new(Metrics::default());
 
+    // WebSocket access control (NFR-SEC-001, ADR 0017).
+    // Both vars are opt-in: unset = no auth (suitable for local demo/dev).
+    let ws_token = std::env::var("FIREFLY_WS_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let ws_allowed_origin = std::env::var("FIREFLY_WS_ALLOWED_ORIGIN")
+        .ok()
+        .filter(|s| !s.is_empty());
+    if ws_token.is_some() {
+        tracing::info!("WebSocket token auth enabled (FIREFLY_WS_TOKEN is set)");
+    }
+    if ws_allowed_origin.is_some() {
+        tracing::info!(
+            origin = ws_allowed_origin.as_deref().unwrap_or(""),
+            "WebSocket origin check enabled"
+        );
+    }
+
     // CAT065 heartbeat runs in both modes: wall-clock liveness signal.
     spawn_cat065_heartbeat(Arc::clone(&metrics));
 
     let state = match config.mode {
-        ServerMode::Replay => build_replay_state(config, metrics),
-        ServerMode::Live => build_live_state(config, metrics).await,
+        ServerMode::Replay => build_replay_state(config, metrics, ws_token, ws_allowed_origin),
+        ServerMode::Live => build_live_state(config, metrics, ws_token, ws_allowed_origin).await,
     };
 
     let listener = match TcpListener::bind(("0.0.0.0", config.port)).await {
@@ -65,7 +83,12 @@ async fn main() {
 /// Build the `AppState` for the deterministic Replay mode: load the pre-computed
 /// scene, spawn the replay CAT062 feed, and optionally start the OpenSky poller
 /// in log-only mode if `FIREFLY_OPENSKY_ENABLED=true`.
-fn build_replay_state(config: ServerConfig, metrics: Arc<Metrics>) -> AppState {
+fn build_replay_state(
+    config: ServerConfig,
+    metrics: Arc<Metrics>,
+    ws_token: Option<String>,
+    ws_allowed_origin: Option<String>,
+) -> AppState {
     let frames = match config.scene {
         Scene::Demo => scene::demo_frames(),
         Scene::Frankfurt => scene::frankfurt_frames(),
@@ -86,6 +109,8 @@ fn build_replay_state(config: ServerConfig, metrics: Arc<Metrics>) -> AppState {
             speed: config.speed,
         },
         metrics,
+        ws_token,
+        ws_allowed_origin,
     }
 }
 
@@ -187,7 +212,12 @@ fn spawn_opensky_poller_log_only() {
 /// Build the `AppState` for Live mode: create the tracker + channels, spawn the
 /// OpenSky poller (unconditional in Live mode — it is the plot source), spawn
 /// the live tracker task, and optionally start the live CAT062 feed.
-async fn build_live_state(_config: ServerConfig, metrics: Arc<Metrics>) -> AppState {
+async fn build_live_state(
+    _config: ServerConfig,
+    metrics: Arc<Metrics>,
+    ws_token: Option<String>,
+    ws_allowed_origin: Option<String>,
+) -> AppState {
     let opensky_config = OpenSkyConfig::from_env();
     let sensor_id = opensky_config.sensor_id;
     let output_period = Duration::from_secs(opensky_config.poll_interval_secs);
@@ -240,6 +270,8 @@ async fn build_live_state(_config: ServerConfig, metrics: Arc<Metrics>) -> AppSt
             sensor: sensor_id,
         },
         metrics,
+        ws_token,
+        ws_allowed_origin,
     }
 }
 

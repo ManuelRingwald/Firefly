@@ -244,7 +244,31 @@ export WAYFINDER_MULTICAST_PORT=8600
 
 ---
 
-## 9. Health-Check und Readiness verifizieren
+## 9. WebSocket-Zugangskontrolle absichern (NFR-SEC-001, ADR 0017)
+
+Standardmäßig ist der `/ws`-Endpunkt ohne Authentifizierung erreichbar — geeignet
+für lokale Entwicklung. Im Produktionsbetrieb empfiehlt sich mindestens ein
+Bearer-Token:
+
+```bash
+export FIREFLY_WS_TOKEN=mein-geheimes-token
+# optional: erlaubte Browser-Origin einschränken
+export FIREFLY_WS_ALLOWED_ORIGIN=https://mein-asd.example.com
+```
+
+- **Token-Prüfung:** Clients müssen `Authorization: Bearer <token>` senden.  
+  Da der Browser-`WebSocket`-API keine Custom-Header unterstützt, akzeptiert
+  Firefly alternativ `?token=<wert>` als Query-Parameter.  
+  Fehlend oder falsch → **401 Unauthorized**.
+- **Origin-Prüfung:** Der `Origin`-Header muss exakt mit `FIREFLY_WS_ALLOWED_ORIGIN`
+  übereinstimmen. Fehlt oder stimmt nicht → **403 Forbidden**.
+- Beide Variablen sind unabhängig — einer, beide oder keiner kann gesetzt werden.
+- Im Produktionsbetrieb Token via Kubernetes Secret injizieren, nicht in Skripten
+  hartkodieren.
+
+---
+
+## 10. Health-Check und Readiness verifizieren
 
 Nach dem Start stehen folgende Endpunkte zur Verfügung:
 
@@ -263,7 +287,7 @@ curl http://localhost:8080/metrics
 
 ---
 
-## 10. Vollständiges Beispiel: Frankfurt + ADS-B + Wayfinder
+## 11. Vollständiges Beispiel: Frankfurt + ADS-B + Wayfinder
 
 ```bash
 # Alle Optionen kombiniert (Produktionsnahes Demo):
@@ -287,7 +311,7 @@ RUST_LOG=info \
 
 ---
 
-## 11. Fehlerdiagnose beim Start
+## 12. Fehlerdiagnose beim Start
 
 | Symptom | Wahrscheinliche Ursache | Lösung |
 |---------|-------------------------|--------|

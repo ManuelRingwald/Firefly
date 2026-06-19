@@ -21,6 +21,8 @@ async fn websocket_streams_parseable_frames_in_order() {
             speed: 100_000.0,
         },
         metrics: Arc::new(Metrics::default()),
+        ws_token: None,
+        ws_allowed_origin: None,
     };
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -68,6 +70,8 @@ async fn delay_trigger_pauses_delivery_without_corrupting_the_stream() {
             speed: 100_000.0,
         },
         metrics: Arc::new(Metrics::default()),
+        ws_token: None,
+        ws_allowed_origin: None,
     };
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
