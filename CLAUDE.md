@@ -172,8 +172,8 @@ stehen in `docs/STATUS.md`.
 |----------|--------|--------|
 | **ADR 0014** | Pivot Lernprojekt → Produktion; Wayfinder konsumiert CAT062/UDP | ✅ akzeptiert |
 | **UTC Time-of-Day** | Echtes ASTERIX-ToD statt "Sekunden seit Szenario-Start" in I062/070 (Issue #9) | ✅ erledigt, geschlossen |
-| **Multicast-Feed-Sicherheit** | Authentizität/Netz-Isolation des CAT062-Eingangspfads (ehem. Issue #7, transformiert) | ⏳ geplant |
-| **Konfigurierbarer System-Referenzpunkt** | I062/100-Referenzpunkt jenseits des Demo-Ursprungs (ADR 0006, offen) | ⏳ geplant |
+| **Multicast-Feed-Sicherheit** | Netz-Isolation (ADR 0017) + WebSocket-Auth `/ws` (`FIREFLY_WS_TOKEN`/`_ALLOWED_ORIGIN`, Issue #7, PR #27) | ✅ erledigt |
+| **Konfigurierbarer System-Referenzpunkt** | Ein System-Referenzpunkt (Tracking-Frame + I062/100), Live via `FIREFLY_SYSTEM_REF_*` (ADR 0021) | ✅ erledigt |
 | **CAT062-ICD** | Versionierte Schnittstellen-Doku für Wayfinder (`docs/ICD-CAT062.md`) | ✅ v1.0.0 erstellt |
 | **ADR 0013** | Asynchrone Pro-Plot-Verarbeitung + periodischer Ausgabetakt (13.1–13.7) | ✅ erledigt |
 | **ADR 0015** | CAT062 Vertikallage (I062/136) + UAP-Standardtreue (I062/500 → FRN 27); ICD 2.0.0, Breaking | ✅ erledigt (Firefly); Wayfinder-Decoder zieht nach (AP2) |

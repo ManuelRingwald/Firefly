@@ -8,7 +8,6 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use firefly_asterix::{Cat065Encoder, DataSourceId};
-use firefly_geo::Wgs84;
 
 /// Configuration of the CAT062 multicast feed.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,10 +26,6 @@ pub struct MulticastConfig {
     /// System Identification Code stamped into I062/010. `FIREFLY_CAT062_SIC`,
     /// default `2`.
     pub sic: u8,
-    /// The system reference point that I062/100 (system-stereographic X/Y) is
-    /// measured from. `FIREFLY_CAT062_REF_LAT` / `FIREFLY_CAT062_REF_LON` in
-    /// degrees, default `48.0, 11.0` (the demo scene origin).
-    pub reference_point: Wgs84,
     /// Whether to emit the CAT065 SDPS-status heartbeat alongside the tracks
     /// (ADR 0018). `FIREFLY_CAT065_ENABLED`, default `true` — when the feed is
     /// on, a consumer should be able to tell "alive but empty" from "dead".
@@ -54,7 +49,6 @@ impl Default for MulticastConfig {
             port: 8600,
             sac: 25,
             sic: 2,
-            reference_point: Wgs84::from_degrees(48.0, 11.0, 0.0),
             heartbeat_enabled: true,
             heartbeat_period_secs: 1.0,
             service_id: 1,
@@ -90,23 +84,6 @@ impl MulticastConfig {
         let sic = get("FIREFLY_CAT062_SIC")
             .and_then(|v| v.parse().ok())
             .unwrap_or(default.sic);
-        let ref_lat = get("FIREFLY_CAT062_REF_LAT")
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| v.is_finite());
-        let ref_lon = get("FIREFLY_CAT062_REF_LON")
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| v.is_finite());
-        // Only rebuild the reference point when an override is actually given,
-        // so the untouched default stays bit-for-bit exact (no degree↔radian
-        // round-trip rounding).
-        let reference_point = match (ref_lat, ref_lon) {
-            (None, None) => default.reference_point,
-            (lat, lon) => Wgs84::from_degrees(
-                lat.unwrap_or(default.reference_point.lat_deg()),
-                lon.unwrap_or(default.reference_point.lon_deg()),
-                0.0,
-            ),
-        };
         let heartbeat_enabled = get("FIREFLY_CAT065_ENABLED")
             .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
             .unwrap_or(default.heartbeat_enabled);
@@ -123,7 +100,6 @@ impl MulticastConfig {
             port,
             sac,
             sic,
-            reference_point,
             heartbeat_enabled,
             heartbeat_period_secs,
             service_id,
@@ -159,7 +135,7 @@ mod tests {
         assert!(config.group.is_multicast());
     }
 
-    /// Valid values are parsed, including the boolean and the reference point.
+    /// Valid values are parsed, including the boolean flag and the data source.
     #[test]
     fn valid_values_are_parsed() {
         let config = MulticastConfig::from_lookup(|key| match key {
@@ -168,8 +144,6 @@ mod tests {
             "FIREFLY_CAT062_PORT" => Some("9000".to_string()),
             "FIREFLY_CAT062_SAC" => Some("16".to_string()),
             "FIREFLY_CAT062_SIC" => Some("32".to_string()),
-            "FIREFLY_CAT062_REF_LAT" => Some("45.0".to_string()),
-            "FIREFLY_CAT062_REF_LON" => Some("11.25".to_string()),
             _ => None,
         });
         assert!(config.enabled);
@@ -177,8 +151,6 @@ mod tests {
         assert_eq!(config.port, 9000);
         assert_eq!(config.sac, 16);
         assert_eq!(config.sic, 32);
-        assert!((config.reference_point.lat_deg() - 45.0).abs() < 1e-12);
-        assert!((config.reference_point.lon_deg() - 11.25).abs() < 1e-12);
         assert_eq!(config.destination(), "239.1.2.3:9000".parse().unwrap());
         assert_eq!(config.data_source(), DataSourceId::new(16, 32));
     }
@@ -191,16 +163,11 @@ mod tests {
         let config = MulticastConfig::from_lookup(|key| match key {
             "FIREFLY_CAT062_GROUP" => Some("8.8.8.8".to_string()), // not multicast
             "FIREFLY_CAT062_PORT" => Some("not-a-port".to_string()),
-            "FIREFLY_CAT062_REF_LAT" => Some("nonsense".to_string()),
             _ => None,
         });
         let default = MulticastConfig::default();
         assert_eq!(config.group, default.group, "non-multicast group rejected");
         assert_eq!(config.port, default.port);
-        assert_eq!(
-            config.reference_point.lat_deg(),
-            default.reference_point.lat_deg()
-        );
     }
 
     /// The heartbeat is on by default and configurable; a non-positive or
