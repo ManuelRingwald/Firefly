@@ -1,6 +1,6 @@
 # ADR 0020 — Live-Tracker-Modus und Plot-Aufzeichnung
 
-- **Status:** akzeptiert (2026-06-18; Umsetzung in AP9.4c-0…6 läuft)
+- **Status:** abgeschlossen (2026-06-19)
 - **Datum:** 2026-06-18
 - **Schnittstellen-relevant:** nein (CAT062-Draht-Vertrag bleibt unverändert;
   ICD 2.4.0 deckt das ES-Age-Subfeld bereits ab). Diese Entscheidung betrifft
@@ -272,8 +272,8 @@ Neue Metriken: `firefly_live_plots_ingested_total`, `firefly_live_tracks_current
 | **AP9.4c-2** ✅ | LiveTracker-Task: Channel vom Poller, `process_plots` nach Datenzeit, Snapshot-Publish (`watch`); `PlotRecorder` schreibt parallel | S4 | Opus 4.8 |
 | **AP9.4c-3** ✅ | WS-Pump + CAT062-Feed lesen Live-Snapshot; Mode-Switch in `main.rs` (`FIREFLY_MODE`) | S4 | Opus 4.8 |
 | **AP9.4c-4** ✅ | Readiness/Metriken im Live-Modus; Robustheit bei OpenSky-Ausfall | S3 | Sonnet 4.6 |
-| **AP9.4c-5** | `firefly-replay-plots` Binary; Integration-Test: Replay aus `.ffplots` → gleicher CAT062-Strom wie Live-Lauf | S3 | Sonnet 4.6 |
-| **AP9.4c-6** | Tests (Fake-Producer, Replay-Regression), Milestone-Doku, ADR auf „akzeptiert" | S2 | Sonnet 4.6 |
+| **AP9.4c-5** ✅ | `firefly-replay-plots` Binary; 5 Integration-Tests: Track-Bestätigung, zwei Tracks, Determinismus, CAT062-Encoding, leere Datei | S3 | Sonnet 4.6 |
+| **AP9.4c-6** ✅ | Milestone-Doku, ADR-Status auf „abgeschlossen", Anforderungsregister aktualisiert | S2 | Sonnet 4.6 |
 
 ## Entschiedene Fragen (bei Freigabe)
 
