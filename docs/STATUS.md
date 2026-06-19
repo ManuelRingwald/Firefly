@@ -7,7 +7,15 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-19 — **Roadmap-Paket 5 (Out-of-Order-Eingang) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-19 — **Roadmap-Paket 6 (Coverage-Werkzeug, Firefly-Seite) abgeschlossen (S3 · Sonnet 4.6).**
+  `SensorModel` erhält `min_range_m: f64` und `max_range_m: f64` (beide `#[serde(default)]`,
+  rein informational — Tracker nutzt sie nicht für Gating). Neue chainbare Methode
+  `TrackerConfig::with_sensor_coverage(id, min, max)` — bestehende `with_sensor`/
+  `single_sensor`-Signaturen unverändert. Frankfurt-Scene: center 120 km, west + northeast
+  je 100 km. Demo-Scene: 200 km. Paket 6a (Firefly-UI-Aufräumen) in Roadmap vermerkt.
+  `cargo test --workspace` grün. Wayfinder-Seite parallel abgeschlossen.
+  Nächster Schritt: Paket 7 (FHA/Hazard-Analyse) nach Abstimmung.
+- **Vorherige Aktualisierung:** 2026-06-19 — **Roadmap-Paket 5 (Out-of-Order-Eingang) abgeschlossen.**
   `data_time_watermark: Option<f64>` als High-Water-Mark im `Tracker`; beide Eingabe-Pfade geschützt:
   - **`process_plots`**: Eingabe wird intern aufsteigend nach Datenzeit sortiert (Eingabe-Reihenfolge-Unabhängigkeit). Jede Gruppe mit `t < watermark` wird verworfen + `tracing::warn!`-Log.
   - **`process_scan`**: Scan mit `t ≤ watermark` wird verworfen + `tracing::warn!`-Log.
