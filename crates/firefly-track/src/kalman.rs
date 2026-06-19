@@ -173,6 +173,10 @@ impl LinearKalman {
     ///
     /// REQ: FR-TRK-003, FR-TRK-011
     pub fn predict_with(&mut self, model: &MotionModel, dt: f64, process: &ProcessNoise) {
+        debug_assert!(
+            dt >= 0.0,
+            "backward prediction dt={dt:.6} s — caller must guard dt > 0"
+        );
         let f = model.transition(dt);
         self.x = f * self.x;
         self.p = f * self.p * f.transpose() + process.covariance(dt);

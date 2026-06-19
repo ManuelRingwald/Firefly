@@ -59,7 +59,8 @@ fn demo_player() -> Player {
         LocalFrame::new(origin),
         SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0),
         scan_period,
-    );
+    )
+    .with_sensor_coverage(SensorId(1), 0.0, 200_000.0);
     tracker.process_noise = ProcessNoise::new(60.0);
     Player::new(&scenario, tracker)
 }
@@ -188,8 +189,11 @@ fn frankfurt_player() -> Player {
     let error = SensorErrorModel::from_polar_deg(50.0, 0.08, 1.0);
     let mut tracker = TrackerConfig::new(LocalFrame::new(origin))
         .with_sensor(SensorId(1), LocalFrame::new(site_center), error, 4.0)
+        .with_sensor_coverage(SensorId(1), 0.0, 120_000.0)
         .with_sensor(SensorId(2), LocalFrame::new(site_west), error, 10.0)
-        .with_sensor(SensorId(3), LocalFrame::new(site_northeast), error, 12.0);
+        .with_sensor_coverage(SensorId(2), 0.0, 100_000.0)
+        .with_sensor(SensorId(3), LocalFrame::new(site_northeast), error, 12.0)
+        .with_sensor_coverage(SensorId(3), 0.0, 100_000.0);
     tracker.process_noise = ProcessNoise::new(60.0);
     // The default association gate (P_G = 0.99) now suffices: multi-radar
     // "ghost" tracks are prevented at the source by the scan-start fusion
