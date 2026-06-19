@@ -7,6 +7,14 @@ authors.workspace = true
 repository.workspace = true
 description = "The Firefly M3 web server: streams the tracker's frame stream to a browser over WebSocket."
 
+[[bin]]
+name = "firefly-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "firefly-replay-plots"
+path = "src/bin/replay_plots.rs"
+
 [dependencies]
 firefly-core = { workspace = true }
 firefly-geo = { workspace = true }
