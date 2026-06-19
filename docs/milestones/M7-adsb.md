@@ -1,9 +1,8 @@
 # M7 — ADS-B-Integration (AP9)
 
-> **Stand:** AP9.1–AP9.6 implementiert und in Branch
-> `claude/beautiful-dijkstra-e7ityj` (Firefly) verfügbar.
-> AP9.4 (opensky-Crate), AP9.7 (weitere Tests), AP9.8 (Doku)
-> und AP9.9 (Wayfinder-Badge) stehen noch aus.
+> **Stand:** AP9.1–AP9.9 vollständig implementiert und in Branch
+> `claude/beautiful-dijkstra-e7ityj` (Firefly/Wayfinder) verfügbar.
+> M7 ist abgeschlossen (2026-06-19).
 
 ---
 
@@ -148,10 +147,74 @@ Cross-Project-Issue: Wayfinder#[wird erstellt in AP9.8].
 
 ---
 
-## 7. Noch ausstehend (AP9.4, AP9.7, AP9.9)
+## 7. AP9.4c — Live-Tracker-Modus und Plot-Replay (ADR 0020)
+
+AP9.4c-0 bis AP9.4c-6 implementieren die Live-Tracker-Architektur (ADR 0020):
+den `FIREFLY_MODE=live`-Pfad, die `.ffplots`-Eingangs-Aufzeichnung und das
+deterministisch-Replay-Binary.
+
+### AP9.4c-5 — `firefly-replay-plots` + Replay-Engine
+
+**Modul `firefly-server::replay`** (`crates/firefly-server/src/replay.rs`):
+- `read_plot_batches<R: Read>(reader) → Result<Vec<(u64, Vec<Plot>)>>` — liest
+  alle Records aus einer `.ffplots`-Datei und gruppiert sie nach `recv_unix_ns`
+  (Plots mit identischem Empfangs-Timestamp wurden während der Aufzeichnung in
+  einem einzigen `ingest`-Aufruf verarbeitet — Gruppierung spiegelt das exakt).
+- `replay_batches(batches, config, output_period_secs, before_batch, on_snapshot) → u64`
+  — füttert einen frischen `LiveTracker` datenzeit-getrieben; feuert Snapshots,
+  wann immer die Datenzeit die nächste Ausgabegrenze überschreitet; ein letzter
+  Snapshot deckt verbleibende Tracks nach dem letzten Takt.
+- 4 Unit-Tests: Batch-Gruppierung, Track-Bestätigung, Ausgabe-Tick-Zählung,
+  Determinismus (zwei Läufe → identische Track-Mengen).
+
+**Binary `firefly-replay-plots`** (`src/bin/replay_plots.rs`):
+- Liest `FIREFLY_REPLAY_PLOTS_INPUT` (Pflicht), `FIREFLY_REPLAY_PLOTS_SPEED`
+  (Default 1.0, 0 = unkontrolliert schnell), `FIREFLY_REPLAY_PLOTS_OUTPUT_PERIOD_SECS`
+  (Default 10.0) sowie die bekannten `FIREFLY_CAT062_*`- und
+  `FIREFLY_OPENSKY_*`-Konfiguration.
+- Drift-freies Pacing: verankert an `recv_unix_ns` des ersten Batches; alle
+  Ziel-Wanduhrpunkte werden relativ zu diesem Ursprung berechnet (kein
+  akkumulierter Drift über viele Batches).
+- Blockierender `UdpSocket` (kein Tokio nötig für ein Replay/Batch-Werkzeug).
+- Sendet CAT062 nur wenn `FIREFLY_CAT062_ENABLED=true`; loggt Blockgröße und
+  Track-Zahl in jedem Fall.
+
+**5 Integrations-Tests** (`tests/replay_plots.rs`, REQ: AP9.4c-5, ADR 0020,
+NFR-REPRO-001):
+1. `replay_confirms_one_aircraft` — 8 ADS-B-Polls → ICAO 0x3CABCD bestätigt,
+   Position ≈ 51°N.
+2. `replay_two_aircraft_two_tracks` — zwei Flugzeuge → zwei unabhängige Tracks.
+3. `replay_is_deterministic` — zwei Läufe → identische `(icao, confirmed)`-Paare
+   (NFR-REPRO-001).
+4. `replayed_snapshot_encodes_to_valid_cat062` — CAT062-Block: Byte 0 = `0x3E`,
+   LEN-Feld == Blocklänge.
+5. `empty_file_replays_cleanly` — Header-only-Datei → keine Snapshots, kein Panic.
+
+### AP9.4c-6 — Doku-Abschluss
+
+ADR 0020 auf „abgeschlossen" gesetzt; M7-Milestone, STATUS.md und
+Anforderungsregister (NFR-REPRO-001) aktualisiert.
+
+---
+
+## 8. Vollständigkeits-Matrix (alle AP9-Pakete)
 
 | Arbeitspaket | Inhalt | Status |
 |-------------|--------|--------|
-| AP9.4 | `firefly-opensky` Crate: HTTP-Poller, JSON-Deserialisierung, NACp-Mapping | offen |
-| AP9.7 | Zusätzliche Tests (ICD 2.4.0 Referenz-Dump-Update) | offen |
-| AP9.9 | Wayfinder: ES-Age-Decoder + ADS-B-Badge im Track-Label | offen |
+| AP9.1 | `Measurement::Geodetic` Enum, `Plot::adsb` | ✅ |
+| AP9.2 | `tracking_measurement` Dispatcher | ✅ |
+| AP9.3 | ICAO-Vorsortierung (pre-JPDA) | ✅ |
+| AP9.4 | `firefly-opensky` Crate (HTTP-Poller, NACp) | ✅ |
+| AP9.4b | OpenSky-Poller in `firefly-server` verdrahtet | ✅ |
+| AP9.4c-0 | `.ffplots`-Format in `firefly-recorder` | ✅ |
+| AP9.4c-1 | `FrameSource`-Abstraktion + `AppState` modusfähig | ✅ |
+| AP9.4c-2 | `LiveTracker`-Task + `PlotRecorder` | ✅ |
+| AP9.4c-3 | WS-Pump + CAT062-Feed + `FIREFLY_MODE`-Schalter | ✅ |
+| AP9.4c-4 | Readiness-Probe + Live-Metriken | ✅ |
+| AP9.4c-5 | `firefly-replay-plots` Binary + Replay-Engine + 5 Integrations-Tests | ✅ |
+| AP9.4c-6 | Doku-Abschluss (ADR 0020, M7, STATUS, Anforderungsregister) | ✅ |
+| AP9.5 | I062/290 ES-Age-Subfeld (ICD 2.4.0) | ✅ |
+| AP9.6 | `adsb_last_hit_time` + `SystemTrack.adsb_age_s` | ✅ |
+| AP9.7 | ES-Age-Referenz-Dump-Tests | ✅ |
+| AP9.8 | ADR 0019, ICD 2.4.0, Milestone-Doku | ✅ |
+| AP9.9 | Wayfinder: ES-Age-Decoder + ADS-B-Badge | ✅ |

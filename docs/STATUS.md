@@ -7,7 +7,17 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-18 — **AP9.4c-3 (Live-Modus vollständig verdrahtet) abgeschlossen.**
+- **Zuletzt aktualisiert:** 2026-06-19 — **AP9.4c-5 + AP9.4c-6 (Replay-Engine + Doku-Abschluss) abgeschlossen. M7 vollständig.**
+  `firefly-replay-plots` Binary und `firefly-server::replay`-Modul implementiert (ADR 0020, NFR-REPRO-001).
+  - **`read_plot_batches()`** — liest `.ffplots`-Datei, gruppiert Records nach `recv_unix_ns`.
+  - **`replay_batches()`** — datenzeit-getrieben; Snapshots auf konfigurierbaren Takt-Grenzen; finaler Snapshot deckt verbleibende Tracks.
+  - **`firefly-replay-plots`** Binary — drift-freies Pacing, sendet CAT062 per UDP-Multicast wenn `FIREFLY_CAT062_ENABLED=true`.
+  - **5 Integrations-Tests** (`tests/replay_plots.rs`): Track-Bestätigung, zwei unabhängige Tracks, Determinismus (NFR-REPRO-001), CAT062-Encoding-Validierung, leere-Datei-Robustheit.
+  - **AP9.4c-6:** ADR 0020 auf „abgeschlossen", M7-Milestone komplett, Anforderungsregister aktualisiert.
+  Alle Qualitäts-Gates grün. S3 · Sonnet 4.6.
+  **M7 (ADS-B-Integration, AP9.1–AP9.9 + AP9.4c-0…6) ist vollständig abgeschlossen.**
+  Nächster Schritt: nächstes Roadmap-Paket nach Abstimmung.
+- **Vorherige Aktualisierung:** 2026-06-18 — **AP9.4c-3 (Live-Modus vollständig verdrahtet) abgeschlossen.**
   `FIREFLY_MODE=live` startet Firefly jetzt im echten Echtzeit-Betrieb.
   - **`LiveSnapshot`** — neuer Typ (`time: Timestamp` + `tracks: Arc<Vec<SystemTrack>>`); ersetzt
     `Arc<Vec<SystemTrack>>` als Payload des `watch`-Kanals. Beide Konsumenten (WS-Pump + CAT062-Sender)

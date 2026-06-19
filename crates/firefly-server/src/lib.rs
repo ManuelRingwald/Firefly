@@ -24,6 +24,7 @@ pub mod config;
 pub mod live;
 pub mod metrics;
 pub mod pacing;
+pub mod replay;
 pub mod scene;
 
 pub use app::{router, AppState, FrameSource};
