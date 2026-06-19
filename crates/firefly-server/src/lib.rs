@@ -31,10 +31,11 @@ pub use app::{router, AppState, FrameSource};
 pub use config::{Scene, ServerConfig, ServerMode};
 pub use firefly_io::Frame;
 pub use live::{
-    build_live_tracker, run_live_cat062, run_live_tracker, LiveSnapshot, LiveTracker, PlotRecorder,
-    SnapshotRx,
+    build_live_tracker, live_system_reference_point, run_live_cat062, run_live_tracker,
+    LiveSnapshot, LiveTracker, PlotRecorder, SnapshotRx,
 };
 pub use metrics::Metrics;
+pub use scene::scene_reference_point;
 
 use tokio::net::TcpListener;
 

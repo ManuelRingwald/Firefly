@@ -214,15 +214,15 @@ Kennung getragen hat (sticky wie Mode 3/A und die Flugfläche).
   rendert direkt daraus — **keine** Rückprojektion nötig.
 - **I062/100 (System-Stereografisch)** ist eine zusätzliche Systemebene,
   optional verwertbar (z. B. für Debugging/Vergleich). Referenzpunkt der
-  Projektion ist aktuell der Demo-Ursprung (Frankfurt-Szenario,
-  `Cat062Encoder::new(source, system_reference_point)` in
-  `crates/firefly-asterix/src/cat062.rs`). Ein frei konfigurierbarer
-  System-Referenzpunkt ist als offener Punkt in
-  `docs/decisions/0006-integration-phoenix-asd-cat062.md` (Abschnitt
-  "Nachtrag (Häppchen C.1–C.3)", Unterabschnitt "Ehrliche Grenze") und in der
-  Firefly-Roadmap ("Konfigurierbarer System-Referenzpunkt") vermerkt — bis
-  dahin ist I062/100 nur im Demo-Kontext sinnvoll interpretierbar, I062/105
-  (WGS-84) bleibt die primäre, kontextfreie Position.
+  Projektion ist der **System-Referenzpunkt** (ADR 0021) — die *eine* Quelle,
+  die zugleich der Tracking-Frame-Ursprung ist, sodass I062/100 stets kohärent
+  mit der Track-Berechnung ist. Im **Replay-Modus** ist das der Szenen-Ursprung
+  (Demo 48/11, Frankfurt 50,04/8,56); im **Live-Modus** standardmäßig die Mitte
+  der OpenSky-Bounding-Box, überschreibbar über `FIREFLY_SYSTEM_REF_LAT/_LON`.
+  I062/105 (WGS-84) bleibt unabhängig davon die primäre, kontextfreie Position.
+  **Hinweis:** Diese Klärung betrifft nur die *Semantik* des Referenzpunkts —
+  das Wire-Format von I062/100 (24-Bit-Zweierkomplement, LSB 0,5 m) ist
+  unverändert, daher keine ICD-Versionserhöhung.
 
 ## 6. Zeit (I062/070)
 

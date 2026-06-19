@@ -220,6 +220,22 @@ Die Readiness-Probe (`/ready`) gibt `503` zurück, bis der erste OpenSky-Poll
 erfolgreich war — danach `200 ready`. Wayfinder zeigt Tracks sobald `/ready`
 positiv antwortet.
 
+### Schritt 5 (optional): System-Referenzpunkt setzen
+
+Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den
+Tracking-Frame und die CAT062-I062/100-Projektion. Im Live-Modus ist er
+standardmäßig die Mitte der OpenSky-Bounding-Box; bei Bedarf explizit setzen:
+
+```bash
+export FIREFLY_SYSTEM_REF_LAT=50.0379
+export FIREFLY_SYSTEM_REF_LON=8.5622
+```
+
+> **Hinweis:** Das ändert **nicht** die Darstellung im ASD — Wayfinder rendert
+> aus der absoluten WGS84-Position (I062/105). Der Referenzpunkt betrifft nur die
+> optionale System-Stereografisch-Ebene (I062/100). Im **Replay-Modus** ist der
+> Referenzpunkt fest der Szenen-Ursprung und wird ignoriert.
+
 ---
 
 ## 8. CAT062-Multicast-Feed für Wayfinder aktivieren

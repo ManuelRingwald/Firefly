@@ -6,11 +6,13 @@ use std::time::Duration;
 
 use firefly_asterix::Cat062Encoder;
 use firefly_core::Plot;
+use firefly_geo::Wgs84;
 use firefly_multicast::MulticastConfig;
 use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
 use firefly_server::{
-    build_live_tracker, router, run_live_cat062, run_live_tracker, scene, AppState, FrameSource,
-    LiveSnapshot, LiveTracker, Metrics, Scene, ServerConfig, ServerMode, SnapshotRx,
+    build_live_tracker, live_system_reference_point, router, run_live_cat062, run_live_tracker,
+    scene, scene_reference_point, AppState, FrameSource, LiveSnapshot, LiveTracker, Metrics, Scene,
+    ServerConfig, ServerMode, SnapshotRx,
 };
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
@@ -100,7 +102,11 @@ fn build_replay_state(
         "replay mode"
     );
 
-    spawn_cat062_multicast(config.speed, config.scene, Arc::clone(&metrics));
+    // The system reference point for I062/100 is the scene origin (ADR 0021),
+    // so the multicast feed's stereographic projection is coherent with the
+    // tracking frame the scene was computed in.
+    let reference = scene_reference_point(config.scene);
+    spawn_cat062_multicast(config.speed, config.scene, reference, Arc::clone(&metrics));
     spawn_opensky_poller_log_only();
 
     AppState {
@@ -117,7 +123,7 @@ fn build_replay_state(
 /// Spawn the CAT062 UDP-multicast feed for Replay mode, if enabled
 /// (`FIREFLY_CAT062_ENABLED=true`). Replays the same scan stream the web map
 /// shows, paced into wall-clock at `speed` (ADR 0006). Disabled by default.
-fn spawn_cat062_multicast(speed: f64, scene: Scene, metrics: Arc<Metrics>) {
+fn spawn_cat062_multicast(speed: f64, scene: Scene, reference: Wgs84, metrics: Arc<Metrics>) {
     let config = MulticastConfig::from_env();
     if !config.enabled {
         tracing::info!(
@@ -127,7 +133,7 @@ fn spawn_cat062_multicast(speed: f64, scene: Scene, metrics: Arc<Metrics>) {
     }
 
     let destination = config.destination();
-    let encoder = Cat062Encoder::new(config.data_source(), config.reference_point, 0.0);
+    let encoder = Cat062Encoder::new(config.data_source(), reference, 0.0);
     let scans = match scene {
         Scene::Demo => scene::demo_scans(),
         Scene::Frankfurt => scene::frankfurt_scans(),
@@ -258,11 +264,16 @@ async fn build_live_state(
         ));
     }
 
+    // The system reference point (ADR 0021): one origin for both the tracking
+    // frame (above) and the I062/100 projection (below). FIREFLY_SYSTEM_REF_*
+    // overrides it; otherwise it is the OpenSky bounding-box midpoint.
+    let reference = live_system_reference_point(&opensky_config);
+
     // Spawn the OpenSky poller, feeding plots into the tracker via mpsc.
     spawn_opensky_poller_live(opensky_config, plots_tx, Arc::clone(&metrics));
 
     // Spawn the live CAT062 feed, if enabled.
-    spawn_cat062_live(Arc::clone(&metrics), snapshot_rx.clone());
+    spawn_cat062_live(Arc::clone(&metrics), reference, snapshot_rx.clone());
 
     AppState {
         source: FrameSource::Live {
@@ -322,7 +333,7 @@ fn spawn_opensky_poller_live(
 /// Spawn the live CAT062 multicast feed, if enabled (`FIREFLY_CAT062_ENABLED`).
 /// Reads the watch channel published by the live tracker and encodes each
 /// snapshot as one CAT062 data block (ADR 0020, AP9.4c-3).
-fn spawn_cat062_live(metrics: Arc<Metrics>, mut snapshot_rx: SnapshotRx) {
+fn spawn_cat062_live(metrics: Arc<Metrics>, reference: Wgs84, mut snapshot_rx: SnapshotRx) {
     let config = MulticastConfig::from_env();
     if !config.enabled {
         tracing::info!(
@@ -332,7 +343,7 @@ fn spawn_cat062_live(metrics: Arc<Metrics>, mut snapshot_rx: SnapshotRx) {
     }
 
     let destination = config.destination();
-    let encoder = Cat062Encoder::new(config.data_source(), config.reference_point, 0.0);
+    let encoder = Cat062Encoder::new(config.data_source(), reference, 0.0);
     tracing::info!(%destination, "CAT062 live multicast feed enabled");
 
     tokio::spawn(async move {

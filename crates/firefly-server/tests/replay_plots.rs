@@ -172,7 +172,10 @@ fn replayed_snapshot_encodes_to_valid_cat062() {
     let buf = build_ffplots(&records);
 
     let mc = MulticastConfig::from_env(); // uses defaults
-    let encoder = Cat062Encoder::new(mc.data_source(), mc.reference_point, 0.0);
+                                          // I062/100 reference = system reference point (ADR 0021): same origin the
+                                          // plots are replayed in (bbox midpoint of the default OpenSky config).
+    let reference = firefly_server::live_system_reference_point(&default_opensky());
+    let encoder = Cat062Encoder::new(mc.data_source(), reference, 0.0);
 
     let mut cat062_blocks: Vec<Vec<u8>> = Vec::new();
     let mut reader = Cursor::new(&buf);

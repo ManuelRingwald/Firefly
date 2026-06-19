@@ -61,7 +61,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opensky_config = OpenSkyConfig::from_env();
     let mc_config = MulticastConfig::from_env();
     let destination = mc_config.destination();
-    let encoder = Cat062Encoder::new(mc_config.data_source(), mc_config.reference_point, 0.0);
+    // The I062/100 reference point is the system reference point (ADR 0021),
+    // identical to the tracking frame the plots are replayed in.
+    let reference = firefly_server::live_system_reference_point(&opensky_config);
+    let encoder = Cat062Encoder::new(mc_config.data_source(), reference, 0.0);
 
     // Blocking UDP socket — fine for a replay/batch tool.
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0u16))?;

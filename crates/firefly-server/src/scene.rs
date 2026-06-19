@@ -12,8 +12,20 @@ use firefly_sim::{Leg, Radar, RadarParams, Scenario, State, Target};
 use firefly_track::{ProcessNoise, SensorErrorModel, TrackerConfig};
 
 /// The geodetic origin of the demo scene — also the system reference point the
-/// CAT062 multicast feed measures I062/100 from.
+/// CAT062 multicast feed measures I062/100 from (ADR 0021).
 pub const DEMO_ORIGIN: (f64, f64) = (48.0, 11.0);
+
+/// The **system reference point** of a replayed scene (ADR 0021): the scene's
+/// own geodetic origin, which is both the tracking-frame origin and the CAT062
+/// I062/100 projection reference. Returning it from one place keeps the encoder
+/// coherent with the tracker instead of carrying an independent reference value.
+pub fn scene_reference_point(scene: crate::config::Scene) -> Wgs84 {
+    let (lat, lon) = match scene {
+        crate::config::Scene::Demo => DEMO_ORIGIN,
+        crate::config::Scene::Frankfurt => FRANKFURT_ORIGIN,
+    };
+    Wgs84::from_degrees(lat, lon, 0.0)
+}
 
 /// Build the demo [`Player`]: two aircraft (one cruising, one turning) seen by
 /// one radar, with the tracker tuning that keeps each on a single stable id.

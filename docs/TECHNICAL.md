@@ -26,8 +26,14 @@
 | `FIREFLY_CAT062_PORT` | u16 | `8600` | UDP-Port |
 | `FIREFLY_CAT062_SAC` | u8 | `25` | System Area Code (I062/010) |
 | `FIREFLY_CAT062_SIC` | u8 | `2` | System Identification Code (I062/010) |
-| `FIREFLY_CAT062_REF_LAT` | f64 | `48.0` | Referenzpunkt-Breitengrad für I062/100 (stereografisch) |
-| `FIREFLY_CAT062_REF_LON` | f64 | `11.0` | Referenzpunkt-Längengrad für I062/100 |
+| `FIREFLY_SYSTEM_REF_LAT` | f64 | Bbox-Mitte¹ | **Nur Live-Modus.** Breitengrad des System-Referenzpunkts (ADR 0021) — speist Tracking-Frame **und** I062/100-Projektion |
+| `FIREFLY_SYSTEM_REF_LON` | f64 | Bbox-Mitte¹ | **Nur Live-Modus.** Längengrad des System-Referenzpunkts |
+
+¹ Default = Mitte der OpenSky-Bounding-Box (`FIREFLY_OPENSKY_LAT/LON_*`). Im
+**Replay-Modus** ist der System-Referenzpunkt fest der Szenen-Ursprung
+(Demo: 48/11, Frankfurt: 50,04/8,56) und **nicht** über Env überschreibbar —
+so bleibt I062/100 kohärent mit der Szene (ADR 0021). I062/105 (WGS84) ist davon
+unabhängig und immer absolut.
 
 ### 1.3 CAT065-Heartbeat (Feed-Liveness)
 
@@ -420,7 +426,6 @@ spec:
 
 | Einschränkung | ADR / Issue | Geplante Lösung |
 |---------------|-------------|-----------------|
-| CAT062-Referenzpunkt fest (Frankfurt-Demo-Ursprung) | ADR 0006 | Konfigurierbarer System-Referenzpunkt |
 | Multicast ohne Authentifizierung | ADR 0017 | Netz-Isolation + anwendungsseitige Absicherung |
 | OpenSky-Passwort nur via Env-Variable | ADR 0003 | Kubernetes Secret (bereits empfohlen) |
 

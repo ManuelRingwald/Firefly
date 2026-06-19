@@ -124,12 +124,51 @@ impl PlotRecorder {
     }
 }
 
+/// Resolve the **system reference point** for live/plot-replay mode (ADR 0021):
+/// the single geodetic origin shared by the tracking frame *and* the CAT062
+/// I062/100 projection, so both are coherent.
+///
+/// `FIREFLY_SYSTEM_REF_LAT` / `FIREFLY_SYSTEM_REF_LON` (degrees) override it;
+/// otherwise it defaults to the **midpoint of the configured OpenSky bounding
+/// box** (ADR 0020, decided question 3) — a sensible reference for the watched
+/// area. Unset or unparseable values fall back to the bounding-box midpoint.
+pub fn live_system_reference_point(config: &OpenSkyConfig) -> Wgs84 {
+    let lat_default = 0.5 * (config.lat_min + config.lat_max);
+    let lon_default = 0.5 * (config.lon_min + config.lon_max);
+    resolve_system_reference_point(
+        std::env::var("FIREFLY_SYSTEM_REF_LAT").ok().as_deref(),
+        std::env::var("FIREFLY_SYSTEM_REF_LON").ok().as_deref(),
+        lat_default,
+        lon_default,
+    )
+}
+
+/// Pure resolver behind [`live_system_reference_point`], split from the
+/// environment lookup so it is testable without touching the process env.
+fn resolve_system_reference_point(
+    lat_env: Option<&str>,
+    lon_env: Option<&str>,
+    lat_default: f64,
+    lon_default: f64,
+) -> Wgs84 {
+    let lat = lat_env
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite())
+        .unwrap_or(lat_default);
+    let lon = lon_env
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite())
+        .unwrap_or(lon_default);
+    Wgs84::from_degrees(lat, lon, 0.0)
+}
+
 /// Build the [`Tracker`] for the live ADS-B feed (ADR 0020).
 ///
-/// The tracking frame is centred on the **midpoint of the configured OpenSky
-/// bounding box** (ADR 0020, decided question 3) — a sensible system reference
-/// point for the area being watched. A single sensor is registered under the
-/// adapter's [`SensorId`](firefly_core::SensorId) so its plots are accepted.
+/// The tracking frame is centred on the **system reference point**
+/// ([`live_system_reference_point`]) — by default the midpoint of the configured
+/// OpenSky bounding box, overridable via `FIREFLY_SYSTEM_REF_*` (ADR 0021). A
+/// single sensor is registered under the adapter's
+/// [`SensorId`](firefly_core::SensorId) so its plots are accepted.
 ///
 /// ADS-B plots carry their own *geodetic* position and an isotropic,
 /// NACp-derived covariance, so the polar [`SensorErrorModel`] is **unused** for
@@ -137,10 +176,7 @@ impl PlotRecorder {
 /// satisfies the API. The configured scan period (the poll interval) floors the
 /// deletion cadence so a track is not churned away between polls.
 pub fn build_live_tracker(config: &OpenSkyConfig) -> Tracker {
-    let lat = 0.5 * (config.lat_min + config.lat_max);
-    let lon = 0.5 * (config.lon_min + config.lon_max);
-    let origin = Wgs84::from_degrees(lat, lon, 0.0);
-    let frame = LocalFrame::new(origin);
+    let frame = LocalFrame::new(live_system_reference_point(config));
 
     // Placeholder polar model — irrelevant for the geodetic ADS-B path.
     let placeholder_error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.1);
@@ -391,6 +427,26 @@ mod tests {
     /// The default-bbox config (bbox midpoint ≈ 51°N, 10.5°E).
     fn config() -> OpenSkyConfig {
         OpenSkyConfig::default()
+    }
+
+    /// With no override, the system reference point is the bounding-box midpoint;
+    /// a valid override wins; garbage falls back to the default. REQ: FR-GEO-005
+    #[test]
+    fn system_reference_point_resolves_override_then_bbox_midpoint() {
+        // No override → bbox midpoint (default config: 47–55°N, 5–16°E).
+        let mid = resolve_system_reference_point(None, None, 51.0, 10.5);
+        assert!((mid.lat_deg() - 51.0).abs() < 1e-12);
+        assert!((mid.lon_deg() - 10.5).abs() < 1e-12);
+
+        // Explicit override wins.
+        let ovr = resolve_system_reference_point(Some("50.0379"), Some("8.5622"), 51.0, 10.5);
+        assert!((ovr.lat_deg() - 50.0379).abs() < 1e-9);
+        assert!((ovr.lon_deg() - 8.5622).abs() < 1e-9);
+
+        // Garbage / non-finite falls back to the default per axis.
+        let bad = resolve_system_reference_point(Some("nonsense"), Some("inf"), 51.0, 10.5);
+        assert!((bad.lat_deg() - 51.0).abs() < 1e-12);
+        assert!((bad.lon_deg() - 10.5).abs() < 1e-12);
     }
 
     /// An ADS-B plot for one aircraft at a geodetic position and data-time.

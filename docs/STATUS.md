@@ -7,7 +7,22 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-19 — **AP9.4c-5 + AP9.4c-6 (Replay-Engine + Doku-Abschluss) abgeschlossen. M7 vollständig.**
+- **Zuletzt aktualisiert:** 2026-06-19 — **Roadmap-Paket 4 (Konfigurierbarer System-Referenzpunkt) abgeschlossen.**
+  Ein **System-Referenzpunkt** als Single Source of Truth (ADR 0021, FR-GEO-005): er ist zugleich
+  Tracking-Frame-Ursprung **und** I062/100-Projektionsreferenz, sodass die System-Stereografisch-Ebene
+  immer kohärent mit der Track-Berechnung ist.
+  - **Replay-Modus:** = Szenen-Ursprung (`scene_reference_point`, Demo 48/11, Frankfurt 50,04/8,56).
+  - **Live-Modus:** `FIREFLY_SYSTEM_REF_LAT/_LON`, Default = Mitte der OpenSky-Bbox; speist
+    `build_live_tracker` **und** den CAT062-Live-Encoder (`live_system_reference_point`).
+  - **Entfernt:** `MulticastConfig::reference_point` + `FIREFLY_CAT062_REF_LAT/_LON` (war die Quelle
+    der Inkohärenz). Kein Wire-Format-/ICD-Versionsbruch — Wayfinder (nutzt I062/105) unberührt.
+  - Doku: ADR 0021, ICD §5, TECHNICAL §1.5, INSTALLATION §7, Requirements FR-GEO-005, Decisions-Index 0014–0021.
+  Alle Qualitäts-Gates grün. S3 · Sonnet 4.6.
+  Nächster Schritt: nächstes Roadmap-Paket nach Abstimmung (z. B. Paket 5 Out-of-Order-Eingang).
+- **Vorherige Aktualisierung:** 2026-06-19 — **Firefly Issue #7 (WebSocket-Auth `/ws`) abgeschlossen** (PR #27, gemergt).
+  `authorize_ws()` mit opt-in Bearer-Token (`FIREFLY_WS_TOKEN`, Header oder `?token=`) + Origin-Check
+  (`FIREFLY_WS_ALLOWED_ORIGIN`); 7 Unit-Tests; NFR-SEC-001 (ADR 0017). S2 · Sonnet 4.6.
+- **Vorherige Aktualisierung:** 2026-06-19 — **AP9.4c-5 + AP9.4c-6 (Replay-Engine + Doku-Abschluss) abgeschlossen. M7 vollständig.**
   `firefly-replay-plots` Binary und `firefly-server::replay`-Modul implementiert (ADR 0020, NFR-REPRO-001).
   - **`read_plot_batches()`** — liest `.ffplots`-Datei, gruppiert Records nach `recv_unix_ns`.
   - **`replay_batches()`** — datenzeit-getrieben; Snapshots auf konfigurierbaren Takt-Grenzen; finaler Snapshot deckt verbleibende Tracks.
