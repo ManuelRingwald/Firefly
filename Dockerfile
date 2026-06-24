@@ -1,7 +1,7 @@
 # Multi-stage build for firefly-server (M6.4).
 #
 # Stage 1: Build the binary and all dependencies.
-FROM rust:1.82-bookworm AS builder
+FROM rust:1.87-bookworm AS builder
 
 WORKDIR /build
 
