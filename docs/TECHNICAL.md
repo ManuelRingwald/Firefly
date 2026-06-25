@@ -43,7 +43,25 @@ unabhängig und immer absolut.
 | `FIREFLY_CAT065_PERIOD` | f64 | `1.0` | Heartbeat-Intervall in Wanduhrsekunden |
 | `FIREFLY_CAT065_SERVICE_ID` | u8 | `1` | Service-ID in I065/015 |
 
-### 1.4 OpenSky Network ADS-B-Adapter
+### 1.4 CAT063-Sensor-Status (Per-Sensor-Liveness)
+
+CAT063 meldet je registriertem Sensor, ob er noch Plots liefert (operationell)
+oder ausgefallen ist (degradiert) — damit Wayfinder einen **Sensor-Ausfall** von
+einem **leeren Himmel** unterscheidet (ADR 0022, Firefly #32). Ein Block je Tick,
+ein Record je Sensor (I063/010 SAC/SIC, I063/030 ToD, I063/060 NOGO). Läuft mit,
+sobald **Feed *und* Heartbeat** aktiv sind — kein eigener Enable-Schalter.
+
+| Variable | Typ | Standard | Bedeutung |
+|----------|-----|----------|-----------|
+| `FIREFLY_CAT063_PERIOD` | f64 | `5.0` | Intervall der Sensor-Status-Blöcke in Wanduhrsekunden. Langsamer als der Heartbeat, weil Sensor-Liveness sich auf der Skala der Antennenumläufe (4–12 s) ändert |
+
+**Degradiert-Kriterium:** Ein Sensor gilt als aktiv, solange er innerhalb von
+`2.5 × scan_period` einen Plot lieferte, sonst degradiert (NOGO `0x40`). Im
+**Replay-Modus** sind alle Szenen-Sensoren dauerhaft aktiv (deterministische
+Wiedergabe meldet keine Degradierung); im **Live-Modus** folgt die Liveness dem
+echten OpenSky-Plot-Eingang.
+
+### 1.5 OpenSky Network ADS-B-Adapter
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
@@ -57,7 +75,7 @@ unabhängig und immer absolut.
 | `FIREFLY_OPENSKY_PASSWORD` | string | — | HTTP-Basic-Auth Passwort (optional) |
 | `FIREFLY_OPENSKY_SENSOR_ID` | u16 | `200` | Sensor-ID, die ADS-B-Plots im Tracker zugeordnet werden |
 
-### 1.5 WebSocket-Zugangskontrolle (NFR-SEC-001, ADR 0017)
+### 1.6 WebSocket-Zugangskontrolle (NFR-SEC-001, ADR 0017)
 
 Beide Variablen sind **opt-in** — ohne Konfiguration ist kein Schutz aktiv
 (geeignet für lokales Demo/Entwicklung). Für Produktionsbetrieb wird mindestens
@@ -71,7 +89,7 @@ ein Token empfohlen.
 **Hinweis Browser-API:** `WebSocket` im Browser unterstützt keine Custom-Header.
 Für Browser-Clients daher den `?token=`-Queryparameter verwenden.
 
-### 1.6 Logging
+### 1.7 Logging
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
@@ -112,6 +130,7 @@ RUST_LOG=debug ./target/release/firefly-server
 | `CAT062 multicast feed enabled destination=...` | Multicast-Feed aktiv; zeigt Ziel-Adresse |
 | `CAT062 multicast feed disabled` | Feed aus (Normal bei `FIREFLY_CAT062_ENABLED` nicht gesetzt) |
 | `CAT065 heartbeat enabled destination=... period_s=1` | Heartbeat aktiv |
+| `CAT063 sensor status sender enabled destination=... period_s=5 sensors_total=3` | Sensor-Status aktiv; zeigt Sensor-Anzahl |
 | `OpenSky ADS-B poller enabled lat_min=... lat_max=...` | ADS-B-Adapter läuft |
 | `OpenSky ADS-B poller disabled` | Adapter aus (Normal-Zustand) |
 | `OpenSky plots received count=42` | Erfolgreiche ADS-B-Abfrage |
@@ -156,6 +175,9 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_live_plots_ingested_total` | counter | **Live-Modus:** Plots insgesamt in den Tracker eingespeist |
 | `firefly_plot_records_written_total` | counter | **Live-Modus:** In `.ffplots`-Datei geschriebene Records |
 | `firefly_opensky_poll_errors_total` | counter | **Live-Modus:** HTTP/Netz-Fehler beim OpenSky-Poll |
+| `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
+| `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
+| `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |
 
 ### 3.3 Prometheus scrape-Konfiguration
 

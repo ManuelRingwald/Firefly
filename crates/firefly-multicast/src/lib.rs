@@ -31,10 +31,12 @@
 //!
 //! REQ: FR-IO-003
 
+pub mod cat063_sender;
 pub mod config;
 pub mod heartbeat;
 pub mod pacing;
 pub mod receiver;
+pub mod sensor_health;
 
 use std::net::{Ipv4Addr, SocketAddr};
 
@@ -42,8 +44,10 @@ use firefly_asterix::Cat062Encoder;
 use firefly_core::{SystemTrack, Timestamp};
 use tokio::net::UdpSocket;
 
+pub use cat063_sender::run_cat063_sender;
 pub use config::MulticastConfig;
 pub use heartbeat::run_heartbeat;
+pub use sensor_health::{SensorHealthMonitor, SensorHealthSnapshot};
 
 /// Bind a UDP socket suitable for *sending* multicast datagrams.
 ///

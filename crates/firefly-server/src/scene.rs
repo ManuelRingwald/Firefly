@@ -224,6 +224,15 @@ pub fn frankfurt_scans() -> Vec<(Timestamp, Vec<SystemTrack>)> {
     player.periodic_snapshots(t_out)
 }
 
+/// The sensor IDs registered in a scene — the set the CAT063 sensor health
+/// monitor tracks for per-sensor status reporting (Firefly #32).
+pub fn scene_sensor_ids(scene: crate::config::Scene) -> Vec<SensorId> {
+    match scene {
+        crate::config::Scene::Demo => vec![SensorId(1)],
+        crate::config::Scene::Frankfurt => vec![SensorId(1), SensorId(2), SensorId(3)],
+    }
+}
+
 /// JPDA crossing showcase, aircraft A: flies north-east, crossing the path of
 /// [`crossing_southeast`] at a common point and time.
 ///

@@ -35,3 +35,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0019 — ADS-B-Integration via OpenSky Network](0019-adsb-integration-opensky.md)
 - [0020 — Live-Tracker-Modus und Plot-Aufzeichnung](0020-live-tracker-modus-fuer-echtzeit-adsb.md)
 - [0021 — Konfigurierbarer System-Referenzpunkt (Single Source of Truth)](0021-konfigurierbarer-system-referenzpunkt.md)
+- [0022 — CAT063 Sensor Status Messages (Per-Sensor-Liveness)](0022-cat063-sensor-status.md)

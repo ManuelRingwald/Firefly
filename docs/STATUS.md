@@ -7,7 +7,36 @@
 > 🗺️ **Roadmap:** Arbeitspakete, Findings und empfohlene Reihenfolge stehen in
 > `docs/ROADMAP.md` (Stichwort „Roadmap" im Chat zeigt diese Liste).
 
-- **Zuletzt aktualisiert:** 2026-06-19 — **Roadmap-Paket 6 (Coverage-Werkzeug, Firefly-Seite) abgeschlossen (S3 · Sonnet 4.6).**
+- **Zuletzt aktualisiert:** 2026-06-25 — **Firefly #32 (CAT063 Sensor Status, `from-wayfinder`) umgesetzt — Wayfinder-Blocker geräumt (S4 · Opus 4.8).**
+  Neue ASTERIX-Kategorie **CAT063** (Sensor Status Messages, CAT-Oktett `0x3F`) auf
+  demselben Multicast-Strom wie CAT062/CAT065 — der Per-Sensor-Liveness-Bericht, mit
+  dem Wayfinder einen **ausgefallenen Sensor** von einem **leeren Himmel** unterscheiden
+  und sein gelbes Sensor-Degradierungs-Banner aktivieren kann. **ADR 0022**, **ICD → 2.5.0**
+  (additiv, Abschnitt 9). Drei Bausteine:
+  - **FF-2 CAT063-Encoder/Decoder** (`firefly-asterix::cat063`): Block mit einem Record je
+    Sensor (FSPEC `0xE0` → I063/010 SAC/SIC, I063/030 ToD 1/128 s, I063/060 NOGO
+    operationell `0x00`/degradiert `0x40`); byte-genaue Referenz-Dumps (ein/zwei Sensoren),
+    Round-Trip, robust gegen falsche Kategorie/Trunkierung. FR-IO-007.
+  - **FF-1 SensorHealthMonitor** (`firefly-multicast::sensor_health`): verfolgt je Sensor
+    die Wall-clock-Zeit des letzten Plot-Batches; **aktiv**, solange letzter Plot innerhalb
+    `2.5 × scan_period`, sonst **degradiert**. Zwei Modi: `new_replay` (alle Sensoren
+    dauerhaft aktiv — deterministische Wiedergabe meldet keine Degradierung) und `new_live`
+    (Liveness aus echtem OpenSky-Eingang via `record_activity`). FR-NET-010.
+  - **FF-3 CAT063-Sender** (`firefly-multicast::run_cat063_sender`): eigener, entkoppelter
+    Tokio-Task im wall-clock-Takt (Default 5 s, `FIREFLY_CAT063_PERIOD`), analog zum
+    CAT065-Heartbeat. In `main.rs` für Replay- **und** Live-Modus verdrahtet
+    (`spawn_cat063_sensor_sender`, läuft sobald Feed + Heartbeat aktiv); `scene_sensor_ids`
+    liefert die SICs je Szene (Frankfurt 1/2/3, Demo/Live 1), SAC = 0.
+  - **Metriken:** `firefly_cat063_status_sent_total` (Counter), `firefly_sensors_total`,
+    `firefly_sensors_active` (Gauges).
+  Doku: ADR 0022, ICD §9 + Changelog 2.5.0, TECHNICAL §1.4 + Metriken/Logs, INSTALLATION §8,
+  Requirements FR-IO-007/FR-NET-010, Decisions-Index. Alle Gates grün
+  (`cargo test --workspace` — 40 Suites ok, `clippy --workspace --all-targets` sauber, `fmt`).
+  **Nächster Schritt:** Wayfinder-Seite (WF-1 CAT063-Decoder + Dispatch `0x3F`, WF-2
+  Registry-Sensor-Status + gelbe Farbe, WF-3 ASD-Broadcast „SENSOR AUSFALL"-Banner) — eigene
+  Wayfinder-Sitzung, erst ankündigen, dann bauen. Cross-Project-Issue `from-firefly` in
+  Wayfinder anlegen.
+- **Vorherige Aktualisierung:** 2026-06-19 — **Roadmap-Paket 6 (Coverage-Werkzeug, Firefly-Seite) abgeschlossen (S3 · Sonnet 4.6).**
   `SensorModel` erhält `min_range_m: f64` und `max_range_m: f64` (beide `#[serde(default)]`,
   rein informational — Tracker nutzt sie nicht für Gating). Neue chainbare Methode
   `TrackerConfig::with_sensor_coverage(id, min, max)` — bestehende `with_sensor`/
