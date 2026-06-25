@@ -7,7 +7,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use firefly_asterix::{Cat065Encoder, DataSourceId};
+use firefly_asterix::{Cat063Encoder, Cat065Encoder, DataSourceId};
 
 /// Configuration of the CAT062 multicast feed.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,6 +39,11 @@ pub struct MulticastConfig {
     /// Service identification stamped into I065/015. `FIREFLY_CAT065_SERVICE_ID`,
     /// default `1`.
     pub service_id: u8,
+    /// Period between CAT063 Sensor Status blocks in **wall-clock** seconds.
+    /// `FIREFLY_CAT063_PERIOD`, default `5.0`. Only effective when
+    /// [`enabled`](Self::enabled) and [`heartbeat_enabled`](Self::heartbeat_enabled)
+    /// are both set.
+    pub cat063_period_secs: f64,
 }
 
 impl Default for MulticastConfig {
@@ -52,6 +57,7 @@ impl Default for MulticastConfig {
             heartbeat_enabled: true,
             heartbeat_period_secs: 1.0,
             service_id: 1,
+            cat063_period_secs: 5.0,
         }
     }
 }
@@ -94,6 +100,10 @@ impl MulticastConfig {
         let service_id = get("FIREFLY_CAT065_SERVICE_ID")
             .and_then(|v| v.parse().ok())
             .unwrap_or(default.service_id);
+        let cat063_period_secs = get("FIREFLY_CAT063_PERIOD")
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|s| s.is_finite() && *s > 0.0)
+            .unwrap_or(default.cat063_period_secs);
         Self {
             enabled,
             group,
@@ -103,6 +113,7 @@ impl MulticastConfig {
             heartbeat_enabled,
             heartbeat_period_secs,
             service_id,
+            cat063_period_secs,
         }
     }
 
@@ -119,6 +130,12 @@ impl MulticastConfig {
     /// A CAT065 heartbeat encoder using this config's data source and service id.
     pub fn cat065_encoder(&self) -> Cat065Encoder {
         Cat065Encoder::new(self.data_source(), self.service_id)
+    }
+
+    /// A CAT063 sensor status encoder. Firefly uses SAC=0 for all local sensor
+    /// identifiers — the SIC distinguishes the individual radars.
+    pub fn cat063_encoder(&self) -> Cat063Encoder {
+        Cat063Encoder::new(0)
     }
 }
 
@@ -170,14 +187,15 @@ mod tests {
         assert_eq!(config.port, default.port);
     }
 
-    /// The heartbeat is on by default and configurable; a non-positive or
-    /// garbage period falls back to the default rate.
+    /// The heartbeat and CAT063 sender are on by default and configurable; a
+    /// non-positive or garbage period falls back to the default rate.
     #[test]
     fn heartbeat_config_is_parsed_with_safe_defaults() {
         let default = MulticastConfig::default();
         assert!(default.heartbeat_enabled, "heartbeat on by default");
         assert_eq!(default.heartbeat_period_secs, 1.0);
         assert_eq!(default.service_id, 1);
+        assert_eq!(default.cat063_period_secs, 5.0);
 
         let custom = MulticastConfig::from_lookup(|key| match key {
             "FIREFLY_CAT065_ENABLED" => Some("false".to_string()),

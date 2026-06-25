@@ -42,6 +42,15 @@ pub struct Metrics {
     /// Total number of OpenSky poll errors (HTTP / network failures, counter).
     /// Stays 0 in Replay mode (OpenSky poller not started).
     pub opensky_poll_errors_total: AtomicU64,
+
+    // --- Sensor health metrics (Firefly #32, CAT063) ---
+    /// Total number of CAT063 sensor status blocks sent over multicast (counter).
+    pub cat063_status_sent_total: AtomicU64,
+    /// Number of registered sensors known to the SDPS (gauge, static).
+    pub sensors_total: AtomicU64,
+    /// Number of sensors currently active — received a plot within their
+    /// staleness window (gauge, updated on each CAT063 send).
+    pub sensors_active: AtomicU64,
 }
 
 /// A guard that increments `ws_clients_connected` (and `ws_clients_total`) on
@@ -141,6 +150,27 @@ pub fn render(metrics: &Metrics, frames_total: usize) -> String {
         "Total number of OpenSky REST API poll errors (Live mode only).",
         metrics.opensky_poll_errors_total.load(Ordering::Relaxed) as f64,
     );
+    write_metric(
+        &mut out,
+        "firefly_cat063_status_sent_total",
+        "counter",
+        "Total number of CAT063 sensor status blocks sent over multicast.",
+        metrics.cat063_status_sent_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_sensors_total",
+        "gauge",
+        "Number of registered sensors known to the SDPS.",
+        metrics.sensors_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_sensors_active",
+        "gauge",
+        "Number of sensors currently active (received a recent plot).",
+        metrics.sensors_active.load(Ordering::Relaxed) as f64,
+    );
     out
 }
 
@@ -176,6 +206,9 @@ mod tests {
         metrics
             .opensky_poll_errors_total
             .store(3, Ordering::Relaxed);
+        metrics.cat063_status_sent_total.store(7, Ordering::Relaxed);
+        metrics.sensors_total.store(3, Ordering::Relaxed);
+        metrics.sensors_active.store(2, Ordering::Relaxed);
 
         let text = render(&metrics, 9);
 
@@ -189,11 +222,17 @@ mod tests {
         assert!(text.contains("firefly_live_plots_ingested_total 100"));
         assert!(text.contains("firefly_plot_records_written_total 100"));
         assert!(text.contains("firefly_opensky_poll_errors_total 3"));
+        assert!(text.contains("firefly_cat063_status_sent_total 7"));
+        assert!(text.contains("firefly_sensors_total 3"));
+        assert!(text.contains("firefly_sensors_active 2"));
         assert!(text.contains("# TYPE firefly_ws_clients_connected gauge"));
         assert!(text.contains("# TYPE firefly_cat062_scans_sent_total counter"));
         assert!(text.contains("# TYPE firefly_tracks_active gauge"));
         assert!(text.contains("# TYPE firefly_live_plots_ingested_total counter"));
         assert!(text.contains("# TYPE firefly_opensky_poll_errors_total counter"));
+        assert!(text.contains("# TYPE firefly_cat063_status_sent_total counter"));
+        assert!(text.contains("# TYPE firefly_sensors_total gauge"));
+        assert!(text.contains("# TYPE firefly_sensors_active gauge"));
     }
 
     /// The connected-client guard increments on creation and decrements again

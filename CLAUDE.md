@@ -179,6 +179,8 @@ stehen in `docs/STATUS.md`.
 | **ADR 0015** | CAT062 Vertikallage (I062/136) + UAP-Standardtreue (I062/500 → FRN 27); ICD 2.0.0, Breaking | ✅ erledigt (Firefly); Wayfinder-Decoder zieht nach (AP2) |
 | **AP7/AP8** | CAT062 Target Identification (I062/245, Callsign); ICD 2.1.0, additiv | ✅ erledigt (beide Repos, PR #15/#7) |
 | **ADR 0016** | CAT062 Track-Ende-Signalisierung (I062/080 TSE); ICD 2.2.0, additiv | ✅ erledigt (beide Repos, PR #16/#8) |
+| **ADR 0018** | CAT065 SDPS-Heartbeat (`0x41`); ICD 2.3.0, additiv | ✅ erledigt (beide Repos) |
+| **ADR 0022** | CAT063 Sensor Status (`0x3F`, Per-Sensor-Liveness); ICD 2.5.0, additiv (Firefly #32) | ✅ erledigt (Firefly); Wayfinder-Decoder zieht nach (WF-1…3) |
 | **Betriebs-Härtung** | Observability-Ausbau, Lastfestigkeit, Deployment | ⏳ |
 
 Innerhalb jedes Vorhabens wird in kleinen Schritten nach Abschnitt 2 gearbeitet.

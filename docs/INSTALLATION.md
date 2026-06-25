@@ -241,14 +241,21 @@ export FIREFLY_SYSTEM_REF_LON=8.5622
 ## 8. CAT062-Multicast-Feed für Wayfinder aktivieren
 
 Damit Wayfinder die Tracks empfangen kann, müssen CAT062 (Tracks) und CAT065
-(Heartbeat) aktiviert sein:
+(Heartbeat) aktiviert sein. CAT063 (Sensor-Status) läuft automatisch mit, sobald
+beide aktiv sind:
 
 ```bash
 export FIREFLY_CAT062_ENABLED=true
 export FIREFLY_CAT062_GROUP=239.255.0.62   # Default
 export FIREFLY_CAT062_PORT=8600             # Default
 export FIREFLY_CAT065_ENABLED=true          # Default: an (wenn CAT062 an)
+export FIREFLY_CAT063_PERIOD=5.0            # Default: 5 s; Sensor-Status-Takt
 ```
+
+Der Strom trägt damit drei ASTERIX-Kategorien auf derselben Gruppe/Port:
+**CAT062** (Tracks, `0x3E`), **CAT065** (SDPS-Heartbeat, `0x41`) und **CAT063**
+(Per-Sensor-Status, `0x3F`). CAT063 erlaubt Wayfinder, einen ausgefallenen
+Sensor von einem leeren Himmel zu unterscheiden.
 
 Wayfinder muss derselben Multicast-Gruppe beitreten:
 

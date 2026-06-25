@@ -7,7 +7,7 @@ use std::time::Duration;
 use firefly_asterix::Cat062Encoder;
 use firefly_core::Plot;
 use firefly_geo::Wgs84;
-use firefly_multicast::MulticastConfig;
+use firefly_multicast::{MulticastConfig, SensorHealthMonitor};
 use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
 use firefly_server::{
     build_live_tracker, live_system_reference_point, router, run_live_cat062, run_live_tracker,
@@ -108,6 +108,11 @@ fn build_replay_state(
     let reference = scene_reference_point(config.scene);
     spawn_cat062_multicast(config.speed, config.scene, reference, Arc::clone(&metrics));
     spawn_opensky_poller_log_only();
+
+    // CAT063 sensor status — all sensors pre-seeded as active in replay mode.
+    let sensor_ids = scene::scene_sensor_ids(config.scene);
+    let sensor_monitor = Arc::new(SensorHealthMonitor::new_replay(sensor_ids));
+    spawn_cat063_sensor_sender(sensor_monitor, Arc::clone(&metrics));
 
     AppState {
         source: FrameSource::Replay {
@@ -269,11 +274,26 @@ async fn build_live_state(
     // overrides it; otherwise it is the OpenSky bounding-box midpoint.
     let reference = live_system_reference_point(&opensky_config);
 
-    // Spawn the OpenSky poller, feeding plots into the tracker via mpsc.
-    spawn_opensky_poller_live(opensky_config, plots_tx, Arc::clone(&metrics));
+    // Sensor health monitor: one OpenSky sensor, scan period = poll interval.
+    let sensor_monitor = Arc::new(SensorHealthMonitor::new_live([(
+        sensor_id,
+        output_period.as_secs_f64(),
+    )]));
+
+    // Spawn the OpenSky poller, feeding plots into the tracker via mpsc, and
+    // notifying the sensor monitor on each batch.
+    spawn_opensky_poller_live(
+        opensky_config,
+        plots_tx,
+        Arc::clone(&metrics),
+        Arc::clone(&sensor_monitor),
+    );
 
     // Spawn the live CAT062 feed, if enabled.
     spawn_cat062_live(Arc::clone(&metrics), reference, snapshot_rx.clone());
+
+    // CAT063 sensor status for live mode.
+    spawn_cat063_sensor_sender(sensor_monitor, Arc::clone(&metrics));
 
     AppState {
         source: FrameSource::Live {
@@ -293,11 +313,16 @@ async fn build_live_state(
 /// Sets `metrics.live_ready = true` on the first successful poll (AP9.4c-4):
 /// until then `/ready` returns 503. Increments `opensky_poll_errors_total` on
 /// each HTTP/network failure.
+///
+/// Also notifies `sensor_monitor` on each successful batch so it can track
+/// the liveness of the single OpenSky sensor (Firefly #32).
 fn spawn_opensky_poller_live(
     config: OpenSkyConfig,
     plots_tx: mpsc::Sender<Vec<Plot>>,
     metrics: Arc<Metrics>,
+    sensor_monitor: Arc<SensorHealthMonitor>,
 ) {
+    let sensor_id = config.sensor_id;
     tracing::info!(
         lat_min = config.lat_min,
         lat_max = config.lat_max,
@@ -315,6 +340,8 @@ fn spawn_opensky_poller_live(
                     metrics
                         .live_ready
                         .store(true, std::sync::atomic::Ordering::Relaxed);
+                    // Notify the sensor health monitor: this sensor is alive.
+                    sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
                     if let Err(e) = plots_tx.try_send(plots) {
                         tracing::warn!("plot channel full; dropping batch: {e}");
                     }
@@ -376,8 +403,66 @@ fn spawn_cat062_live(metrics: Arc<Metrics>, reference: Wgs84, mut snapshot_rx: S
 }
 
 // ---------------------------------------------------------------------------
-// Shared: CAT065 heartbeat, tracing, shutdown
+// Shared: CAT063 sensor status, CAT065 heartbeat, tracing, shutdown
 // ---------------------------------------------------------------------------
+
+/// Spawn the CAT063 sensor status sender, if `FIREFLY_CAT062_ENABLED` and
+/// `FIREFLY_CAT065_ENABLED` are both set (Firefly #32). Sends one block per
+/// `FIREFLY_CAT063_PERIOD` (default 5 s), one record per registered sensor.
+fn spawn_cat063_sensor_sender(monitor: Arc<SensorHealthMonitor>, metrics: Arc<Metrics>) {
+    let config = MulticastConfig::from_env();
+    if !config.enabled || !config.heartbeat_enabled {
+        return;
+    }
+
+    let destination = config.destination();
+    let encoder = config.cat063_encoder();
+    let period = Duration::from_secs_f64(config.cat063_period_secs);
+    // Set sensors_total once at startup (static count).
+    metrics.sensors_total.store(
+        monitor.sensors_total() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    tracing::info!(
+        %destination,
+        period_s = config.cat063_period_secs,
+        sensors_total = monitor.sensors_total(),
+        "CAT063 sensor status sender enabled"
+    );
+
+    tokio::spawn(async move {
+        let socket = match firefly_multicast::sender_socket().await {
+            Ok(s) => s,
+            Err(error) => {
+                tracing::error!(%error, "failed to open CAT063 sender socket");
+                return;
+            }
+        };
+        let result = firefly_multicast::run_cat063_sender(
+            &socket,
+            destination,
+            &encoder,
+            monitor,
+            period,
+            utc_time_of_day_secs,
+            |active, total| {
+                metrics
+                    .sensors_active
+                    .store(active as u64, std::sync::atomic::Ordering::Relaxed);
+                metrics
+                    .sensors_total
+                    .store(total as u64, std::sync::atomic::Ordering::Relaxed);
+                metrics
+                    .cat063_status_sent_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            },
+        )
+        .await;
+        if let Err(error) = result {
+            tracing::error!(%error, "CAT063 sensor status sender stopped");
+        }
+    });
+}
 
 /// Spawn the CAT065 SDPS-status heartbeat alongside the track feed, if both
 /// `FIREFLY_CAT062_ENABLED` and `FIREFLY_CAT065_ENABLED` (default on) are set

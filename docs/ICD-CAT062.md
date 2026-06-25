@@ -21,19 +21,20 @@
 
 ## Version
 
-**2.3.0** (2026-06-15) — **Additiv:** CAT065 SDPS-Service-Status-Heartbeat auf
-demselben Multicast-Strom (ADR 0018). Konsument dispatcht am CAT-Oktett.
+**2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Sensor Status Messages, `0x3F`) auf demselben Multicast-Strom. Periodische Per-Sensor-Statusmeldung (Default 5 s, `FIREFLY_CAT063_PERIOD`): je Tick ein Block mit einem Record pro registriertem Sensor (I063/010 SAC/SIC, I063/030 ToD, I063/060 NOGO operationell/degradiert). Erlaubt dem Konsumenten einen ausgefallenen Sensor von einem leeren Himmel zu unterscheiden — Grundlage für Wayfinders Sensor-Degradierungs-Banner. Konsument dispatcht am CAT-Oktett (`0x3F`). Details: Abschnitt 9.
 
 > ℹ️ **Geltungsbereich.** Diese ICD beschreibt den **gesamten
 > Multicast-Ausgabe-Vertrag** zwischen Firefly und Wayfinder. Seit 2.3.0
-> trägt der Strom **zwei** ASTERIX-Kategorien: **CAT062** (System-Tracks,
-> Abschnitte 2–6) und **CAT065** (SDPS-Service-Status / Heartbeat,
-> Abschnitt 8). Der Dateiname (`ICD-CAT062.md`) bleibt aus Historie erhalten.
+> trägt der Strom mehrere ASTERIX-Kategorien: **CAT062** (System-Tracks,
+> Abschnitte 2–6), **CAT065** (SDPS-Service-Status / Heartbeat, Abschnitt 8)
+> und seit 2.5.0 **CAT063** (Sensor Status Messages, Abschnitt 9). Der
+> Dateiname (`ICD-CAT062.md`) bleibt aus Historie erhalten.
 
 ### Changelog
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 2.5.0 | 2026-06-25 | **Additiv (ADR 0022, Firefly #32).** Neue Kategorie **CAT063** (Sensor Status Messages, CAT-Oktett `0x3F`) auf **derselben** Multicast-Gruppe/Port wie CAT062/CAT065. Periodische Per-Sensor-Statusmeldung (wall-clock-getaktet, Default 5 s, `FIREFLY_CAT063_PERIOD`): **ein Block pro Tick mit einem Record je registriertem Sensor**, FSPEC `0xE0` → I063/010 (SAC/SIC), I063/030 (Time of Day, 1/128 s), I063/060 (NOGO: `0x00` operationell / `0x40` degradiert). Ein Sensor gilt als degradiert, wenn er innerhalb von `2.5 × scan_period` keinen Plot geliefert hat. Erlaubt dem Konsumenten, einen **ausgefallenen Sensor** von einem **leeren Himmel** zu unterscheiden (CAT065 sagt „SDPS lebt", CAT063 sagt „welche Sensoren liefern"). **Konsument muss am CAT-Oktett dispatchen** (`0x3E` Track, `0x41` Heartbeat, `0x3F` Sensor-Status) und unbekannte Kategorien überspringen — robuste-Decoder-Regel galt ohnehin. Kein Eingriff in CAT062/CAT065. Details: Abschnitt 9. |
 | 2.4.0 | 2026-06-18 | **Additiv (AP9.5).** I062/290 (System Track Update Ages) trägt jetzt optional das **ES-Age-Subfeld** (Extended Squitter / ADS-B): Bit `0x08` im primären Subfeld-Oktett signalisiert, dass ein ES-Age-Byte folgt. Das ES-Age-Byte kodiert das ADS-B-Trefferalter in 1/4-Sekunden (identisch zum PSR-Age). Ist `0x08` nicht gesetzt, fehlt das Byte und das Item ist weiterhin 2 Byte lang (Subfeld + PSR-Age). Für Tracks ohne ADS-B-Treffer: kein Unterschied zum bisherigen Wire-Format. **Konsument (Wayfinder): kein Breaking Change** — vorhandene Decoder müssen I062/290 als variabel lang behandeln (bisher in der Praxis immer 2 Byte; robust implementiert wenn der Decoder `bytes.len()` prüft). Die ES-Age-Präsenz signalisiert „dieser Track hat mindestens einen ADS-B-Update erhalten" und kann von Wayfinder als ADS-B-Badge genutzt werden (AP9.9). |
 | 2.3.0 | 2026-06-15 | **Additiv (ADR 0018).** Neue Kategorie **CAT065** (SDPS Service Status, „Heartbeat") auf **derselben** Multicast-Gruppe/Port wie CAT062. Periodische SDPS-Status-Meldung (I065/000 = 1) mit I065/010, I065/000, I065/015, I065/030 (Time of Day), I065/040 (NOGO operationell/degradiert). Wall-clock-getaktet (Default 1 s, `FIREFLY_CAT065_PERIOD`). **Konsument muss am führenden CAT-Oktett dispatchen** (`0x3E` → Track, `0x41` → Status) und unbekannte Kategorien überspringen — die robuste-Decoder-Regel verlangte das ohnehin. Kein Eingriff in das CAT062-Record-Format. Details: Abschnitt 8. |
 | 2.2.0 | 2026-06-15 | **Additiv (ADR 0016).** I062/080 (Track Status) trägt jetzt das **TSE-Bit** (*Track Service End*, Oktett 2, Bit 7, `0x40`): es markiert die **letzte** Meldung für einen Track (er wird gelöscht). Erscheint nur bei gelöschten Tracks; ein gelöschter Track wird damit **genau einmal** mit gesetztem TSE gemeldet und danach nicht mehr. I062/080 ist bereits ein variabel langes FX-Item (FRN 13, in jedem Record) — kein FSPEC-Wachstum, kein Breaking Change. **Konsument muss TSE als „Track entfernen" interpretieren** (sonst Ein-Frame-Geist). |
@@ -304,5 +305,85 @@ wenn der Feed via `FIREFLY_CAT062_ENABLED` läuft), `FIREFLY_CAT065_PERIOD`
   (Firefly, `firefly-asterix`).
 - Architekturentscheidungen: Fireflys ADR 0006 (Integration/CAT062), ADR 0014
   (Produktions-Pivot, Wayfinder konsumiert CAT062/UDP), **ADR 0018 (CAT065
-  Heartbeat)**.
+  Heartbeat)**, **ADR 0022 (CAT063 Sensor Status)**.
 - Kurzfassung für Wayfinder: Wayfinders `CLAUDE.md` Abschnitt 2.
+
+## 9. CAT063 — Sensor Status Messages (seit 2.5.0)
+
+**Zweck.** CAT065 (Abschnitt 8) sagt „das **Datenverarbeitungssystem** (SDPS)
+lebt und ist operationell". Es sagt aber **nichts** darüber, ob die einzelnen
+**Sensoren** (Radare, ADS-B-Empfänger) noch Daten liefern. Fällt ein Radar aus,
+läuft der Tracker (und damit der CAT065-Heartbeat) ungestört weiter — das
+Lagebild wird nur in der Abdeckung dieses Sensors ärmer, ohne dass irgendein
+Signal das anzeigt. CAT063 schließt diese Lücke: es ist der periodische
+**Per-Sensor-Statusbericht** des SDPS und erlaubt dem Konsumenten, einen
+**ausgefallenen Sensor** von einem **leeren Himmel** zu unterscheiden. Für
+Wayfinder ist das die Grundlage des Sensor-Degradierungs-Banners (gelb).
+
+> **Abgrenzung der drei Kategorien.** CAT062 = „*was* fliegt" (Tracks),
+> CAT065 = „*lebt das SDPS*" (globaler Herzschlag), CAT063 = „*welche Sensoren
+> speisen das SDPS*" (Per-Sensor-Liveness).
+
+**Normative Referenz.** EUROCONTROL **SUR.ET1.ST05.2000-STD-04-01** („CAT063
+Sensor Status Messages"). Wir senden ein bewusstes Subset (periodischer
+Per-Sensor-Status).
+
+**Datenblock.**
+```
+[CAT = 0x3F] [LEN: u16 BE] [Record]...
+```
+- `CAT` = 1 Oktett, immer `0x3F` (63).
+- `LEN` = 2 Oktette, big-endian, Gesamtlänge inkl. 3-Oktett-Header.
+- Danach folgen **mehrere Records ohne Trenner** — **einer je registriertem
+  Sensor**. Jeder Record ist über sein FSPEC selbst-begrenzend (Abschnitt 3).
+  Sind keine Sensoren registriert, trägt der Block null Records (nur Header).
+
+**Record (FSPEC/UAP).** Gleiche FSPEC-Mechanik wie CAT062 (Abschnitt 3). Die
+periodische Sensor-Status-Meldung setzt die FRNs **{1, 2, 3}** → ein einzelnes
+FSPEC-Oktett `0xE0`.
+
+| FRN | Item | Länge | Inhalt |
+|-----|------|-------|--------|
+| 1 | I063/010 | 2 | Data Source Identifier (SAC/SIC) des **Sensors**. SAC = `FIREFLY_CAT062_SAC` (Default 0); **SIC identifiziert den einzelnen Sensor** (Frankfurt: 1/2/3; Demo/Live: 1). |
+| 2 | I063/030 | 3 | Time of Day, 24-Bit, **1/128 s** seit UTC-Mitternacht (wie I062/070). **Wall-clock-Aussendezeit**, nicht Datenzeit. |
+| 3 | I063/060 | 1 | Sensor Configuration & Status. **NOGO-Feld** (Bits 8/7): `00` = operationell (`0x00`), `01` = degradiert (`0x40`), `10` = nicht verbunden (`0x80`), `11` = nicht initialisiert (`0xC0`). Firefly sendet nur `0x00` (aktiv) oder `0x40` (kein Plot innerhalb `2.5 × scan_period`). |
+
+> Weitere CAT063-UAP-Items (I063/050 Sensor-Konfiguration, I063/070–I063/090
+> Zeit-/Positions-/Bias-Statistik) gehören zu anderen Reports und werden vom
+> periodischen Sensor-Status **nicht** gesendet. Ein Decoder soll sie tolerieren
+> (Vorwärtskompatibilität, Abschnitt 3).
+
+**Byte-genauer Referenz-Dump** (ein operationeller Sensor SIC = 1, SAC = 0,
+Mitternacht):
+```
+0x3F 0x00 0x0A 0xE0 0x00 0x01 0x00 0x00 0x00 0x00
+```
+(`LEN` = 10; FSPEC `0xE0`; I063/010 = `00 01`; I063/030 = `00 00 00`;
+I063/060 = `0x00`.)
+
+**Zwei Sensoren in einem Block** (SIC 1 operationell, SIC 2 degradiert):
+```
+0x3F 0x00 0x11
+0xE0 0x00 0x01 0x00 0x00 0x00 0x00    # Sensor 1 operationell
+0xE0 0x00 0x02 0x00 0x00 0x00 0x40    # Sensor 2 degradiert (NOGO 0x40)
+```
+(`LEN` = 17 = 3 Header + 2 × 7 Record.)
+
+**Takt.** Wall-clock-periodisch, Default **5 s** (`FIREFLY_CAT063_PERIOD`).
+Langsamer als der CAT065-Heartbeat (1 s), weil Sensor-Liveness sich auf der
+Zeitskala der Antennenumläufe (4–12 s) ändert, nicht im Sekundentakt.
+
+**Degradiertes-Kriterium (Sender).** Ein Sensor gilt als **aktiv**, solange er
+innerhalb von `2.5 × scan_period` Sekunden mindestens einen Plot geliefert hat
+(`SensorHealthMonitor`); andernfalls **degradiert** (NOGO `0x40`). Im
+**Replay-Modus** werden alle Sensoren der Szene als dauerhaft aktiv geführt
+(deterministische Wiedergabe meldet keine Degradierung). Im **Live-Modus** wird
+die Liveness aus dem echten Plot-Eingang (OpenSky) abgeleitet.
+
+**Konfiguration (Sender).** `FIREFLY_CAT063_PERIOD` (Sekunden, Default 5).
+CAT063 läuft mit, sobald **sowohl** der Feed (`FIREFLY_CAT062_ENABLED`) **als
+auch** der Heartbeat (`FIREFLY_CAT065_ENABLED`, Default an) aktiv sind — es gibt
+keinen eigenen Enable-Schalter, weil Per-Sensor-Status und Heartbeat denselben
+Zweck (Feed-/Sensor-Liveness) bedienen. SAC der Sensor-Records ist `0`
+(Firefly-Konvention für lokale Sensoren); die SICs sind die der registrierten
+Sensoren.
