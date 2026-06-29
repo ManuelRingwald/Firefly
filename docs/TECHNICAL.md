@@ -75,6 +75,27 @@ echten OpenSky-Plot-Eingang.
 | `FIREFLY_OPENSKY_PASSWORD` | string | — | HTTP-Basic-Auth Passwort (optional) |
 | `FIREFLY_OPENSKY_SENSOR_ID` | u16 | `200` | Sensor-ID, die ADS-B-Plots im Tracker zugeordnet werden |
 
+> **Standalone-/Dev-Pfad.** Die `FIREFLY_OPENSKY_*`-Variablen konfigurieren **eine**
+> OpenSky-Quelle. Im **orchestrierten** Betrieb wird stattdessen `FIREFLY_SOURCES`
+> gesetzt (Abschnitt 1.5.1) — dann haben die `FIREFLY_OPENSKY_*`-Variablen **keinen**
+> Effekt (Vorrang von `FIREFLY_SOURCES`).
+
+### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
+
+Maßgeblich: `docs/source-input-contract.md` v1.0.0. Im **Live-Modus** liest Firefly
+seine Quellen aus einer JSON-Liste, die ein Orchestrator (Wayfinder) je Instanz
+setzt — ein Eintrag je Quelle, mehrere Adapter speisen denselben Live-Tracker.
+
+| Variable | Typ | Standard | Bedeutung |
+|----------|-----|----------|-----------|
+| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`. Eintrag: `{type, bbox?, sac?, sic?, sensor_id?, cred_env?}`. `type` ∈ `adsb_opensky` (unterstützt) / `flarm_aprs` / `radar_asterix` (reserviert → WARN + übersprungen). Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
+| `FIREFLY_SOURCE_<n>_SECRET` o. ä. | string | — | Beliebig **benannte** Credential-Env, von einem Eintrag per `cred_env` referenziert. Wert = `benutzer:passwort` (Split am ersten `:`), nie im JSON-Blob. |
+
+Beispiel: siehe `docs/source-input-contract.md` §2. Referenzpunkt = Mittelpunkt der
+**Union** aller Quell-BBoxen (`FIREFLY_SYSTEM_REF_*` überschreibt); Ausgabe-Takt =
+**min** Poll-Intervall der Quellen. Jede Quelle stempelt ihre `sensor_id` auf ihre
+Plots; die Sensor-Liveness (CAT063) verfolgt alle Quellen.
+
 ### 1.6 WebSocket-Zugangskontrolle (NFR-SEC-001, ADR 0017)
 
 Beide Variablen sind **opt-in** — ohne Konfiguration ist kein Schutz aktiv
