@@ -10,11 +10,18 @@
 
 ---
 
-## 🎯 Stand 2026-06-28
+## 🎯 Stand 2026-06-29
 
-- **Zuletzt aktualisiert:** 2026-06-28
-- **Letzte Arbeit:** ADR 0022 ratifiziert, CAT063 Sensor-Status-Meldungen im Multicast-Strom (ICD 2.5.0, Firefly #32 erledigt)
-- **Nächster Schritt:** siehe Firefly Roadmap oder zentrale **Wayfinder ROADMAP.md**
+- **Zuletzt aktualisiert:** 2026-06-29
+- **Letzte Arbeit:** **ADR 0023 ratifiziert** — Quell-Eingangs-Kontrakt
+  (`FIREFLY_SOURCES`, env-getriebene JSON-Quell-Liste; Credentials isoliert in
+  benannten Cred-Envs; `adsb_opensky` unterstützt, FLARM/Radar reserviert).
+  Versioniertes Doku `docs/source-input-contract.md` v1.0.0. Antwort auf
+  Wayfinder-Issue #35; Entscheidungen D1 = JSON-Liste, D2 = `user:pass`-Secret (UX-2).
+  **Doku-only**, kein Code.
+- **Nächster Schritt:** Schritt 2 — `FIREFLY_SOURCES` parsen + Live-Tracker aus
+  *N* Adaptern speisen (Cred-Split, Validierung, Tests). Nach Ankündigung & „Go"
+  (S4 · Opus 4.8). Wayfinder zieht ORCH-5 (Übersetzung + UI) nach.
 
 ---
 

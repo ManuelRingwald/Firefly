@@ -2,6 +2,18 @@
 
 Schnittstellen-Themen, die in Firefly entstehen und Wayfinder-Arbeit auslösen.
 
+> **Quell-Eingangs-Kontrakt ratifiziert (ADR 0023, Antwort auf Wayfinder-Issue
+> #35).** Firefly liest die Live-Quellen einer orchestrierten Instanz aus einer
+> env-getriebenen **JSON-Liste `FIREFLY_SOURCES`** (Credentials isoliert in
+> benannten Cred-Envs, `user:pass`-Format/UX-2, Live via `FIREFLY_MODE=live`);
+> `adsb_opensky` ist unterstützt, FLARM/Radar reserviert. Maßgeblich:
+> `docs/source-input-contract.md` v1.0.0. **Wayfinder-Folge (ORCH-5, eigene
+> Roadmap — kein separates Issue):** Docker-Backend übersetzt `source_config` →
+> `FIREFLY_SOURCES` + injiziert die aufgelösten Creds in die Cred-Envs; UI gibt
+> je `adsb_opensky`-Quelle zwei Felder (Benutzername/Passwort), intern ein
+> verschlüsseltes Secret. Firefly-Folge (Schritt 2): `FIREFLY_SOURCES`-Parser +
+> Multi-Adapter-Speisung.
+
 | Issue | Thema | Status |
 |-------|-------|--------|
 | [Wayfinder#5](https://github.com/ManuelRingwald/Wayfinder/issues/5) (`from-firefly`) | **CAT062 ICD 2.0.0 (Breaking):** neues optionales **I062/136** (Measured Flight Level, FRN 17, i16, LSB 1/4 FL = 25 ft) + **I062/500 von FRN 16 → FRN 27** (UAP-Standardtreue, FSPEC 3→4 Oktette). ADR 0015. Wayfinder-Decoder muss in lockstep nachziehen (AP2). | ✅ erledigt (Wayfinder PR #6, AP2) |
