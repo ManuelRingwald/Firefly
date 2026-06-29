@@ -1,9 +1,15 @@
 # ADR 0019 — ADS-B-Integration via OpenSky Network
 
-- **Status:** akzeptiert
+- **Status:** akzeptiert (Authentifizierung teil-abgelöst durch **ADR 0024**)
 - **Datum:** 2026-06-18
 - **Schnittstellen-relevant:** ja (ICD → 2.4.0, additiv; neues `adsb_age_s`-Feld
   auf `SystemTrack` + ES-Age-Subfeld in I062/290)
+
+> **Aktualisierung (ADR 0024):** Die hier beschriebene HTTP-Basic-Auth
+> (`FIREFLY_OPENSKY_USERNAME`/`_PASSWORD`) ist überholt — OpenSky akzeptiert nur
+> noch **OAuth2 Client-Credentials**. Die Auth-Variablen heißen jetzt
+> `FIREFLY_OPENSKY_CLIENT_ID`/`_CLIENT_SECRET` (+ `_TOKEN_URL`). Der übrige Inhalt
+> dieses ADR bleibt gültig.
 
 ## Kontext
 

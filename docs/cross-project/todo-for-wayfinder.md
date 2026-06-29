@@ -7,12 +7,20 @@ Schnittstellen-Themen, die in Firefly entstehen und Wayfinder-Arbeit auslösen.
 > env-getriebenen **JSON-Liste `FIREFLY_SOURCES`** (Credentials isoliert in
 > benannten Cred-Envs, `user:pass`-Format/UX-2, Live via `FIREFLY_MODE=live`);
 > `adsb_opensky` ist unterstützt, FLARM/Radar reserviert. Maßgeblich:
-> `docs/source-input-contract.md` v1.0.0. **Wayfinder-Folge (ORCH-5, eigene
+> `docs/source-input-contract.md` v1.1.0. **Wayfinder-Folge (ORCH-5, eigene
 > Roadmap — kein separates Issue):** Docker-Backend übersetzt `source_config` →
 > `FIREFLY_SOURCES` + injiziert die aufgelösten Creds in die Cred-Envs; UI gibt
-> je `adsb_opensky`-Quelle zwei Felder (Benutzername/Passwort), intern ein
-> verschlüsseltes Secret. Firefly-Folge (Schritt 2): `FIREFLY_SOURCES`-Parser +
-> Multi-Adapter-Speisung.
+> je `adsb_opensky`-Quelle zwei Felder, intern ein verschlüsseltes Secret.
+> Firefly-Folge (Schritt 2): `FIREFLY_SOURCES`-Parser + Multi-Adapter-Speisung.
+
+> **OpenSky-Auth: OAuth2 statt Basic Auth (ADR 0024, kein separates Issue).**
+> OpenSky hat Basic Auth abgeschaltet — Firefly nutzt jetzt OAuth2
+> Client-Credentials. Der Cred-Wert ist `client_id:client_secret` statt
+> `benutzer:passwort`; der **Wire-Vertrag bleibt** (ein String, ein `:`, Split am
+> ersten `:`), Wayfinders Backend (ORCH-5b) ist **nicht** betroffen. **Wayfinder-
+> Folge (nur UI):** die zwei Secret-Felder im Admin sollten „Client-ID" /
+> „Client-Secret" heißen (statt „Benutzername"/„Passwort"); reiner Label-/Hinweis-
+> Wechsel, keine Logik. Teil der ORCH-5-E2E-Vorbereitung.
 
 | Issue | Thema | Status |
 |-------|-------|--------|

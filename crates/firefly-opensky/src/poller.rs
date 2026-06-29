@@ -9,6 +9,7 @@ use tracing::{debug, warn};
 
 use crate::{
     api::{parse_state, StatesResponse},
+    auth::{self, AuthError, TokenCache},
     config::OpenSkyConfig,
 };
 
@@ -20,12 +21,15 @@ const API_BASE: &str = "https://opensky-network.org/api/states/all";
 pub enum PollError {
     /// HTTP-layer failure (network unreachable, timeout, non-2xx response, …).
     Http(reqwest::Error),
+    /// Failure obtaining an OAuth2 access token (ADR 0024).
+    Auth(AuthError),
 }
 
 impl std::fmt::Display for PollError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PollError::Http(e) => write!(f, "HTTP error: {e}"),
+            PollError::Auth(e) => write!(f, "{e}"),
         }
     }
 }
@@ -33,6 +37,12 @@ impl std::fmt::Display for PollError {
 impl From<reqwest::Error> for PollError {
     fn from(e: reqwest::Error) -> Self {
         PollError::Http(e)
+    }
+}
+
+impl From<AuthError> for PollError {
+    fn from(e: AuthError) -> Self {
+        PollError::Auth(e)
     }
 }
 
@@ -61,6 +71,8 @@ impl From<reqwest::Error> for PollError {
 pub struct OpenSkyPoller {
     config: OpenSkyConfig,
     client: reqwest::Client,
+    /// Cached OAuth2 bearer token (ADR 0024). Unused on the anonymous path.
+    token_cache: TokenCache,
 }
 
 impl OpenSkyPoller {
@@ -71,7 +83,58 @@ impl OpenSkyPoller {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("TLS backend should initialise successfully");
-        Self { config, client }
+        Self {
+            config,
+            client,
+            token_cache: TokenCache::new(),
+        }
+    }
+
+    /// The OAuth2 credentials, when both are configured. Both must be present to
+    /// authenticate; either alone (or neither) means anonymous polling.
+    fn credentials(&self) -> Option<(&str, &str)> {
+        match (
+            self.config.client_id.as_deref(),
+            self.config.client_secret.as_deref(),
+        ) {
+            (Some(id), Some(secret)) => Some((id, secret)),
+            _ => None,
+        }
+    }
+
+    /// Send one `states/all` request, attaching a bearer token when authenticated.
+    async fn send_states(&self) -> Result<reqwest::Response, PollError> {
+        let mut req = self.client.get(API_BASE).query(&[
+            ("lamin", self.config.lat_min.to_string()),
+            ("lomin", self.config.lon_min.to_string()),
+            ("lamax", self.config.lat_max.to_string()),
+            ("lomax", self.config.lon_max.to_string()),
+        ]);
+        if let Some((id, secret)) = self.credentials() {
+            let token = self
+                .token_cache
+                .token(|| auth::fetch_token_http(&self.client, &self.config.token_url, id, secret))
+                .await?;
+            req = req.bearer_auth(token);
+        }
+        Ok(req.send().await?)
+    }
+
+    /// Fetch the state vectors, transparently recovering from a `401`: a cached
+    /// token the server rejected (revoked / server-side expired) is invalidated
+    /// and the request retried once with a fresh token. Anonymous requests do not
+    /// retry (a `401` then is a genuine failure).
+    async fn fetch_states(&self) -> Result<StatesResponse, PollError> {
+        let resp = self.send_states().await?;
+        let resp =
+            if resp.status() == reqwest::StatusCode::UNAUTHORIZED && self.credentials().is_some() {
+                warn!("OpenSky returned 401 — refreshing OAuth2 token and retrying once");
+                self.token_cache.invalidate().await;
+                self.send_states().await?
+            } else {
+                resp
+            };
+        Ok(resp.error_for_status()?.json().await?)
     }
 
     /// Perform a single poll: fetch the state vectors for the configured
@@ -80,21 +143,7 @@ impl OpenSkyPoller {
     /// Aircraft that are on the ground, or whose position is unknown, are
     /// silently dropped.
     pub async fn poll(&self) -> Result<Vec<Plot>, PollError> {
-        let mut req = self.client.get(API_BASE).query(&[
-            ("lamin", self.config.lat_min.to_string()),
-            ("lomin", self.config.lon_min.to_string()),
-            ("lamax", self.config.lat_max.to_string()),
-            ("lomax", self.config.lon_max.to_string()),
-        ]);
-
-        if let (Some(user), Some(pass)) = (
-            self.config.username.as_deref(),
-            self.config.password.as_deref(),
-        ) {
-            req = req.basic_auth(user, Some(pass));
-        }
-
-        let resp: StatesResponse = req.send().await?.error_for_status()?.json().await?;
+        let resp = self.fetch_states().await?;
         let timestamp = resp.time as f64;
         let sensor = self.config.sensor_id;
 

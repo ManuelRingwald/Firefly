@@ -59,11 +59,15 @@ secret-frei (notfalls loggbar), und jedes Secret ist isoliert.
 
 **Format des Cred-Werts (UX-2, abgestimmt mit Wayfinder):** Wayfinders Quell-Modell
 hat **eine** Credential-Referenz je Quelle (= **ein** Secret-Wert). OpenSky braucht
-User **und** Pass; der Wert ist daher `benutzer:passwort`, und der Adapter
-**splittet am ersten `:`** (Basic-Auth-Usernames enthalten kein `:`). Die Wayfinder-
-UI bietet dafür zwei getrennte Felder (Benutzername/Passwort) und fügt sie vor dem
-verschlüsselten Speichern zusammen — der kombinierte String berührt das Backend nur
-verschlüsselt.
+zwei Teile; der Wert ist daher ein String mit **einem** Doppelpunkt, und der Adapter
+**splittet am ersten `:`**. Die Wayfinder-UI bietet dafür zwei getrennte Felder und
+fügt sie vor dem verschlüsselten Speichern zusammen — der kombinierte String berührt
+das Backend nur verschlüsselt.
+
+> **Aktualisierung (ADR 0024):** Die zwei Teile sind seit der OpenSky-OAuth2-
+> Migration `client_id:client_secret` (nicht mehr `benutzer:passwort`). Der
+> **Wire-Vertrag bleibt** (ein String, ein Doppelpunkt, Split am ersten `:`); nur
+> die Bedeutung ändert sich. `docs/source-input-contract.md` v1.1.0.
 
 ### 3. Live-Schalter
 

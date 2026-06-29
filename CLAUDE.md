@@ -183,6 +183,8 @@ stehen in `docs/STATUS.md`.
 | **ADR 0016** | CAT062 Track-Ende-Signalisierung (I062/080 TSE); ICD 2.2.0, additiv | ✅ erledigt (beide Repos, PR #16/#8) |
 | **ADR 0018** | CAT065 SDPS-Heartbeat (`0x41`); ICD 2.3.0, additiv | ✅ erledigt (beide Repos) |
 | **ADR 0022** | CAT063 Sensor Status (`0x3F`, Per-Sensor-Liveness); ICD 2.5.0, additiv (Firefly #32) | ✅ erledigt (Firefly); Wayfinder-Decoder zieht nach (WF-1…3) |
+| **ADR 0023** | Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, env-getrieben); Antwort auf Wayfinder #35 | ✅ erledigt (Kontrakt + adsb_opensky) |
+| **ADR 0024** | OpenSky-Auth Basic → OAuth2 Client-Credentials (Token-Cache, 401-Recovery); Cred-Wert `client_id:client_secret`, Wire-Vertrag unverändert | ✅ erledigt (Firefly); Wayfinder-UI-Label zieht nach |
 | **Betriebs-Härtung** | Observability-Ausbau, Lastfestigkeit, Deployment | ⏳ |
 
 Innerhalb jedes Vorhabens wird in kleinen Schritten nach Abschnitt 2 gearbeitet.

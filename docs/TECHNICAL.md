@@ -71,8 +71,9 @@ echten OpenSky-Plot-Eingang.
 | `FIREFLY_OPENSKY_LON_MIN` | f64 | `5.0` | Westliche Begrenzung (Grad) |
 | `FIREFLY_OPENSKY_LON_MAX` | f64 | `16.0` | Östliche Begrenzung (Grad) |
 | `FIREFLY_OPENSKY_POLL_INTERVAL_SECS` | u64 | `10` | Abfrageintervall in Sekunden (≥ 10 ohne Account, ≥ 5 mit Account) |
-| `FIREFLY_OPENSKY_USERNAME` | string | — | HTTP-Basic-Auth Benutzername (optional) |
-| `FIREFLY_OPENSKY_PASSWORD` | string | — | HTTP-Basic-Auth Passwort (optional) |
+| `FIREFLY_OPENSKY_CLIENT_ID` | string | — | OAuth2 Client-ID (optional; ADR 0024). Mit `_CLIENT_SECRET` zusammen → authentifiziert, sonst anonym |
+| `FIREFLY_OPENSKY_CLIENT_SECRET` | string | — | OAuth2 Client-Secret (optional; ADR 0024) |
+| `FIREFLY_OPENSKY_TOKEN_URL` | string | OpenSky-Keycloak-Realm | OAuth2-Token-Endpoint (Client-Credentials); überschreibbar für Test/Realm-Wechsel |
 | `FIREFLY_OPENSKY_SENSOR_ID` | u16 | `200` | Sensor-ID, die ADS-B-Plots im Tracker zugeordnet werden |
 
 > **Standalone-/Dev-Pfad.** Die `FIREFLY_OPENSKY_*`-Variablen konfigurieren **eine**
@@ -429,16 +430,16 @@ spec:
               value: "true"
             - name: FIREFLY_OPENSKY_ENABLED
               value: "true"
-            - name: FIREFLY_OPENSKY_USERNAME
+            - name: FIREFLY_OPENSKY_CLIENT_ID
               valueFrom:
                 secretKeyRef:
                   name: opensky-credentials
-                  key: username
-            - name: FIREFLY_OPENSKY_PASSWORD
+                  key: client_id
+            - name: FIREFLY_OPENSKY_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: opensky-credentials
-                  key: password
+                  key: client_secret
             - name: RUST_LOG
               value: "info"
           livenessProbe:

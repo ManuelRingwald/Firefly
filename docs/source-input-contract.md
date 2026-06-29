@@ -20,6 +20,11 @@
 
 ## Version
 
+**1.1.0** (2026-06-29) — `adsb_opensky`-Cred-Wert ist nun
+`client_id:client_secret` (OpenSky OAuth2 Client-Credentials, ADR 0024) statt
+`benutzer:passwort`. **Wire-Vertrag unverändert** (ein String, ein Doppelpunkt) —
+nur die Bedeutung der zwei Teile, daher Minor-Bump.
+
 **1.0.0** (2026-06-29) — Erstdefinition (ADR 0023). JSON-Liste `FIREFLY_SOURCES`,
 Credentials isoliert in benannten Cred-Envs, `adsb_opensky` als erster
 unterstützter Quell-Typ; `flarm_aprs`/`radar_asterix` reserviert.
@@ -86,9 +91,12 @@ Der Credential-**Wert** steht in der durch `cred_env` benannten **separaten** En
 nie im `FIREFLY_SOURCES`-Blob. Das hält die Liste secret-frei und isoliert jedes
 Secret.
 
-**`adsb_opensky` (OpenSky Basic-Auth):** Der Wert ist `benutzer:passwort`; der
-Adapter **splittet am ersten `:`**. Kein `cred_env` → anonymer Zugang (gedrosseltes
-Poll-Intervall, ADR 0019).
+**`adsb_opensky` (OpenSky OAuth2 Client-Credentials, ADR 0024):** Der Wert ist
+`client_id:client_secret`; der Adapter **splittet am ersten `:`** (Client-IDs
+enthalten kein `:`) und tauscht das Paar am OAuth2-Token-Endpoint gegen ein
+kurzlebiges Bearer-Token (Basic Auth ist von OpenSky abgeschaltet). Kein `cred_env`
+→ anonymer Zugang (gedrosseltes Poll-Intervall, ADR 0019). Der **Wire-Vertrag**
+(ein String, ein Doppelpunkt) ist unverändert; nur die Bedeutung der zwei Teile.
 
 > **Sicherheits-Grenze (ehrlich).** Eine Cred-Env trägt den **Klartext** zur
 > Laufzeit (sichtbar in `docker inspect`/Prozess-Env). Wayfinders Verschlüsselung
@@ -98,4 +106,6 @@ Poll-Intervall, ADR 0019).
 
 ## 5. Changelog
 
+- **1.1.0** (2026-06-29, ADR 0024) — `adsb_opensky`-Cred-Wert ist
+  `client_id:client_secret` (OAuth2 Client-Credentials); Wire-Vertrag unverändert.
 - **1.0.0** (2026-06-29, ADR 0023) — Erstdefinition.

@@ -13,17 +13,21 @@
 ## 🎯 Stand 2026-06-29
 
 - **Zuletzt aktualisiert:** 2026-06-29
-- **Letzte Arbeit:** **Schritt 2b** — Live-Verdrahtung von `FIREFLY_SOURCES`.
-  `build_live_state` löst die Quellen auf (`resolve_sources`: `adsb_opensky` →
-  `OpenSkyConfig`, FLARM/Radar → WARN+skip, Fehler → Prozess-Exit), startet **einen
-  Poller je Quelle** in den geteilten `mpsc`, registriert alle Sensor-IDs (CAT063);
-  Referenzpunkt = Union-BBox-Mitte, Takt = min Poll-Intervall (`representative_config`);
-  `FIREFLY_SOURCES` hat Vorrang vor `FIREFLY_OPENSKY_*` (Fallback). 15 sources-Tests,
-  alle Gates grün, TECHNICAL/INSTALLATION-Env nachgezogen. Damit ist die
-  **Firefly-Seite von #35 (Kontrakt + adsb_opensky) komplett** (ADR 0023 → 2a → 2b).
-- **Nächster Schritt:** **Wayfinder ORCH-5** — Docker-Backend übersetzt
-  `source_config` → `FIREFLY_SOURCES` + Cred-Injection; UI-Zwei-Felder (UX-2). Danach
-  End-to-End-Abnahme. FLARM/APRS- + Radar-ASTERIX-Adapter bleiben spätere ADRs.
+- **Letzte Arbeit:** **ADR 0024 — OpenSky OAuth2 Client-Credentials.** OpenSky hat
+  Basic Auth abgeschaltet; der Adapter holt jetzt ein OAuth2-Bearer-Token. Neuer
+  `auth.rs`-Token-Manager (`TokenCache`: Reuse bis Skew-vor-Ablauf, proaktiver
+  Refresh, 401-Recovery; reine `needs_refresh` + injizierter Fetch → ohne Netz/Uhr
+  testbar). `config.rs`: `client_id`/`client_secret`/`token_url`
+  (`FIREFLY_OPENSKY_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`). `poller.rs`: Bearer
+  + Einmal-Retry bei 401; anonym unverändert. Cred-Split (`sources.rs`) bleibt am
+  ersten `:`, jetzt `client_id:client_secret`. Wire-Vertrag unverändert,
+  `source-input-contract.md` → v1.1.0. Alle Gates grün (15 opensky-Unit-Tests).
+  Davor: Schritt 2b (Live-Verdrahtung `FIREFLY_SOURCES`), Firefly-Seite von #35.
+- **Nächster Schritt:** zurück zu **Wayfinder** — (1) UI-Labels „Benutzername/
+  Passwort" → „Client-ID/Client-Secret", (2) **E2E-Abnahme-Harness** (Compose:
+  DB + Server + Orchestrator + Docker-Socket) + Anonym-Trockenlauf; authentifizierte
+  Live-Abnahme dann lokal beim Betreiber. FLARM/APRS- + Radar-ASTERIX-Adapter bleiben
+  spätere ADRs.
 
 ---
 

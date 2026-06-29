@@ -24,8 +24,9 @@ abgekapselt und vollständig unit-testbar, bevor er an den Server gehängt wird.
 - **`opensky_config_from_spec(spec, index, get_env)`** → `OpenSkyConfig`: bildet
   einen `adsb_opensky`-Eintrag auf die bestehende Adapter-Konfig ab —
   BBox → Query-Fenster, `sensor_id` (Default wenn fehlend), und die per `cred_env`
-  **benannte** Env aufgelöst und am **ersten `:`** in `user:pass` gesplittet (UX-2;
-  Passwort darf `:` enthalten, der Basic-Auth-Username nicht). Fehlende/leere
+  **benannte** Env aufgelöst und am **ersten `:`** in `client_id:client_secret`
+  gesplittet (UX-2, OAuth2 seit ADR 0024; das Client-Secret darf `:` enthalten, die
+  Client-ID nicht). Fehlende/leere
   Cred-Env → Fehler; ohne `cred_env` → anonymer Zugang. `get_env` ist injiziert →
   testbar ohne Prozess-Umgebung.
 - **BBox-Validierung:** finit, WGS84-Bereich, `min ≤ max` — eine Konfig, die sonst
