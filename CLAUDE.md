@@ -151,10 +151,12 @@ Ein Schritt gilt erst als fertig, wenn:
 ## 6. Git & Branches
 
 - Entwicklung **immer** auf dem vereinbarten Feature-Branch
-  (`claude/loving-turing-2obzk6`).
+  (`claude/roadmap-action-points-z50u6w`).
 - Niemals ungefragt auf einen anderen Branch pushen.
-- **Kein** Pull Request, außer der Projektverantwortliche bittet ausdrücklich
-  darum.
+- **Pull-Request-Workflow (wie Wayfinder, ab 2026-06-29 abgestimmt):** pro
+  abgeschlossenem Häppchen ein PR gegen `main`, nach Freigabe gemergt; danach den
+  Feature-Branch frisch auf `main` aufsetzen. (Frühere Regel „kein PR" ist damit
+  abgelöst.)
 - Commits klein und thematisch geschnitten; eine Sache pro Commit.
 
 ---
