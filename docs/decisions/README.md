@@ -36,3 +36,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0020 — Live-Tracker-Modus und Plot-Aufzeichnung](0020-live-tracker-modus-fuer-echtzeit-adsb.md)
 - [0021 — Konfigurierbarer System-Referenzpunkt (Single Source of Truth)](0021-konfigurierbarer-system-referenzpunkt.md)
 - [0022 — CAT063 Sensor Status Messages (Per-Sensor-Liveness)](0022-cat063-sensor-status.md)
+- [0023 — Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, env-getrieben)](0023-quell-eingangs-kontrakt-firefly-sources.md)
