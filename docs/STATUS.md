@@ -13,15 +13,17 @@
 ## 🎯 Stand 2026-06-29
 
 - **Zuletzt aktualisiert:** 2026-06-29
-- **Letzte Arbeit:** **ADR 0023 ratifiziert** — Quell-Eingangs-Kontrakt
-  (`FIREFLY_SOURCES`, env-getriebene JSON-Quell-Liste; Credentials isoliert in
-  benannten Cred-Envs; `adsb_opensky` unterstützt, FLARM/Radar reserviert).
-  Versioniertes Doku `docs/source-input-contract.md` v1.0.0. Antwort auf
-  Wayfinder-Issue #35; Entscheidungen D1 = JSON-Liste, D2 = `user:pass`-Secret (UX-2).
-  **Doku-only**, kein Code.
-- **Nächster Schritt:** Schritt 2 — `FIREFLY_SOURCES` parsen + Live-Tracker aus
-  *N* Adaptern speisen (Cred-Split, Validierung, Tests). Nach Ankündigung & „Go"
-  (S4 · Opus 4.8). Wayfinder zieht ORCH-5 (Übersetzung + UI) nach.
+- **Letzte Arbeit:** **Schritt 2a** — `FIREFLY_SOURCES`-Parser + Mapping
+  (`firefly-server::sources`): `serde`-Typen (Vokabular/BBox/Spec), `parse_sources`
+  (unbekannter Typ/malformes JSON → Startfehler), `opensky_config_from_spec`
+  (BBox→Query-Fenster, `cred_env`→`user:pass`-Split, BBox-Validierung). Reine,
+  env-freie Logik, 11 Unit-Tests, alle Gates grün. Davor: ADR 0023 + Kontrakt-Doku
+  v1.0.0 (PR #36 gemergt). PR-Workflow für Firefly aktiv (Charter §6).
+- **Nächster Schritt:** **Schritt 2b** — `build_live_state` aus *N* Adaptern der
+  Liste speisen (Poller je `adsb_opensky` in geteilten `mpsc`; FLARM/Radar →
+  WARN+skip; Sensor-Health über alle IDs; Vorrang vor `FIREFLY_OPENSKY_*`) +
+  TECHNICAL/INSTALLATION-Env. Nach Ankündigung & „Go" (S4 · Opus 4.8). Danach
+  Wayfinder ORCH-5 (Übersetzung + UI).
 
 ---
 
