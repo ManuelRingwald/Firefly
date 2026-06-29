@@ -184,6 +184,72 @@ fn validate_bbox(b: &BBox, index: usize) -> Result<(), SourceError> {
     Ok(())
 }
 
+/// Runnable adapters resolved from a parsed source list.
+pub struct ResolvedSources {
+    /// One [`OpenSkyConfig`] per `adsb_opensky` source, in list order.
+    pub opensky: Vec<OpenSkyConfig>,
+    /// Reserved types present but without an adapter yet — the caller logs a WARN
+    /// and skips them (availability over completeness, ADR 0023).
+    pub skipped: Vec<SourceType>,
+}
+
+/// Resolve a parsed source list into runnable adapter configs. An `adsb_opensky`
+/// entry becomes an [`OpenSkyConfig`] (credentials resolved via `get_env`);
+/// `flarm_aprs`/`radar_asterix` go to `skipped` (reserved, no adapter yet). A
+/// malformed `adsb_opensky` entry (missing/invalid bbox, bad credential) is a hard
+/// error — a configured source that cannot run must not be silently dropped.
+pub fn resolve_sources(
+    specs: &[SourceSpec],
+    get_env: impl Fn(&str) -> Option<String>,
+) -> Result<ResolvedSources, SourceError> {
+    let mut opensky = Vec::new();
+    let mut skipped = Vec::new();
+    for (index, spec) in specs.iter().enumerate() {
+        match spec.source_type {
+            SourceType::AdsbOpensky => {
+                opensky.push(opensky_config_from_spec(spec, index, &get_env)?)
+            }
+            other => skipped.push(other),
+        }
+    }
+    Ok(ResolvedSources { opensky, skipped })
+}
+
+/// A representative config across N source configs, used for the tracking frame
+/// origin (its bbox midpoint, unless `FIREFLY_SYSTEM_REF_*` overrides) and the
+/// tracker's output cadence: the **union** of all bboxes, the **minimum** poll
+/// interval (publish at least as often as the fastest source), and the first
+/// source's sensor id (a placeholder for the geodetic ADS-B path). Falls back to
+/// the default when there is no source.
+pub fn representative_config(configs: &[OpenSkyConfig]) -> OpenSkyConfig {
+    let mut rep = match configs.first() {
+        Some(first) => first.clone(),
+        None => return OpenSkyConfig::default(),
+    };
+    rep.lat_min = configs
+        .iter()
+        .map(|c| c.lat_min)
+        .fold(f64::INFINITY, f64::min);
+    rep.lat_max = configs
+        .iter()
+        .map(|c| c.lat_max)
+        .fold(f64::NEG_INFINITY, f64::max);
+    rep.lon_min = configs
+        .iter()
+        .map(|c| c.lon_min)
+        .fold(f64::INFINITY, f64::min);
+    rep.lon_max = configs
+        .iter()
+        .map(|c| c.lon_max)
+        .fold(f64::NEG_INFINITY, f64::max);
+    rep.poll_interval_secs = configs
+        .iter()
+        .map(|c| c.poll_interval_secs)
+        .min()
+        .unwrap_or(rep.poll_interval_secs);
+    rep
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,6 +408,99 @@ mod tests {
             opensky_config_from_spec(&out_of_range, 0, no_env),
             Err(SourceError::InvalidBBox { .. })
         ));
+    }
+
+    #[test]
+    fn resolve_splits_opensky_from_reserved_types() {
+        let specs = vec![
+            adsb_spec(None, Some(201)),
+            SourceSpec {
+                source_type: SourceType::FlarmAprs,
+                bbox: Some(BBox {
+                    min_lat: 48.0,
+                    min_lon: 7.0,
+                    max_lat: 50.0,
+                    max_lon: 9.0,
+                }),
+                sac: None,
+                sic: None,
+                sensor_id: None,
+                cred_env: None,
+            },
+            SourceSpec {
+                source_type: SourceType::RadarAsterix,
+                bbox: None,
+                sac: Some(1),
+                sic: Some(4),
+                sensor_id: None,
+                cred_env: None,
+            },
+            adsb_spec(None, Some(202)),
+        ];
+        let resolved = resolve_sources(&specs, no_env).expect("valid");
+        assert_eq!(resolved.opensky.len(), 2, "two adsb_opensky configs");
+        assert_eq!(resolved.opensky[0].sensor_id, SensorId(201));
+        assert_eq!(resolved.opensky[1].sensor_id, SensorId(202));
+        assert_eq!(
+            resolved.skipped,
+            vec![SourceType::FlarmAprs, SourceType::RadarAsterix]
+        );
+    }
+
+    #[test]
+    fn resolve_propagates_a_bad_adsb_entry() {
+        let specs = vec![SourceSpec {
+            source_type: SourceType::AdsbOpensky,
+            bbox: None, // missing → hard error, not skipped
+            sac: None,
+            sic: None,
+            sensor_id: None,
+            cred_env: None,
+        }];
+        assert!(matches!(
+            resolve_sources(&specs, no_env),
+            Err(SourceError::MissingBBox { index: 0 })
+        ));
+    }
+
+    #[test]
+    fn representative_unions_bboxes_and_takes_min_interval() {
+        let mut a = opensky_config_from_spec(
+            &adsb_spec_with_bbox(BBox {
+                min_lat: 48.0,
+                min_lon: 7.0,
+                max_lat: 50.0,
+                max_lon: 9.0,
+            }),
+            0,
+            no_env,
+        )
+        .unwrap();
+        a.poll_interval_secs = 10;
+        let mut b = opensky_config_from_spec(
+            &adsb_spec_with_bbox(BBox {
+                min_lat: 49.0,
+                min_lon: 6.0,
+                max_lat: 52.0,
+                max_lon: 8.0,
+            }),
+            1,
+            no_env,
+        )
+        .unwrap();
+        b.poll_interval_secs = 5;
+
+        let rep = representative_config(&[a, b]);
+        assert_eq!(rep.lat_min, 48.0);
+        assert_eq!(rep.lat_max, 52.0);
+        assert_eq!(rep.lon_min, 6.0);
+        assert_eq!(rep.lon_max, 9.0);
+        assert_eq!(rep.poll_interval_secs, 5, "fastest source's cadence");
+    }
+
+    #[test]
+    fn representative_of_empty_is_the_default() {
+        assert_eq!(representative_config(&[]), OpenSkyConfig::default());
     }
 
     // --- helpers ---------------------------------------------------------

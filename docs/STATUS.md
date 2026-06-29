@@ -13,17 +13,17 @@
 ## 🎯 Stand 2026-06-29
 
 - **Zuletzt aktualisiert:** 2026-06-29
-- **Letzte Arbeit:** **Schritt 2a** — `FIREFLY_SOURCES`-Parser + Mapping
-  (`firefly-server::sources`): `serde`-Typen (Vokabular/BBox/Spec), `parse_sources`
-  (unbekannter Typ/malformes JSON → Startfehler), `opensky_config_from_spec`
-  (BBox→Query-Fenster, `cred_env`→`user:pass`-Split, BBox-Validierung). Reine,
-  env-freie Logik, 11 Unit-Tests, alle Gates grün. Davor: ADR 0023 + Kontrakt-Doku
-  v1.0.0 (PR #36 gemergt). PR-Workflow für Firefly aktiv (Charter §6).
-- **Nächster Schritt:** **Schritt 2b** — `build_live_state` aus *N* Adaptern der
-  Liste speisen (Poller je `adsb_opensky` in geteilten `mpsc`; FLARM/Radar →
-  WARN+skip; Sensor-Health über alle IDs; Vorrang vor `FIREFLY_OPENSKY_*`) +
-  TECHNICAL/INSTALLATION-Env. Nach Ankündigung & „Go" (S4 · Opus 4.8). Danach
-  Wayfinder ORCH-5 (Übersetzung + UI).
+- **Letzte Arbeit:** **Schritt 2b** — Live-Verdrahtung von `FIREFLY_SOURCES`.
+  `build_live_state` löst die Quellen auf (`resolve_sources`: `adsb_opensky` →
+  `OpenSkyConfig`, FLARM/Radar → WARN+skip, Fehler → Prozess-Exit), startet **einen
+  Poller je Quelle** in den geteilten `mpsc`, registriert alle Sensor-IDs (CAT063);
+  Referenzpunkt = Union-BBox-Mitte, Takt = min Poll-Intervall (`representative_config`);
+  `FIREFLY_SOURCES` hat Vorrang vor `FIREFLY_OPENSKY_*` (Fallback). 15 sources-Tests,
+  alle Gates grün, TECHNICAL/INSTALLATION-Env nachgezogen. Damit ist die
+  **Firefly-Seite von #35 (Kontrakt + adsb_opensky) komplett** (ADR 0023 → 2a → 2b).
+- **Nächster Schritt:** **Wayfinder ORCH-5** — Docker-Backend übersetzt
+  `source_config` → `FIREFLY_SOURCES` + Cred-Injection; UI-Zwei-Felder (UX-2). Danach
+  End-to-End-Abnahme. FLARM/APRS- + Radar-ASTERIX-Adapter bleiben spätere ADRs.
 
 ---
 

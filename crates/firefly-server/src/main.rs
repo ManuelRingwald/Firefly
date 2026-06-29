@@ -9,6 +9,7 @@ use firefly_core::Plot;
 use firefly_geo::Wgs84;
 use firefly_multicast::{MulticastConfig, SensorHealthMonitor};
 use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
+use firefly_server::sources;
 use firefly_server::{
     build_live_tracker, live_system_reference_point, router, run_live_cat062, run_live_tracker,
     scene, scene_reference_point, AppState, FrameSource, LiveSnapshot, LiveTracker, Metrics, Scene,
@@ -229,29 +230,41 @@ async fn build_live_state(
     ws_token: Option<String>,
     ws_allowed_origin: Option<String>,
 ) -> AppState {
-    let opensky_config = OpenSkyConfig::from_env();
-    let sensor_id = opensky_config.sensor_id;
-    let output_period = Duration::from_secs(opensky_config.poll_interval_secs);
+    // Resolve the live source set (ADR 0023): FIREFLY_SOURCES — the orchestrated
+    // contract — takes precedence; otherwise fall back to the single
+    // FIREFLY_OPENSKY_* config (standalone/dev). A FIREFLY_SOURCES config fault is
+    // fatal, so the orchestrator sees the container fail rather than run
+    // mis-sourced.
+    let configs = resolve_live_sources();
+
+    // Representative config across N sources: union bbox (tracking-frame origin),
+    // min poll interval (output cadence), first sensor id (placeholder for the
+    // geodetic ADS-B path).
+    let representative = sources::representative_config(&configs);
+    let sensor_id = representative.sensor_id;
+    let output_period = Duration::from_secs(representative.poll_interval_secs);
 
     tracing::info!(
-        lat_min = opensky_config.lat_min,
-        lat_max = opensky_config.lat_max,
-        lon_min = opensky_config.lon_min,
-        lon_max = opensky_config.lon_max,
-        poll_interval_secs = opensky_config.poll_interval_secs,
+        source_count = configs.len(),
+        lat_min = representative.lat_min,
+        lat_max = representative.lat_max,
+        lon_min = representative.lon_min,
+        lon_max = representative.lon_max,
+        poll_interval_secs = representative.poll_interval_secs,
         sensor_id = sensor_id.0,
         "live mode: starting ADS-B tracker"
     );
 
-    // Channel: OpenSky poller → live tracker (bounded; drop batches if the
-    // tracker is busy rather than blocking the network callback).
+    // Channel: OpenSky pollers → live tracker (bounded; drop batches if the
+    // tracker is busy rather than blocking the network callback). One sender clone
+    // per source feeds this shared channel.
     let (plots_tx, plots_rx) = mpsc::channel::<Vec<Plot>>(32);
 
     // Channel: live tracker → WS/CAT062 consumers ("last value wins" watch).
     let (snapshot_tx, snapshot_rx) = watch::channel(LiveSnapshot::empty());
 
     // Build and spawn the live tracker task.
-    let tracker = build_live_tracker(&opensky_config);
+    let tracker = build_live_tracker(&representative);
     let live = LiveTracker::new(tracker, None); // recorder wired in AP9.4c-4
     {
         let m = Arc::clone(&metrics);
@@ -271,23 +284,27 @@ async fn build_live_state(
 
     // The system reference point (ADR 0021): one origin for both the tracking
     // frame (above) and the I062/100 projection (below). FIREFLY_SYSTEM_REF_*
-    // overrides it; otherwise it is the OpenSky bounding-box midpoint.
-    let reference = live_system_reference_point(&opensky_config);
+    // overrides it; otherwise it is the union bounding-box midpoint.
+    let reference = live_system_reference_point(&representative);
 
-    // Sensor health monitor: one OpenSky sensor, scan period = poll interval.
-    let sensor_monitor = Arc::new(SensorHealthMonitor::new_live([(
-        sensor_id,
-        output_period.as_secs_f64(),
-    )]));
+    // Sensor health monitor: every source's sensor, scan period = its poll
+    // interval (CAT063 per-sensor liveness).
+    let sensor_monitor = Arc::new(SensorHealthMonitor::new_live(
+        configs
+            .iter()
+            .map(|c| (c.sensor_id, c.poll_interval_secs as f64)),
+    ));
 
-    // Spawn the OpenSky poller, feeding plots into the tracker via mpsc, and
-    // notifying the sensor monitor on each batch.
-    spawn_opensky_poller_live(
-        opensky_config,
-        plots_tx,
-        Arc::clone(&metrics),
-        Arc::clone(&sensor_monitor),
-    );
+    // Spawn one OpenSky poller per source, all feeding the shared plot channel and
+    // notifying the sensor monitor for their own sensor on each batch.
+    for cfg in configs {
+        spawn_opensky_poller_live(
+            cfg,
+            plots_tx.clone(),
+            Arc::clone(&metrics),
+            Arc::clone(&sensor_monitor),
+        );
+    }
 
     // Spawn the live CAT062 feed, if enabled.
     spawn_cat062_live(Arc::clone(&metrics), reference, snapshot_rx.clone());
@@ -304,6 +321,40 @@ async fn build_live_state(
         ws_token,
         ws_allowed_origin,
     }
+}
+
+/// Resolve the live source set (ADR 0023). `FIREFLY_SOURCES` — the orchestrated
+/// source-input contract — wins when set; otherwise the single `FIREFLY_OPENSKY_*`
+/// config (standalone/dev) is used, preserving the pre-contract behaviour.
+///
+/// A `FIREFLY_SOURCES` parse or config fault is **fatal**: the process exits so
+/// the orchestrator sees the container fail rather than run with the wrong (or no)
+/// sources. Reserved types without an adapter yet are logged and skipped; an empty
+/// effective set runs an idle tracker (the instance still serves an empty sky).
+fn resolve_live_sources() -> Vec<OpenSkyConfig> {
+    let json = match std::env::var("FIREFLY_SOURCES") {
+        Ok(j) if !j.trim().is_empty() => j,
+        _ => return vec![OpenSkyConfig::from_env()],
+    };
+    let specs = sources::parse_sources(&json).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "FIREFLY_SOURCES invalid; aborting");
+        std::process::exit(1);
+    });
+    let resolved =
+        sources::resolve_sources(&specs, |k| std::env::var(k).ok()).unwrap_or_else(|e| {
+            tracing::error!(error = %e, "FIREFLY_SOURCES unusable; aborting");
+            std::process::exit(1);
+        });
+    for source_type in &resolved.skipped {
+        tracing::warn!(
+            ?source_type,
+            "FIREFLY_SOURCES: no adapter for this source type yet; skipping"
+        );
+    }
+    if resolved.opensky.is_empty() {
+        tracing::warn!("FIREFLY_SOURCES: no live source adapter active (empty sky)");
+    }
+    resolved.opensky
 }
 
 /// Spawn the OpenSky poller in Live mode: every batch of plots is sent into

@@ -165,6 +165,13 @@ parallel in einer `.ffplots`-Datei aufgezeichnet (ADR 0020).
 > den OpenSky-Poller nur als **Log-only**-Sonde im Replay-Modus (Plots werden
 > geloggt, aber nicht verarbeitet).
 
+> **Orchestrierter Betrieb (ADR 0023).** Dieser Abschnitt beschreibt die
+> **Standalone**-Konfiguration über `FIREFLY_OPENSKY_*` (eine Quelle, von Hand
+> gesetzt). Wird Firefly von Wayfinder **auto-orchestriert** (eine Instanz pro
+> Feed), setzt der Orchestrator stattdessen `FIREFLY_SOURCES` (JSON-Quell-Liste)
+> + benannte Credential-Envs; diese haben dann **Vorrang** vor `FIREFLY_OPENSKY_*`.
+> Den Vertrag beschreibt `docs/source-input-contract.md`.
+
 ### Schritt 1: OpenSky-Account anlegen (optional, empfohlen)
 
 Anonymer Zugang ist möglich, aber auf **1 Anfrage / 10 Sekunden** gedrosselt.
