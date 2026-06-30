@@ -1,7 +1,7 @@
 //! The sensor side of the simulation: turning true target positions into noisy,
 //! sometimes-missing radar plots.
 
-use firefly_core::{DetectionKind, ModeAC, Plot, Sensor, Timestamp};
+use firefly_core::{DetectionKind, ModeAC, Plot, Sensor, SourceKind, Timestamp};
 use firefly_geo::{Enu, LocalFrame, Polar};
 
 use crate::rng::Pcg32;
@@ -127,13 +127,21 @@ impl Radar {
 
         // Decide what kind of plot this is and what SSR data rides along.
         let target_has_transponder = target.mode_3a.is_some() || target.icao_address.is_some();
-        let (kind, mode_ac) = if self.params.has_ssr && target_has_transponder {
+        let (kind, source, mode_ac) = if self.params.has_ssr && target_has_transponder {
             // Geometric height of the target, used as a stand-in for Mode C
             // pressure altitude (no atmosphere model in M1).
             let geodetic = scenario_frame.enu_to_geodetic(&position);
             let flight_level_ft = geodetic.height / 0.3048;
+            // A Mode S reply (24-bit ICAO address) is selective interrogation;
+            // a Mode A/C reply alone is classic SSR (ADR 0027).
+            let source = if target.icao_address.is_some() {
+                SourceKind::ModeS
+            } else {
+                SourceKind::Ssr
+            };
             (
                 DetectionKind::Combined,
+                source,
                 ModeAC {
                     mode_3a: target.mode_3a,
                     flight_level_ft: Some(flight_level_ft),
@@ -142,7 +150,7 @@ impl Radar {
                 },
             )
         } else {
-            (DetectionKind::Primary, ModeAC::default())
+            (DetectionKind::Primary, SourceKind::Psr, ModeAC::default())
         };
 
         Some(Plot {
@@ -150,6 +158,7 @@ impl Radar {
             time: Timestamp(plot_time),
             measurement: firefly_core::Measurement::Polar(measurement),
             kind,
+            source,
             mode_ac,
         })
     }

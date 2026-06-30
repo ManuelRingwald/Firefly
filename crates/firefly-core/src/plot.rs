@@ -31,6 +31,30 @@ impl DetectionKind {
     }
 }
 
+/// Which **surveillance technology** produced a plot (ADR 0027).
+///
+/// [`DetectionKind`] describes the radar-dwell correlation (primary/secondary);
+/// `SourceKind` is orthogonal and names the *technology family*, so a fused track
+/// can report its honest per-technology provenance (PSR / SSR / Mode S / ADS-B /
+/// FLARM) instead of the consumer guessing from field presence. The cooperative
+/// geodetic sources (ADS-B vs FLARM) are otherwise indistinguishable — both are
+/// `Measurement::Geodetic` + `DetectionKind::Secondary` — so the producer tags
+/// them explicitly here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SourceKind {
+    /// Primary surveillance radar skin paint.
+    #[default]
+    Psr,
+    /// Secondary surveillance radar Mode A/C reply (no Mode S address).
+    Ssr,
+    /// Mode S selective interrogation reply (carries a 24-bit ICAO address).
+    ModeS,
+    /// ADS-B (1090 Extended Squitter) geodetic self-report.
+    AdsB,
+    /// FLARM / Open Glider Network geodetic report (ADR 0026).
+    Flarm,
+}
+
 /// An aircraft callsign / flight identification (Mode S "target identification").
 ///
 /// Stored as up to 8 ASCII characters, space-padded — the same shape as the
@@ -122,6 +146,11 @@ pub struct Plot {
     pub measurement: Measurement,
     /// What kind of detection this is.
     pub kind: DetectionKind,
+    /// Which surveillance technology produced this plot (ADR 0027). Defaults to
+    /// [`SourceKind::Psr`] for backward compatibility with `.ffplots` files
+    /// recorded before this field existed (ADR 0020 / FR-OPS-006).
+    #[serde(default)]
+    pub source: SourceKind,
     /// Secondary-radar data, present when [`DetectionKind::has_secondary`].
     pub mode_ac: ModeAC,
 }
@@ -134,6 +163,7 @@ impl Plot {
             time,
             measurement: Measurement::Polar(measurement),
             kind: DetectionKind::Primary,
+            source: SourceKind::Psr,
             mode_ac: ModeAC::default(),
         }
     }
@@ -149,6 +179,48 @@ impl Plot {
         sigma_pos_m: f64,
         mode_ac: ModeAC,
     ) -> Self {
+        Self::geodetic(
+            sensor,
+            time,
+            position,
+            sigma_pos_m,
+            mode_ac,
+            SourceKind::AdsB,
+        )
+    }
+
+    /// Construct a FLARM/OGN plot (ADR 0026/0027): like [`Plot::adsb`] a
+    /// cooperative geodetic self-report (secondary, isotropic accuracy), but
+    /// tagged [`SourceKind::Flarm`] so the tracker reports its provenance
+    /// honestly rather than confusing it with ADS-B.
+    pub fn flarm(
+        sensor: SensorId,
+        time: Timestamp,
+        position: Wgs84,
+        sigma_pos_m: f64,
+        mode_ac: ModeAC,
+    ) -> Self {
+        Self::geodetic(
+            sensor,
+            time,
+            position,
+            sigma_pos_m,
+            mode_ac,
+            SourceKind::Flarm,
+        )
+    }
+
+    /// Shared constructor for a cooperative **geodetic** self-report (ADS-B or
+    /// FLARM): `Measurement::Geodetic`, `DetectionKind::Secondary`, with an
+    /// explicit [`SourceKind`].
+    pub fn geodetic(
+        sensor: SensorId,
+        time: Timestamp,
+        position: Wgs84,
+        sigma_pos_m: f64,
+        mode_ac: ModeAC,
+        source: SourceKind,
+    ) -> Self {
         Self {
             sensor,
             time,
@@ -157,6 +229,7 @@ impl Plot {
                 sigma_pos_m,
             },
             kind: DetectionKind::Secondary,
+            source,
             mode_ac,
         }
     }

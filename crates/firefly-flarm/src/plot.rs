@@ -42,7 +42,7 @@ pub fn position_to_plot(pos: &OgnPosition, sensor: SensorId, sigma_pos_m: f64) -
     // integration layer reconciles the time origin (Schritt C).
     let time = Timestamp(pos.time_of_day_s.unwrap_or(0.0));
 
-    Plot::adsb(sensor, time, position, sigma_pos_m, mode_ac)
+    Plot::flarm(sensor, time, position, sigma_pos_m, mode_ac)
 }
 
 #[cfg(test)]

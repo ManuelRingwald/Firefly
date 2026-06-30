@@ -216,7 +216,7 @@ pub fn tracking_measurement(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use firefly_core::{DetectionKind, ModeAC, SensorId, Timestamp};
+    use firefly_core::{DetectionKind, ModeAC, SensorId, SourceKind, Timestamp};
     use firefly_geo::Wgs84;
     use std::f64::consts::PI;
 
@@ -343,6 +343,7 @@ mod tests {
                 sigma_pos_m,
             },
             kind: DetectionKind::Secondary,
+            source: SourceKind::AdsB,
             mode_ac: ModeAC::default(),
         }
     }

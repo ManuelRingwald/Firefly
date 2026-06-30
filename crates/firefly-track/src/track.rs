@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 
-use firefly_core::{Callsign, ModeAC, SensorId, TrackId};
+use firefly_core::{Callsign, ModeAC, SensorId, SourceKind, TrackId};
 use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +35,42 @@ pub enum TrackStatus {
     Tentative,
     /// Confirmed as a real target.
     Confirmed,
+}
+
+/// Per-technology last-hit data times (seconds), one slot per surveillance
+/// technology (ADR 0027). Drives the per-source ages of CAT062 I062/290 and the
+/// derived track provenance. `None` until a plot of that technology has
+/// contributed; keeps the **latest** time per technology.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SourceHits {
+    pub psr: Option<f64>,
+    pub ssr: Option<f64>,
+    pub mode_s: Option<f64>,
+    pub adsb: Option<f64>,
+    pub flarm: Option<f64>,
+}
+
+impl SourceHits {
+    /// Record a contribution of `source` at data time `time`. `has_primary`
+    /// additionally bumps the PSR age (a combined PSR+SSR/Mode-S dwell feeds both
+    /// technologies). Monotonic per slot — an older time never overwrites a newer.
+    fn record(&mut self, source: SourceKind, time: f64, has_primary: bool) {
+        fn bump(slot: &mut Option<f64>, time: f64) {
+            if slot.is_none_or(|t| time > t) {
+                *slot = Some(time);
+            }
+        }
+        if has_primary {
+            bump(&mut self.psr, time);
+        }
+        match source {
+            SourceKind::Psr => bump(&mut self.psr, time),
+            SourceKind::Ssr => bump(&mut self.ssr, time),
+            SourceKind::ModeS => bump(&mut self.mode_s, time),
+            SourceKind::AdsB => bump(&mut self.adsb, time),
+            SourceKind::Flarm => bump(&mut self.flarm, time),
+        }
+    }
 }
 
 /// A maintained track.
@@ -85,10 +121,11 @@ pub struct Track {
     /// `mode_3a`/`icao_address` this is not sticky, since it answers "who sees
     /// it *right now*", not "who has ever seen it".
     contributing_sensors: BTreeSet<SensorId>,
-    /// Data time of the last ADS-B hit (ICAO address match, AP9.3/AP9.6), seconds.
-    /// `None` if the track has never been updated by an ADS-B measurement. Used to
-    /// compute the ES-Age subfield of CAT062 I062/290 (ICD 2.4.0, AP9.5).
-    pub(crate) adsb_last_hit_time: Option<f64>,
+    /// Per-technology last-hit data times (PSR/SSR/Mode S/ADS-B/FLARM), driving
+    /// the per-source ages of CAT062 I062/290 and the derived provenance (ADR
+    /// 0027). Generalises the former single `adsb_last_hit_time`.
+    #[serde(default)]
+    pub(crate) source_hits: SourceHits,
 }
 
 impl Track {
@@ -107,7 +144,7 @@ impl Track {
             flight_level_ft: None,
             callsign: None,
             contributing_sensors: BTreeSet::new(),
-            adsb_last_hit_time: None,
+            source_hits: SourceHits::default(),
         }
     }
 
@@ -243,9 +280,15 @@ impl Track {
         &self.contributing_sensors
     }
 
-    /// Data time of the last ADS-B (ICAO address match) hit, seconds, if any.
+    /// Data time of the last ADS-B hit, seconds, if any.
     pub fn adsb_last_hit_time(&self) -> Option<f64> {
-        self.adsb_last_hit_time
+        self.source_hits.adsb
+    }
+
+    /// Per-technology last-hit times for this track (ADR 0027), driving the
+    /// I062/290 ages and the derived provenance.
+    pub(crate) fn source_hits(&self) -> SourceHits {
+        self.source_hits
     }
 
     /// Clear the contributing-sensor set at the start of a new scan; sensors
@@ -259,6 +302,13 @@ impl Track {
     /// in the current scan.
     pub(crate) fn record_hit_from(&mut self, sensor: SensorId) {
         self.contributing_sensors.insert(sensor);
+    }
+
+    /// Record a per-technology contribution (ADR 0027): a hit of `source` at data
+    /// time `time`, with `has_primary` flagging a combined dwell that also feeds
+    /// PSR. Updates the per-source ages behind I062/290 and the provenance.
+    pub(crate) fn record_source_hit(&mut self, source: SourceKind, time: f64, has_primary: bool) {
+        self.source_hits.record(source, time, has_primary);
     }
 
     /// Absorb the SSR-derived attributes (if any) of an associated plot: the

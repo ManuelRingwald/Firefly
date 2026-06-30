@@ -10,7 +10,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use firefly_asterix::{Cat062Encoder, DataSourceId};
-use firefly_core::{Callsign, SystemTrack, Timestamp, TrackId};
+use firefly_core::{Callsign, SourceAges, SystemTrack, Timestamp, TrackId};
 use firefly_geo::Wgs84;
 use firefly_multicast::{run, sender_socket};
 use tokio::net::UdpSocket;
@@ -35,6 +35,7 @@ fn track(id: u32) -> SystemTrack {
         callsign: Some(Callsign::new("DLH123")),
         contributing_sensors: Vec::new(),
         adsb_age_s: None,
+        source_ages: SourceAges::default(),
     }
 }
 

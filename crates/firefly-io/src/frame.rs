@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use firefly_core::{SensorId, SystemTrack, Timestamp, TrackId};
+use firefly_core::{Provenance, SensorId, SourceAges, SystemTrack, Timestamp, TrackId};
 
 /// One raw radar plot in the wire form, for visualization (M6.3).
 ///
@@ -65,6 +65,15 @@ pub struct FrameTrack {
     pub update_age_s: f64,
     /// 1σ semi-major axis of the position error ellipse, metres.
     pub position_uncertainty_m: f64,
+    /// Dominant surveillance provenance (ADR 0027), **derived** from the
+    /// per-technology ages — the authoritative replacement for a frontend
+    /// heuristic. Serialises as `"psr"`/`"ssr"`/`"mode_s"`/`"adsb"`/`"flarm"`/
+    /// `"combined"`/`"unknown"`. The JSON/web path may carry it explicitly (it
+    /// is *not* part of the CAT062 wire contract, where provenance is derived
+    /// from the I062/290 ages).
+    pub provenance: Provenance,
+    /// Per-technology update ages (seconds), the raw data behind `provenance`.
+    pub source_ages: SourceAges,
 }
 
 impl FrameTrack {
@@ -81,6 +90,8 @@ impl FrameTrack {
             coasting: track.coasting,
             update_age_s: track.update_age,
             position_uncertainty_m: track.position_uncertainty,
+            provenance: track.provenance(),
+            source_ages: track.source_ages,
         }
     }
 }
@@ -161,6 +172,7 @@ mod tests {
             callsign: None,
             contributing_sensors: Vec::new(),
             adsb_age_s: None,
+            source_ages: firefly_core::SourceAges::default(),
         }
     }
 
