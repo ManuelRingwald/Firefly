@@ -195,13 +195,18 @@ export FIREFLY_OPENSKY_LON_MAX=10.0
 
 ### Schritt 3: Authentifizierung (falls OpenSky-Account vorhanden)
 
+OpenSky akzeptiert nur noch **OAuth2 Client-Credentials** (Basic Auth ist
+abgeschaltet, ADR 0024). Auf der OpenSky-Account-Seite einen **API-Client**
+anlegen und `client_id` + `client_secret` abrufen — Firefly tauscht sie selbst
+gegen ein kurzlebiges Token (kein manueller Token-Schritt nötig):
+
 ```bash
-export FIREFLY_OPENSKY_USERNAME=mein_benutzer
-export FIREFLY_OPENSKY_PASSWORD=mein_passwort
+export FIREFLY_OPENSKY_CLIENT_ID=mein_client_id
+export FIREFLY_OPENSKY_CLIENT_SECRET=mein_client_secret
 export FIREFLY_OPENSKY_POLL_INTERVAL_SECS=5   # mit Account: 5 s möglich
 ```
 
-> **Sicherheitshinweis:** Passwörter nie direkt in Shell-Skripten hartkodieren.
+> **Sicherheitshinweis:** Client-Secrets nie direkt in Shell-Skripten hartkodieren.
 > Im Produktionsbetrieb über Kubernetes Secrets oder ein Vault-System injizieren.
 
 ### Schritt 4: Im Live-Modus starten
@@ -329,8 +334,8 @@ FIREFLY_CAT062_GROUP=239.255.0.62 \
 FIREFLY_CAT062_PORT=8600 \
 FIREFLY_CAT065_ENABLED=true \
 FIREFLY_OPENSKY_ENABLED=true \
-FIREFLY_OPENSKY_USERNAME=mein_benutzer \
-FIREFLY_OPENSKY_PASSWORD=mein_passwort \
+FIREFLY_OPENSKY_CLIENT_ID=mein_client_id \
+FIREFLY_OPENSKY_CLIENT_SECRET=mein_client_secret \
 FIREFLY_OPENSKY_LAT_MIN=49.0 \
 FIREFLY_OPENSKY_LAT_MAX=51.0 \
 FIREFLY_OPENSKY_LON_MIN=7.0 \

@@ -70,7 +70,8 @@ pub enum SourceError {
     InvalidBBox { index: usize, reason: &'static str },
     /// `cred_env` names an env that is unset or empty.
     MissingCredential { index: usize, env: String },
-    /// The credential value is not in `user:pass` form (no `:` separator).
+    /// The credential value is not in `client_id:client_secret` form (no `:`
+    /// separator).
     MalformedCredential { index: usize, env: String },
 }
 
@@ -90,7 +91,7 @@ impl fmt::Display for SourceError {
             ),
             SourceError::MalformedCredential { index, env } => write!(
                 f,
-                "FIREFLY_SOURCES[{index}]: credential in {env} is not in user:pass form"
+                "FIREFLY_SOURCES[{index}]: credential in {env} is not in client_id:client_secret form"
             ),
         }
     }
@@ -105,11 +106,11 @@ pub fn parse_sources(json: &str) -> Result<Vec<SourceSpec>, SourceError> {
 }
 
 /// Build an [`OpenSkyConfig`] from an `adsb_opensky` spec at list position
-/// `index`. `get_env` resolves the spec's `cred_env` to its `user:pass` value
-/// (split at the **first** `:` — Basic-Auth usernames contain no `:`). The poll
-/// interval keeps the [`OpenSkyConfig`] default (anonymous-safe); bbox, sensor id
-/// and credentials come from the spec. A missing `cred_env` yields anonymous
-/// access (no username/password).
+/// `index`. `get_env` resolves the spec's `cred_env` to its
+/// `client_id:client_secret` value (split at the **first** `:` — OAuth2 client ids
+/// contain no `:`; ADR 0024). The poll interval keeps the [`OpenSkyConfig`]
+/// default (anonymous-safe); bbox, sensor id and credentials come from the spec. A
+/// missing `cred_env` yields anonymous access (no OAuth2 credentials).
 ///
 /// The caller guarantees `spec.source_type == SourceType::AdsbOpensky`.
 pub fn opensky_config_from_spec(
@@ -138,14 +139,14 @@ pub fn opensky_config_from_spec(
                 env: env_name.clone(),
             }
         })?;
-        let (user, pass) = raw
-            .split_once(':')
-            .ok_or_else(|| SourceError::MalformedCredential {
-                index,
-                env: env_name.clone(),
-            })?;
-        cfg.username = Some(user.to_string());
-        cfg.password = Some(pass.to_string());
+        let (client_id, client_secret) =
+            raw.split_once(':')
+                .ok_or_else(|| SourceError::MalformedCredential {
+                    index,
+                    env: env_name.clone(),
+                })?;
+        cfg.client_id = Some(client_id.to_string());
+        cfg.client_secret = Some(client_secret.to_string());
     }
     Ok(cfg)
 }
@@ -317,7 +318,7 @@ mod tests {
         assert_eq!(cfg.lon_min, 7.0);
         assert_eq!(cfg.lon_max, 9.0);
         assert_eq!(cfg.sensor_id, SensorId(201));
-        assert!(cfg.username.is_none() && cfg.password.is_none());
+        assert!(cfg.client_id.is_none() && cfg.client_secret.is_none());
     }
 
     #[test]
@@ -328,24 +329,24 @@ mod tests {
     }
 
     #[test]
-    fn cred_env_is_split_into_user_and_pass() {
+    fn cred_env_is_split_into_client_id_and_secret() {
         let spec = adsb_spec(Some("SECRET"), None);
         let cfg = opensky_config_from_spec(&spec, 0, |k| {
-            (k == "SECRET").then(|| "alice:s3cr3t".to_string())
+            (k == "SECRET").then(|| "client-abc:s3cr3t".to_string())
         })
         .expect("valid");
-        assert_eq!(cfg.username.as_deref(), Some("alice"));
-        assert_eq!(cfg.password.as_deref(), Some("s3cr3t"));
+        assert_eq!(cfg.client_id.as_deref(), Some("client-abc"));
+        assert_eq!(cfg.client_secret.as_deref(), Some("s3cr3t"));
     }
 
     #[test]
     fn cred_split_uses_the_first_colon() {
-        // A password may contain a colon; the username never does (Basic auth).
+        // A client secret may contain a colon; the client id never does (OAuth2).
         let spec = adsb_spec(Some("SECRET"), None);
-        let cfg =
-            opensky_config_from_spec(&spec, 0, |_| Some("alice:pa:ss".to_string())).expect("valid");
-        assert_eq!(cfg.username.as_deref(), Some("alice"));
-        assert_eq!(cfg.password.as_deref(), Some("pa:ss"));
+        let cfg = opensky_config_from_spec(&spec, 0, |_| Some("client-abc:pa:ss".to_string()))
+            .expect("valid");
+        assert_eq!(cfg.client_id.as_deref(), Some("client-abc"));
+        assert_eq!(cfg.client_secret.as_deref(), Some("pa:ss"));
     }
 
     #[test]

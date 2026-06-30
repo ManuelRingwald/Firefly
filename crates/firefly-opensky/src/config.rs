@@ -24,10 +24,16 @@ pub struct OpenSkyConfig {
     /// Anonymous access is rate-limited to approximately one request per 10 s;
     /// authenticated access allows ~5 s.
     pub poll_interval_secs: u64,
-    /// Optional HTTP Basic-Auth username. `FIREFLY_OPENSKY_USERNAME`.
-    pub username: Option<String>,
-    /// Optional HTTP Basic-Auth password. `FIREFLY_OPENSKY_PASSWORD`.
-    pub password: Option<String>,
+    /// Optional OAuth2 client id. `FIREFLY_OPENSKY_CLIENT_ID`. Together with
+    /// [`client_secret`](Self::client_secret) it drives the client-credentials
+    /// flow (ADR 0024); absent → anonymous, unauthenticated polling.
+    pub client_id: Option<String>,
+    /// Optional OAuth2 client secret. `FIREFLY_OPENSKY_CLIENT_SECRET`. Paired with
+    /// [`client_id`](Self::client_id).
+    pub client_secret: Option<String>,
+    /// OAuth2 token endpoint (client-credentials grant). `FIREFLY_OPENSKY_TOKEN_URL`,
+    /// default OpenSky's Keycloak realm — overridable for testing or a realm change.
+    pub token_url: String,
     /// The [`SensorId`] stamped onto every ADS-B plot. `FIREFLY_OPENSKY_SENSOR_ID`,
     /// default `200`. Allows the tracker to attribute plots to the OpenSky adapter
     /// and to apply a dedicated noise model (ADR 0019).
@@ -43,8 +49,9 @@ impl Default for OpenSkyConfig {
             lon_min: 5.0,
             lon_max: 16.0,
             poll_interval_secs: 10,
-            username: None,
-            password: None,
+            client_id: None,
+            client_secret: None,
+            token_url: crate::auth::DEFAULT_TOKEN_URL.to_string(),
             sensor_id: SensorId(200),
         }
     }
@@ -85,8 +92,11 @@ impl OpenSkyConfig {
             .and_then(|v| v.parse::<u64>().ok())
             .filter(|&s| s > 0)
             .unwrap_or(d.poll_interval_secs);
-        let username = get("FIREFLY_OPENSKY_USERNAME").filter(|s| !s.is_empty());
-        let password = get("FIREFLY_OPENSKY_PASSWORD").filter(|s| !s.is_empty());
+        let client_id = get("FIREFLY_OPENSKY_CLIENT_ID").filter(|s| !s.is_empty());
+        let client_secret = get("FIREFLY_OPENSKY_CLIENT_SECRET").filter(|s| !s.is_empty());
+        let token_url = get("FIREFLY_OPENSKY_TOKEN_URL")
+            .filter(|s| !s.is_empty())
+            .unwrap_or(d.token_url);
         let sensor_id = get("FIREFLY_OPENSKY_SENSOR_ID")
             .and_then(|v| v.parse::<u16>().ok())
             .map(SensorId)
@@ -98,8 +108,9 @@ impl OpenSkyConfig {
             lon_min,
             lon_max,
             poll_interval_secs,
-            username,
-            password,
+            client_id,
+            client_secret,
+            token_url,
             sensor_id,
         }
     }
@@ -127,8 +138,8 @@ mod tests {
             "FIREFLY_OPENSKY_LON_MIN" => Some("6.0".into()),
             "FIREFLY_OPENSKY_LON_MAX" => Some("15.0".into()),
             "FIREFLY_OPENSKY_POLL_INTERVAL_SECS" => Some("5".into()),
-            "FIREFLY_OPENSKY_USERNAME" => Some("alice".into()),
-            "FIREFLY_OPENSKY_PASSWORD" => Some("s3cret".into()),
+            "FIREFLY_OPENSKY_CLIENT_ID" => Some("client-abc".into()),
+            "FIREFLY_OPENSKY_CLIENT_SECRET" => Some("s3cret".into()),
             "FIREFLY_OPENSKY_SENSOR_ID" => Some("201".into()),
             _ => None,
         });
@@ -136,9 +147,20 @@ mod tests {
         assert!((config.lat_min - 48.0).abs() < 1e-12);
         assert!((config.lat_max - 54.0).abs() < 1e-12);
         assert_eq!(config.poll_interval_secs, 5);
-        assert_eq!(config.username.as_deref(), Some("alice"));
-        assert_eq!(config.password.as_deref(), Some("s3cret"));
+        assert_eq!(config.client_id.as_deref(), Some("client-abc"));
+        assert_eq!(config.client_secret.as_deref(), Some("s3cret"));
         assert_eq!(config.sensor_id, SensorId(201));
+    }
+
+    /// The token endpoint defaults to OpenSky's realm and is overridable.
+    #[test]
+    fn token_url_defaults_and_overrides() {
+        let default = OpenSkyConfig::from_lookup(|_| None);
+        assert_eq!(default.token_url, crate::auth::DEFAULT_TOKEN_URL);
+        let overridden = OpenSkyConfig::from_lookup(|key| {
+            (key == "FIREFLY_OPENSKY_TOKEN_URL").then(|| "http://localhost/token".into())
+        });
+        assert_eq!(overridden.token_url, "http://localhost/token");
     }
 
     /// Garbage values fall back to defaults rather than crashing.

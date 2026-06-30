@@ -27,8 +27,10 @@
 //! [OpenSky Network]: https://opensky-network.org
 
 mod api;
+mod auth;
 mod config;
 mod poller;
 
+pub use auth::AuthError;
 pub use config::OpenSkyConfig;
 pub use poller::{OpenSkyPoller, PollError};
