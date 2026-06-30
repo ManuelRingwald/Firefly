@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 
-use firefly_core::{Plot, SensorId, SystemTrack, Timestamp, TrackId};
+use firefly_core::{Plot, SensorId, SourceAges, SystemTrack, Timestamp, TrackId};
 use firefly_geo::{Enu, LocalFrame};
 use serde::{Deserialize, Serialize};
 
@@ -834,7 +834,7 @@ impl Tracker {
                 self.tracks[ti].mark_hit(t);
                 self.tracks[ti].record_hit_from(sensor);
                 self.tracks[ti].update_identity(&plot.mode_ac);
-                self.tracks[ti].adsb_last_hit_time = Some(t);
+                self.tracks[ti].record_source_hit(plot.source, t, plot.kind.has_primary());
                 handled[mi] = true;
             }
         }
@@ -888,7 +888,11 @@ impl Tracker {
                 if let Some((mi, _)) = best {
                     // Translate JPDA measurement index → original items index.
                     let orig_mi = non_icao[mi].0;
-                    self.tracks[ti].update_identity(&items[orig_mi].0.mode_ac);
+                    let plot = &items[orig_mi].0;
+                    self.tracks[ti].update_identity(&plot.mode_ac);
+                    // Per-technology provenance bookkeeping (ADR 0027): book the
+                    // associated plot's technology (and PSR for a combined dwell).
+                    self.tracks[ti].record_source_hit(plot.source, t, plot.kind.has_primary());
                 }
             }
 
@@ -916,8 +920,12 @@ impl Tracker {
                 let id = TrackId(self.next_id);
                 self.next_id += 1;
                 let mut track = Track::new(id, imm, t);
-                track.update_identity(&items[orig_mi].0.mode_ac);
+                let founding = &items[orig_mi].0;
+                track.update_identity(&founding.mode_ac);
                 track.record_hit_from(sensor);
+                // Per-technology provenance bookkeeping (ADR 0027): the founding
+                // plot's technology (and PSR if it is a combined dwell).
+                track.record_source_hit(founding.source, t, founding.kind.has_primary());
                 newborn.push(track.estimate());
                 self.tracks.push(track);
             }
@@ -944,6 +952,17 @@ fn system_track_from(
     let p = estimate.position();
     let v = estimate.velocity();
     let position = frame.enu_to_geodetic(&Enu::new(p[0], p[1], 0.0));
+    // Per-technology ages at the report time (ADR 0027): age = report time minus
+    // that technology's last-hit time, clamped at 0; `None` if it never contributed.
+    let age = |hit: Option<f64>| hit.map(|h| (time - h).max(0.0));
+    let sh = track.source_hits();
+    let source_ages = SourceAges {
+        psr: age(sh.psr),
+        ssr: age(sh.ssr),
+        mode_s: age(sh.mode_s),
+        adsb: age(sh.adsb),
+        flarm: age(sh.flarm),
+    };
     SystemTrack {
         id: track.id(),
         time: Timestamp(time),
@@ -960,7 +979,8 @@ fn system_track_from(
         flight_level_ft: track.flight_level_ft(),
         callsign: track.callsign(),
         contributing_sensors: track.contributing_sensors().iter().copied().collect(),
-        adsb_age_s: track.adsb_last_hit_time().map(|hit| (time - hit).max(0.0)),
+        adsb_age_s: source_ages.adsb,
+        source_ages,
     }
 }
 
@@ -1018,7 +1038,9 @@ fn should_delete_continuous(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use firefly_core::{DetectionKind, Measurement, ModeAC, Plot, SensorId};
+    use firefly_core::{
+        DetectionKind, Measurement, ModeAC, Plot, Provenance, SensorId, SourceKind,
+    };
     use firefly_geo::{Polar, Wgs84};
 
     /// The common test frame; the single test sensor sits here too.
@@ -1047,6 +1069,7 @@ mod tests {
             time: Timestamp(time),
             measurement: firefly_core::Measurement::Polar(Polar::new(range, az, 0.0)),
             kind: DetectionKind::Combined,
+            source: SourceKind::ModeS,
             mode_ac: ModeAC {
                 mode_3a: Some(mode_3a),
                 flight_level_ft: Some(35_000.0),
@@ -1349,6 +1372,44 @@ mod tests {
             Some(35_000.0),
             "flight level stays sticky through a primary-only hit"
         );
+    }
+
+    /// A primary-only track records only a PSR age and derives `Psr`
+    /// provenance; the other technology ages stay `None`. REQ: FR-TRK-034
+    #[test]
+    fn primary_only_track_records_psr_age_and_provenance() {
+        let mut tracker = Tracker::new(config());
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(Timestamp(t), &[plot(t, 50_000.0, 0.0)]);
+        }
+        let st = &tracker.system_tracks()[0];
+        assert!(st.source_ages.psr.is_some(), "PSR age recorded");
+        assert_eq!(st.source_ages.ssr, None);
+        assert_eq!(st.source_ages.mode_s, None);
+        assert_eq!(st.source_ages.adsb, None);
+        assert_eq!(st.source_ages.flarm, None);
+        assert_eq!(st.provenance(), Provenance::Psr);
+    }
+
+    /// A combined PSR+Mode-S dwell books **both** technologies (FR-TRK-034,
+    /// ADR 0027 §1): the plot carries `kind.has_primary()` *and* a Mode-S
+    /// `source`, so the track records a PSR age and a Mode-S age, and the
+    /// derived provenance is `Combined` (two fresh technologies). REQ: FR-TRK-034
+    #[test]
+    fn combined_mode_s_dwell_books_psr_and_mode_s_and_combines() {
+        let mut tracker = Tracker::new(config());
+        for k in 0..3 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[plot_with_identity(t, 50_000.0, 0.0, 0o2613, 0x0040_0123)],
+            );
+        }
+        let st = &tracker.system_tracks()[0];
+        assert!(st.source_ages.psr.is_some(), "primary half of the dwell");
+        assert!(st.source_ages.mode_s.is_some(), "Mode S half of the dwell");
+        assert_eq!(st.provenance(), Provenance::Combined);
     }
 
     /// A plot as one sensor would see a given geodetic target (its own polar).
@@ -1879,6 +1940,7 @@ mod tests {
                 firefly_geo::Enu::new(east, north, 0.0).to_polar(),
             ),
             kind: DetectionKind::Combined,
+            source: SourceKind::Ssr,
             mode_ac: ModeAC {
                 mode_3a: Some(squawk),
                 flight_level_ft: Some(35_000.0),
@@ -2176,6 +2238,7 @@ mod tests {
                 sigma_pos_m: 30.0,
             },
             kind: DetectionKind::Secondary,
+            source: SourceKind::AdsB,
             mode_ac: ModeAC {
                 icao_address: Some(0xAB_CD_EF),
                 ..ModeAC::default()

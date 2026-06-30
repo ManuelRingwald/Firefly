@@ -32,8 +32,20 @@ Schnittstellen-Themen, die in Firefly entstehen und Wayfinder-Arbeit auslösen.
 > aus `source_config` nach `FIREFLY_SOURCES` (ORCH-5, Vokabular war reserviert).
 > Von Issue #35 ist auf Firefly-Seite damit nur noch **`radar_asterix`** offen.
 
+> **Per-Track-Provenienz: I062/290 Per-Technologie-Alter (ADR 0027, ICD 2.6.0,
+> additiv).** Firefly liefert die Track-Herkunft jetzt **autoritativ im Strom**
+> statt sie Wayfinders Frontend-Heuristik (`provenance.js`) zu überlassen.
+> I062/290 trägt zusätzlich zu PSR (`0x40`) und ES/ADS-B (`0x08`) optional
+> **SSR-Age** (`0x20`), **Mode-S-Age** (`0x10`) und **FLARM-Age** (`0x04`,
+> Firefly-Vendor-Subfeld); Age-Oktette in Bit-Priorität MSB→LSB. **Damit wird
+> FLARM erstmals unterscheidbar.** Strikt additiv — `0x40`/`0x08` unverändert,
+> kein Wire-Bruch. **Wayfinder-Folge (Issue #90):** Decoder liest die neuen
+> Subfelder, leitet die Provenienz daraus ab (≥ 2 frische → kombiniert; sonst
+> dominante einzelne), ersetzt `provenance.js`. Antwort auf Wayfinder-Issue #30.
+
 | Issue | Thema | Status |
 |-------|-------|--------|
+| [Wayfinder#90](https://github.com/ManuelRingwald/Wayfinder/issues/90) (`from-firefly`) | **CAT062 ICD 2.6.0 (additiv):** I062/290 Per-Technologie-Alter — **SSR** (`0x20`), **Mode S** (`0x10`), **FLARM** (`0x04`) zusätzlich zu PSR/ES; Age-Oktette in Bit-Priorität MSB→LSB. Autoritative Track-Provenienz ersetzt Wayfinders `provenance.js`-Heuristik; FLARM erstmals unterscheidbar. ADR 0027, Antwort auf Wayfinder #30. Firefly-Seite (Encoder+Decoder+byte-genaue Vektoren+ICD) erledigt. Wayfinder: Decoder + Provenienz-Ableitung + UI-Symbolik. | ⏳ Firefly fertig; Wayfinder offen |
 | [Wayfinder#5](https://github.com/ManuelRingwald/Wayfinder/issues/5) (`from-firefly`) | **CAT062 ICD 2.0.0 (Breaking):** neues optionales **I062/136** (Measured Flight Level, FRN 17, i16, LSB 1/4 FL = 25 ft) + **I062/500 von FRN 16 → FRN 27** (UAP-Standardtreue, FSPEC 3→4 Oktette). ADR 0015. Wayfinder-Decoder muss in lockstep nachziehen (AP2). | ✅ erledigt (Wayfinder PR #6, AP2) |
 | [Wayfinder#9](https://github.com/ManuelRingwald/Wayfinder/issues/9) (`from-firefly`) | **CAT065 SDPS-Heartbeat, ICD 2.3.0 (additiv):** neuer Kategorie-Strom (`0x41`) auf derselben Multicast-Gruppe; Konsument dispatcht am CAT-Oktett. SDPS-Status (I065/010/000/015/030/040). ADR 0018. Wayfinder: CAT065-Decoder, Receiver-Dispatch, Staleness-Erkennung, Feed-Banner. | ✅ erledigt (beide Repos, Branch `claude/cat065-heartbeat`) |
 | [Wayfinder#21](https://github.com/ManuelRingwald/Wayfinder/issues/21) (`from-firefly`) | **ICD 2.4.0 ES-Age-Subfeld (additiv, AP9.5/AP9.9):** I062/290 ist variabel lang; Bit `0x08` im primären Subfeld-Oktett zeigt ES-Age-Byte an. Wayfinder: Decoder variabel-lang, `DecodedTrack.AdsbAgeS *float64`, ADS-B-Badge im Track-Label (< 30 s frisch). ADR 0019. Abhängig von AP9.4 für echte ADS-B-Tracks. | ✅ erledigt (Wayfinder AP9.9, Commit `05d22b8`, Branch `claude/beautiful-dijkstra-e7ityj`) |

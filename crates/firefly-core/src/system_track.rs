@@ -25,6 +25,53 @@ use crate::plot::Callsign;
 use crate::time::Timestamp;
 use firefly_geo::Wgs84;
 
+/// A technology counts as *fresh* for provenance when its update age is within
+/// this many seconds (ADR 0027) — matches the ADS-B freshness Wayfinder already
+/// uses for its badge.
+pub const PROVENANCE_FRESH_S: f64 = 30.0;
+
+/// Per-technology update ages of a track, seconds (ADR 0027). `Some(age)` once a
+/// plot of that technology has contributed (age measured at the report time);
+/// `None` otherwise. Drives the CAT062 I062/290 per-source age subfields and the
+/// derived [`Provenance`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct SourceAges {
+    /// Primary surveillance radar.
+    pub psr: Option<f64>,
+    /// Secondary surveillance radar (Mode A/C).
+    pub ssr: Option<f64>,
+    /// Mode S selective interrogation.
+    pub mode_s: Option<f64>,
+    /// ADS-B (1090 Extended Squitter).
+    pub adsb: Option<f64>,
+    /// FLARM / Open Glider Network (ADR 0026).
+    pub flarm: Option<f64>,
+}
+
+/// The dominant surveillance provenance of a track, **derived** from
+/// [`SourceAges`] (ADR 0027): the technology that most recently contributed, or
+/// `Combined` when several are fresh together. Authoritative replacement for the
+/// consumer-side heuristic (Wayfinder `provenance.js`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Provenance {
+    /// No technology age recorded yet.
+    Unknown,
+    /// Primary radar only.
+    Psr,
+    /// Secondary radar (Mode A/C).
+    Ssr,
+    /// Mode S.
+    ModeS,
+    /// ADS-B. Serialises as the conventional token `"adsb"`.
+    #[serde(rename = "adsb")]
+    AdsB,
+    /// FLARM.
+    Flarm,
+    /// Two or more technologies fresh together (true fusion).
+    Combined,
+}
+
 /// One track as reported to the outside world, in geodetic coordinates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemTrack {
@@ -96,8 +143,13 @@ pub struct SystemTrack {
     /// `None` if the track has never been updated by an ADS-B measurement.
     /// When `Some`, drives the ES-Age subfield of CAT062 I062/290 (ICD 2.4.0,
     /// AP9.5/AP9.6); its presence signals "this track has an ADS-B contribution"
-    /// to Wayfinder.
+    /// to Wayfinder. Equals `source_ages.adsb` (kept as a back-compat alias).
     pub adsb_age_s: Option<f64>,
+    /// Per-technology update ages (ADR 0027): the authoritative, source-resolved
+    /// provenance data. Drives the I062/290 PSR/SSR/Mode-S/ES/FLARM age subfields
+    /// and [`SystemTrack::provenance`]. Defaults to all-`None` for back-compat.
+    #[serde(default)]
+    pub source_ages: SourceAges,
 }
 
 impl SystemTrack {
@@ -121,6 +173,37 @@ impl SystemTrack {
             angle += std::f64::consts::TAU;
         }
         angle
+    }
+
+    /// Derive the dominant [`Provenance`] from the per-technology ages (ADR 0027).
+    /// A technology counts as *fresh* within [`PROVENANCE_FRESH_S`]; two or more
+    /// fresh technologies → [`Provenance::Combined`]; otherwise the single fresh
+    /// technology, or — if none is within the freshness window — the most recently
+    /// seen one, or [`Provenance::Unknown`] if none has ever contributed.
+    pub fn provenance(&self) -> Provenance {
+        let a = &self.source_ages;
+        let entries = [
+            (Provenance::Psr, a.psr),
+            (Provenance::Ssr, a.ssr),
+            (Provenance::ModeS, a.mode_s),
+            (Provenance::AdsB, a.adsb),
+            (Provenance::Flarm, a.flarm),
+        ];
+        let fresh: Vec<Provenance> = entries
+            .iter()
+            .filter(|(_, age)| age.is_some_and(|s| s <= PROVENANCE_FRESH_S))
+            .map(|(p, _)| *p)
+            .collect();
+        match fresh.as_slice() {
+            [] => entries
+                .iter()
+                .filter_map(|(p, age)| age.map(|s| (*p, s)))
+                .min_by(|x, y| x.1.total_cmp(&y.1))
+                .map(|(p, _)| p)
+                .unwrap_or(Provenance::Unknown),
+            [single] => *single,
+            _ => Provenance::Combined,
+        }
     }
 }
 
@@ -147,6 +230,7 @@ mod tests {
             callsign: None,
             contributing_sensors: Vec::new(),
             adsb_age_s: None,
+            source_ages: SourceAges::default(),
         }
     }
 
@@ -180,5 +264,78 @@ mod tests {
     #[test]
     fn stationary_track_angle_is_zero() {
         assert_eq!(track(0.0, 0.0).track_angle(), 0.0);
+    }
+
+    fn track_with_ages(ages: SourceAges) -> SystemTrack {
+        let mut t = track(0.0, 0.0);
+        t.source_ages = ages;
+        t
+    }
+
+    /// With no technology age recorded, provenance is `Unknown`. REQ: FR-TRK-034
+    #[test]
+    fn provenance_unknown_without_any_age() {
+        assert_eq!(
+            track_with_ages(SourceAges::default()).provenance(),
+            Provenance::Unknown
+        );
+    }
+
+    /// A single fresh technology yields exactly that provenance. REQ: FR-TRK-034
+    #[test]
+    fn provenance_single_fresh_technology() {
+        assert_eq!(
+            track_with_ages(SourceAges {
+                adsb: Some(2.0),
+                ..SourceAges::default()
+            })
+            .provenance(),
+            Provenance::AdsB
+        );
+    }
+
+    /// Two or more fresh technologies fuse to `Combined`. REQ: FR-TRK-034
+    #[test]
+    fn provenance_two_fresh_technologies_combine() {
+        assert_eq!(
+            track_with_ages(SourceAges {
+                psr: Some(1.0),
+                ssr: Some(2.0),
+                ..SourceAges::default()
+            })
+            .provenance(),
+            Provenance::Combined
+        );
+    }
+
+    /// When nothing is within the freshness window, the most recently seen
+    /// technology wins (no false `Combined`). REQ: FR-TRK-034
+    #[test]
+    fn provenance_falls_back_to_most_recent_when_all_stale() {
+        let stale = PROVENANCE_FRESH_S + 10.0;
+        assert_eq!(
+            track_with_ages(SourceAges {
+                psr: Some(stale + 5.0),
+                flarm: Some(stale),
+                ..SourceAges::default()
+            })
+            .provenance(),
+            Provenance::Flarm,
+            "flarm is the freshest of the stale set"
+        );
+    }
+
+    /// A technology exactly at the freshness boundary still counts as fresh.
+    /// REQ: FR-TRK-034
+    #[test]
+    fn provenance_boundary_age_counts_as_fresh() {
+        assert_eq!(
+            track_with_ages(SourceAges {
+                ssr: Some(PROVENANCE_FRESH_S),
+                ..SourceAges::default()
+            })
+            .provenance(),
+            Provenance::Ssr
+        );
     }
 }

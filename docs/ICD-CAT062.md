@@ -21,7 +21,9 @@
 
 ## Version
 
-**2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Sensor Status Messages, `0x3F`) auf demselben Multicast-Strom. Periodische Per-Sensor-Statusmeldung (Default 5 s, `FIREFLY_CAT063_PERIOD`): je Tick ein Block mit einem Record pro registriertem Sensor (I063/010 SAC/SIC, I063/030 ToD, I063/060 NOGO operationell/degradiert). Erlaubt dem Konsumenten einen ausgefallenen Sensor von einem leeren Himmel zu unterscheiden — Grundlage für Wayfinders Sensor-Degradierungs-Banner. Konsument dispatcht am CAT-Oktett (`0x3F`). Details: Abschnitt 9.
+**2.6.0** (2026-06-30) — **Additiv (ADR 0027, Firefly #30):** I062/290 (System Track Update Ages) trägt jetzt optional **per-Technologie-Alter** — **SSR** (`0x20`), **Mode S** (`0x10`) und **FLARM** (`0x04`, Firefly-Vendor-Subfeld) — zusätzlich zu PSR (`0x40`) und ES/ADS-B (`0x08`). Die Age-Oktette folgen der Bit-Priorität MSB→LSB. Damit liefert Firefly die **autoritative Track-Provenienz** im Strom; der Konsument leitet ◆ ADS-B / ▢ SSR / ○ PSR / FLARM aus den Age-Subfeldern ab statt zu raten (ersetzt Wayfinders `provenance.js`-Heuristik). Strikt additiv — bestehende PSR/ES-Subfelder unverändert, kein Wire-Format-Bruch. Details: Abschnitt 4.2.
+
+Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Sensor Status Messages, `0x3F`) auf demselben Multicast-Strom. Periodische Per-Sensor-Statusmeldung (Default 5 s, `FIREFLY_CAT063_PERIOD`): je Tick ein Block mit einem Record pro registriertem Sensor (I063/010 SAC/SIC, I063/030 ToD, I063/060 NOGO operationell/degradiert). Erlaubt dem Konsumenten einen ausgefallenen Sensor von einem leeren Himmel zu unterscheiden — Grundlage für Wayfinders Sensor-Degradierungs-Banner. Konsument dispatcht am CAT-Oktett (`0x3F`). Details: Abschnitt 9.
 
 > ℹ️ **Geltungsbereich.** Diese ICD beschreibt den **gesamten
 > Multicast-Ausgabe-Vertrag** zwischen Firefly und Wayfinder. Seit 2.3.0
@@ -34,6 +36,7 @@
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 2.6.0 | 2026-06-30 | **Additiv (ADR 0027, Firefly #30).** I062/290 (System Track Update Ages) trägt jetzt **per-Technologie-Alter**: zusätzlich zu PSR (`0x40`) und ES/ADS-B (`0x08`) optional **SSR-Age** (`0x20`), **Mode-S-Age** (`0x10`) und **FLARM-Age** (`0x04`). Die Age-Oktette folgen der Bit-Priorität MSB→LSB im Primary-Subfeld (PSR → SSR → MDS → ES → FLARM), je 1 Oktett, u8, LSB 0,25 s. Ein Age-Oktett ist nur vorhanden, wenn das zugehörige Bit gesetzt ist (Track hat einen Treffer dieser Technologie). PSR-only-Tracks: **kein** Unterschied zum bisherigen Wire-Format (2 Byte). Quelle: `SystemTrack.source_ages`. Damit kann der Konsument die **Track-Provenienz** (◆ ADS-B / ▢ SSR / ○ PSR / FLARM) aus den Age-Subfeldern ableiten, statt im Frontend zu raten. **Firefly-Bit-Map bleibt:** `0x40`/`0x08` unverändert (Wayfinder-Decoder bricht nicht); neue Subfelder auf freien Bits; **FLARM (`0x04`) ist ein dokumentiertes Firefly-Vendor-Subfeld** (kein EUROCONTROL-Standard-Subfeld, vom toleranten Decoder überspringbar). **Konsument (Wayfinder): kein Breaking Change** — I062/290 muss ohnehin variabel lang dekodiert werden (Länge/Reihenfolge aus dem Primary-Subfeld). Details: Abschnitt 4.2. |
 | 2.5.0 | 2026-06-25 | **Additiv (ADR 0022, Firefly #32).** Neue Kategorie **CAT063** (Sensor Status Messages, CAT-Oktett `0x3F`) auf **derselben** Multicast-Gruppe/Port wie CAT062/CAT065. Periodische Per-Sensor-Statusmeldung (wall-clock-getaktet, Default 5 s, `FIREFLY_CAT063_PERIOD`): **ein Block pro Tick mit einem Record je registriertem Sensor**, FSPEC `0xE0` → I063/010 (SAC/SIC), I063/030 (Time of Day, 1/128 s), I063/060 (NOGO: `0x00` operationell / `0x40` degradiert). Ein Sensor gilt als degradiert, wenn er innerhalb von `2.5 × scan_period` keinen Plot geliefert hat. Erlaubt dem Konsumenten, einen **ausgefallenen Sensor** von einem **leeren Himmel** zu unterscheiden (CAT065 sagt „SDPS lebt", CAT063 sagt „welche Sensoren liefern"). **Konsument muss am CAT-Oktett dispatchen** (`0x3E` Track, `0x41` Heartbeat, `0x3F` Sensor-Status) und unbekannte Kategorien überspringen — robuste-Decoder-Regel galt ohnehin. Kein Eingriff in CAT062/CAT065. Details: Abschnitt 9. |
 | 2.4.0 | 2026-06-18 | **Additiv (AP9.5).** I062/290 (System Track Update Ages) trägt jetzt optional das **ES-Age-Subfeld** (Extended Squitter / ADS-B): Bit `0x08` im primären Subfeld-Oktett signalisiert, dass ein ES-Age-Byte folgt. Das ES-Age-Byte kodiert das ADS-B-Trefferalter in 1/4-Sekunden (identisch zum PSR-Age). Ist `0x08` nicht gesetzt, fehlt das Byte und das Item ist weiterhin 2 Byte lang (Subfeld + PSR-Age). Für Tracks ohne ADS-B-Treffer: kein Unterschied zum bisherigen Wire-Format. **Konsument (Wayfinder): kein Breaking Change** — vorhandene Decoder müssen I062/290 als variabel lang behandeln (bisher in der Praxis immer 2 Byte; robust implementiert wenn der Decoder `bytes.len()` prüft). Die ES-Age-Präsenz signalisiert „dieser Track hat mindestens einen ADS-B-Update erhalten" und kann von Wayfinder als ADS-B-Badge genutzt werden (AP9.9). |
 | 2.3.0 | 2026-06-15 | **Additiv (ADR 0018).** Neue Kategorie **CAT065** (SDPS Service Status, „Heartbeat") auf **derselben** Multicast-Gruppe/Port wie CAT062. Periodische SDPS-Status-Meldung (I065/000 = 1) mit I065/010, I065/000, I065/015, I065/030 (Time of Day), I065/040 (NOGO operationell/degradiert). Wall-clock-getaktet (Default 1 s, `FIREFLY_CAT065_PERIOD`). **Konsument muss am führenden CAT-Oktett dispatchen** (`0x3E` → Track, `0x41` → Status) und unbekannte Kategorien überspringen — die robuste-Decoder-Regel verlangte das ohnehin. Kein Eingriff in das CAT062-Record-Format. Details: Abschnitt 8. |
@@ -150,22 +153,42 @@ in Oktett 4 desselben Records.
 ### 4.2 I062/290 — System Track Update Ages
 
 Compound Item: Primary Subfield (1 Oktett) + Subfelder je gesetztem Bit.
-Seit ICD 2.4.0 ist das Item **variabel lang**: PSR-Age ist immer vorhanden
-(1 primäres Subfeld-Byte + 1 Byte); das optionale ES-Age-Byte folgt, wenn
-Bit `0x08` gesetzt ist.
+Das Item ist **variabel lang**: PSR-Age ist immer vorhanden (1 primäres
+Subfeld-Byte + 1 Byte); seit ICD 2.4.0 folgt optional das ES-Age, seit
+ICD 2.6.0 (ADR 0027) zusätzlich SSR-, Mode-S- und FLARM-Age. Die Age-Oktette
+folgen der **Bit-Priorität MSB→LSB** im Primary-Subfeld (PSR → SSR → MDS → ES
+→ FLARM), je 1 Oktett.
 
-| Primary-Subfield-Bit | Subfeld | Länge | Kodierung | Quelle |
-|----------------------|---------|-------|-----------|--------|
-| Bit 7 (`0x40`, "PSR") | PSR-Age | 1 Oktett | u8, LSB = 0,25 s | `SystemTrack.update_age` |
-| Bit 4 (`0x08`, "ES") | ES-Age (Extended Squitter / ADS-B) | 1 Oktett (nur wenn Bit gesetzt) | u8, LSB = 0,25 s | `SystemTrack.adsb_age_s` (ICD 2.4.0) |
+| Primary-Subfield-Bit | Subfeld | Länge | Kodierung | Quelle | Seit |
+|----------------------|---------|-------|-----------|--------|------|
+| Bit 7 (`0x40`, "PSR") | PSR-Age (generisches Track-Update-Alter) | 1 Oktett (immer) | u8, LSB = 0,25 s | `SystemTrack.update_age` | 1.0.0 |
+| Bit 6 (`0x20`, "SSR") | SSR-Age (Mode A/C) | 1 Oktett (nur wenn Bit gesetzt) | u8, LSB = 0,25 s | `SystemTrack.source_ages.ssr` | **2.6.0** |
+| Bit 5 (`0x10`, "MDS") | Mode-S-Age | 1 Oktett (nur wenn Bit gesetzt) | u8, LSB = 0,25 s | `SystemTrack.source_ages.mode_s` | **2.6.0** |
+| Bit 4 (`0x08`, "ES") | ES-Age (Extended Squitter / ADS-B) | 1 Oktett (nur wenn Bit gesetzt) | u8, LSB = 0,25 s | `SystemTrack.source_ages.adsb` (= `adsb_age_s`) | 2.4.0 |
+| Bit 3 (`0x04`, "FLARM") | FLARM-Age (**Firefly-Vendor-Subfeld**) | 1 Oktett (nur wenn Bit gesetzt) | u8, LSB = 0,25 s | `SystemTrack.source_ages.flarm` | **2.6.0** |
 
-Das ES-Age-Byte ist nur vorhanden, wenn `SystemTrack.adsb_age_s` `Some` ist
-(d. h. der Track hat mindestens einen ADS-B-Treffer erhalten). Fehlt das Bit,
-ist das Item 2 Byte lang (bisheriges Wire-Format, keine Änderung für
-Radar-only-Tracks). **Konsument**: I062/290 robust als variabel langes Item
-dekodieren (Länge aus dem Primary-Subfield bestimmen, nicht hardcoded auf 2
-Byte). Die Präsenz des ES-Subfelds signalisiert „ADS-B-Anteil vorhanden" →
-kann als ADS-B-Badge in der Lageanzeige genutzt werden.
+Ein Age-Byte ist nur vorhanden, wenn das zugehörige Bit im Primary-Subfeld
+gesetzt ist (d. h. der Track hat einen Treffer dieser Technologie erhalten).
+Trägt ein Track nur PSR, ist das Item weiterhin 2 Byte lang (bisheriges
+Wire-Format, keine Änderung für Radar-only-Tracks).
+
+> **Firefly-Bit-Map (wichtig).** Fireflys I062/290-Bit-Belegung ist ein
+> **dokumentiertes Subset**, das von der rohen EUROCONTROL-Erweiterungs-
+> Reihenfolge abweicht (ES sitzt historisch auf `0x08`, dem Standard-ADS-Bit).
+> Die ADR-0027-Subfelder bleiben in diesem dokumentierten Rahmen **additiv** auf
+> freien Bits — `0x40`/`0x08` bleiben unverändert, damit der bestehende
+> Wayfinder-Decoder nicht bricht. **FLARM** hat **kein** EUROCONTROL-Standard-
+> Subfeld in I062/290; `0x04` ist ein **Firefly-Vendor-Subfeld** (ein toleranter
+> Decoder darf es überspringen).
+
+**Konsument**: I062/290 robust als variabel langes Item dekodieren — Länge und
+Reihenfolge der Age-Oktette aus dem Primary-Subfeld bestimmen (MSB→LSB-Priorität,
+ein Oktett je gesetztem Bit), **nicht** hardcoded auf eine feste Länge. Aus den
+vorhandenen Age-Subfeldern leitet der Konsument die **Provenienz** ab (≥ 2
+frische Technologien → „kombiniert"; sonst die dominante einzelne; PSR-only →
+Primär) — das ersetzt die bisherige Frontend-Heuristik (Wayfinder
+`provenance.js`). Die Präsenz des ES-Subfelds signalisiert weiterhin
+„ADS-B-Anteil vorhanden"; FLARM wird damit erstmals sauber unterscheidbar.
 
 ### 4.3 I062/500 — Estimated Accuracies
 
