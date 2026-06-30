@@ -37,3 +37,5 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0021 — Konfigurierbarer System-Referenzpunkt (Single Source of Truth)](0021-konfigurierbarer-system-referenzpunkt.md)
 - [0022 — CAT063 Sensor Status Messages (Per-Sensor-Liveness)](0022-cat063-sensor-status.md)
 - [0023 — Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, env-getrieben)](0023-quell-eingangs-kontrakt-firefly-sources.md)
+- [0024 — OpenSky-Auth: Basic Auth → OAuth2 Client-Credentials](0024-opensky-oauth2-client-credentials.md)
+- [0025 — Assurance-Dokumenten-Architektur (CR → SSS → SRS → STD, Rückverfolgbarkeit)](0025-assurance-dokumenten-architektur.md)
