@@ -1,0 +1,18 @@
+[package]
+name = "firefly-radar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Radar ASTERIX input adapter: decodes CAT048 monoradar target reports over UDP into firefly-core Plots (ADR 0028)."
+
+[dependencies]
+firefly-core = { workspace = true }
+firefly-geo = { workspace = true }
+firefly-asterix = { workspace = true }
+tokio = { version = "1", features = ["net", "time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

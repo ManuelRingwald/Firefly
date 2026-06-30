@@ -10,11 +10,12 @@ use firefly_flarm::FlarmConfig;
 use firefly_geo::Wgs84;
 use firefly_multicast::{MulticastConfig, SensorHealthMonitor};
 use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
+use firefly_radar::RadarConfig;
 use firefly_server::sources;
 use firefly_server::{
     build_live_tracker_multi, live_system_reference_point, router, run_live_cat062,
     run_live_tracker, scene, scene_reference_point, AppState, FrameSource, LiveSnapshot,
-    LiveTracker, Metrics, Scene, ServerConfig, ServerMode, SnapshotRx,
+    LiveTracker, Metrics, RadarSensor, Scene, ServerConfig, ServerMode, SnapshotRx,
 };
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
@@ -239,18 +240,19 @@ async fn build_live_state(
     let resolved = resolve_live_sources();
     let opensky = resolved.opensky;
     let flarm = resolved.flarm;
+    let radar = resolved.radar;
 
     // Representative across all sources: union bbox (tracking-frame origin), output
-    // cadence, and a placeholder sensor id. FLARM is folded in (ADR 0026).
-    let representative = sources::representative_config(&opensky, &flarm);
+    // cadence, and a placeholder sensor id. FLARM and radar are folded in
+    // (ADR 0026/0028).
+    let representative = sources::representative_config(&opensky, &flarm, &radar);
     let sensor_id = representative.sensor_id;
     let output_period = Duration::from_secs(representative.poll_interval_secs);
 
-    // Every source's sensor + scan period: OpenSky uses its poll interval, FLARM a
-    // nominal (it is a push stream). The tracker registers ALL of them so no
-    // adapter's plots are dropped (FR-TRK-010); the same list drives the
-    // sensor-health monitor (CAT063).
-    let sensors: Vec<(SensorId, f64)> = opensky
+    // Geodetic source sensors (OpenSky, FLARM) and their scan periods: OpenSky
+    // uses its poll interval, FLARM a nominal (it is a push stream). These share
+    // the common tracking frame (geodetic path).
+    let geodetic_sensors: Vec<(SensorId, f64)> = opensky
         .iter()
         .map(|c| (c.sensor_id, c.poll_interval_secs as f64))
         .chain(
@@ -260,9 +262,31 @@ async fn build_live_state(
         )
         .collect();
 
+    // Radar (polar) sensors register with their **own** site frame and a real
+    // polar error model (ADR 0028) — CAT048 plots are polar relative to the radar.
+    let radar_sensors: Vec<RadarSensor> = radar
+        .iter()
+        .map(|c| RadarSensor {
+            id: c.sensor_id,
+            position: Wgs84::from_degrees(c.lat_deg, c.lon_deg, c.height_m),
+            sigma_range_m: c.sigma_range_m,
+            sigma_azimuth_deg: c.sigma_azimuth_deg,
+            scan_period: c.scan_period_secs,
+        })
+        .collect();
+
+    // The sensor-health monitor (CAT063) tracks every source sensor — geodetic and
+    // radar alike — so no adapter's plots go unmonitored (FR-TRK-010).
+    let monitored_sensors: Vec<(SensorId, f64)> = geodetic_sensors
+        .iter()
+        .copied()
+        .chain(radar.iter().map(|c| (c.sensor_id, c.scan_period_secs)))
+        .collect();
+
     tracing::info!(
         opensky_sources = opensky.len(),
         flarm_sources = flarm.len(),
+        radar_sources = radar.len(),
         lat_min = representative.lat_min,
         lat_max = representative.lat_max,
         lon_min = representative.lon_min,
@@ -284,8 +308,10 @@ async fn build_live_state(
     // otherwise it is the union bounding-box midpoint.
     let reference = live_system_reference_point(&representative);
 
-    // Build and spawn the live tracker task, registering every source sensor.
-    let tracker = build_live_tracker_multi(reference, sensors.iter().copied());
+    // Build and spawn the live tracker task, registering every source sensor —
+    // geodetic adapters on the shared frame, radar sensors on their own site frame.
+    let tracker =
+        build_live_tracker_multi(reference, geodetic_sensors.iter().copied(), radar_sensors);
     let live = LiveTracker::new(tracker, None); // recorder wired in AP9.4c-4
     {
         let m = Arc::clone(&metrics);
@@ -304,7 +330,7 @@ async fn build_live_state(
     }
 
     // Sensor health monitor over all source sensors (CAT063 per-sensor liveness).
-    let sensor_monitor = Arc::new(SensorHealthMonitor::new_live(sensors.iter().copied()));
+    let sensor_monitor = Arc::new(SensorHealthMonitor::new_live(monitored_sensors));
 
     // Spawn one adapter per source, all feeding the shared plot channel and
     // notifying the sensor monitor for their own sensor.
@@ -318,6 +344,14 @@ async fn build_live_state(
     }
     for cfg in flarm {
         spawn_flarm_listener_live(
+            cfg,
+            plots_tx.clone(),
+            Arc::clone(&metrics),
+            Arc::clone(&sensor_monitor),
+        );
+    }
+    for cfg in radar {
+        spawn_radar_listener_live(
             cfg,
             plots_tx.clone(),
             Arc::clone(&metrics),
@@ -355,16 +389,24 @@ fn resolve_live_sources() -> sources::ResolvedSources {
         Ok(j) if !j.trim().is_empty() => j,
         _ => {
             // Standalone/dev: OpenSky is the implicit primary source in Live mode;
-            // FLARM/OGN is opt-in via FIREFLY_FLARM_ENABLED (ADR 0026).
+            // FLARM/OGN (ADR 0026) and radar ASTERIX (ADR 0028) are opt-in via
+            // FIREFLY_FLARM_ENABLED / FIREFLY_RADAR_ENABLED.
             let flarm_cfg = FlarmConfig::from_env();
             let flarm = if flarm_cfg.enabled {
                 vec![flarm_cfg]
             } else {
                 Vec::new()
             };
+            let radar_cfg = RadarConfig::from_env();
+            let radar = if radar_cfg.enabled {
+                vec![radar_cfg]
+            } else {
+                Vec::new()
+            };
             return sources::ResolvedSources {
                 opensky: vec![OpenSkyConfig::from_env()],
                 flarm,
+                radar,
                 skipped: Vec::new(),
             };
         }
@@ -384,7 +426,7 @@ fn resolve_live_sources() -> sources::ResolvedSources {
             "FIREFLY_SOURCES: no adapter for this source type yet; skipping"
         );
     }
-    if resolved.opensky.is_empty() && resolved.flarm.is_empty() {
+    if resolved.opensky.is_empty() && resolved.flarm.is_empty() && resolved.radar.is_empty() {
         tracing::warn!("FIREFLY_SOURCES: no live source adapter active (empty sky)");
     }
     resolved
@@ -475,6 +517,47 @@ fn spawn_flarm_listener_live(
             sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
             if let Err(e) = plots_tx.try_send(vec![plot]) {
                 tracing::warn!("plot channel full; dropping FLARM plot: {e}");
+            }
+        })
+        .await;
+    });
+}
+
+/// Spawn the radar ASTERIX (CAT048) UDP listener in Live mode (ADR 0028): each
+/// decoded datagram's plots are sent into `plots_tx` so the tracker fuses them
+/// with the ADS-B/FLARM inputs. A full channel drops the batch with a warning
+/// (availability over back-pressure).
+///
+/// Sets `metrics.live_ready = true` on the first batch (AP9.4c-4) and counts plots
+/// in `radar_plots_received_total`. Notifies `sensor_monitor` so the radar
+/// sensor's liveness is tracked (CAT063). The listener never returns under normal
+/// operation; a bind failure logs and returns (other sources keep running).
+fn spawn_radar_listener_live(
+    config: RadarConfig,
+    plots_tx: mpsc::Sender<Vec<Plot>>,
+    metrics: Arc<Metrics>,
+    sensor_monitor: Arc<SensorHealthMonitor>,
+) {
+    let sensor_id = config.sensor_id;
+    tracing::info!(
+        sac = config.sac,
+        sic = config.sic,
+        sensor_id = sensor_id.0,
+        port = config.listen_port,
+        multicast = config.is_multicast(),
+        "radar ASTERIX (CAT048) listener starting (live mode)"
+    );
+    tokio::spawn(async move {
+        firefly_radar::run(&config, move |plots| {
+            metrics
+                .live_ready
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            metrics
+                .radar_plots_received_total
+                .fetch_add(plots.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
+            if let Err(e) = plots_tx.try_send(plots) {
+                tracing::warn!("plot channel full; dropping radar batch: {e}");
             }
         })
         .await;

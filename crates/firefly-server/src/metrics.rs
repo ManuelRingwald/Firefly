@@ -46,6 +46,10 @@ pub struct Metrics {
     /// (counter, ADR 0026). Stays 0 in Replay mode or without a `flarm_aprs`
     /// source.
     pub flarm_plots_received_total: AtomicU64,
+    /// Total number of radar ASTERIX (CAT048) plots decoded from the UDP feed
+    /// (counter, ADR 0028). Stays 0 in Replay mode or without a `radar_asterix`
+    /// source.
+    pub radar_plots_received_total: AtomicU64,
 
     // --- Sensor health metrics (Firefly #32, CAT063) ---
     /// Total number of CAT063 sensor status blocks sent over multicast (counter).
@@ -160,6 +164,13 @@ pub fn render(metrics: &Metrics, frames_total: usize) -> String {
         "counter",
         "Total number of FLARM/OGN plots received from APRS-IS (Live mode only).",
         metrics.flarm_plots_received_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_radar_plots_received_total",
+        "counter",
+        "Total number of radar ASTERIX (CAT048) plots decoded from UDP (Live mode only).",
+        metrics.radar_plots_received_total.load(Ordering::Relaxed) as f64,
     );
     write_metric(
         &mut out,
