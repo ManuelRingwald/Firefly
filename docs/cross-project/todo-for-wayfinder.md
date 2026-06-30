@@ -22,6 +22,16 @@ Schnittstellen-Themen, die in Firefly entstehen und Wayfinder-Arbeit auslösen.
 > „Client-Secret" heißen (statt „Benutzername"/„Passwort"); reiner Label-/Hinweis-
 > Wechsel, keine Logik. Teil der ORCH-5-E2E-Vorbereitung.
 
+> **`flarm_aprs`-Adapter unterstützt (ADR 0026, Kontrakt v1.2.0, kein separates
+> Issue).** Firefly hat den **zweiten** Live-Quell-Adapter implementiert: FLARM-
+> Positionen über OGN/APRS-IS (Schritt A ADR · B Crate `firefly-flarm` · C
+> Verdrahtung). Im Kontrakt wechselt `flarm_aprs` von „reserviert" → „unterstützt";
+> Cred-Wert `callsign:passcode` (read-only anonym ohne `cred_env`), gleiche
+> Ein-String-Form wie `adsb_opensky`. **Additiv** — kein Wire-Format-Bruch.
+> **Wayfinder-Folge: keine** — das Docker-Backend serialisiert `flarm_aprs` bereits
+> aus `source_config` nach `FIREFLY_SOURCES` (ORCH-5, Vokabular war reserviert).
+> Von Issue #35 ist auf Firefly-Seite damit nur noch **`radar_asterix`** offen.
+
 | Issue | Thema | Status |
 |-------|-------|--------|
 | [Wayfinder#5](https://github.com/ManuelRingwald/Wayfinder/issues/5) (`from-firefly`) | **CAT062 ICD 2.0.0 (Breaking):** neues optionales **I062/136** (Measured Flight Level, FRN 17, i16, LSB 1/4 FL = 25 ft) + **I062/500 von FRN 16 → FRN 27** (UAP-Standardtreue, FSPEC 3→4 Oktette). ADR 0015. Wayfinder-Decoder muss in lockstep nachziehen (AP2). | ✅ erledigt (Wayfinder PR #6, AP2) |

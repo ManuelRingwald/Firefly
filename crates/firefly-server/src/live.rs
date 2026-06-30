@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use firefly_asterix::Cat062Encoder;
-use firefly_core::{Plot, SystemTrack, Timestamp};
+use firefly_core::{Plot, SensorId, SystemTrack, Timestamp};
 use firefly_geo::{LocalFrame, Wgs84};
 use firefly_opensky::OpenSkyConfig;
 use firefly_track::{ProcessNoise, SensorErrorModel, Tracker, TrackerConfig};
@@ -176,14 +176,32 @@ fn resolve_system_reference_point(
 /// satisfies the API. The configured scan period (the poll interval) floors the
 /// deletion cadence so a track is not churned away between polls.
 pub fn build_live_tracker(config: &OpenSkyConfig) -> Tracker {
-    let frame = LocalFrame::new(live_system_reference_point(config));
+    build_live_tracker_multi(
+        live_system_reference_point(config),
+        std::iter::once((config.sensor_id, config.poll_interval_secs as f64)),
+    )
+}
 
-    // Placeholder polar model — irrelevant for the geodetic ADS-B path.
+/// Build the live [`Tracker`] anchored at `reference`, registering **every** live
+/// source sensor (ADR 0026): one sensor per `(SensorId, scan_period_secs)` so the
+/// tracker accepts plots from all adapters (OpenSky ADS-B, FLARM/OGN, …) rather
+/// than dropping those whose sensor is unregistered (FR-TRK-010). Every live
+/// source is on the geodetic path, so each sensor shares the common tracking
+/// frame and a placeholder polar error model (irrelevant for geodetic
+/// measurements). The slowest registered scan period floors the deletion cadence
+/// (ADR 0013), so a track is not churned away between a slow sensor's updates.
+pub fn build_live_tracker_multi(
+    reference: Wgs84,
+    sensors: impl IntoIterator<Item = (SensorId, f64)>,
+) -> Tracker {
+    let frame = LocalFrame::new(reference);
+    // Placeholder polar model — irrelevant for the geodetic ADS-B/FLARM path.
     let placeholder_error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.1);
-    let scan_period = config.poll_interval_secs as f64;
 
-    let mut tracker_config =
-        TrackerConfig::single_sensor(config.sensor_id, frame, placeholder_error, scan_period);
+    let mut tracker_config = TrackerConfig::new(frame);
+    for (id, scan_period) in sensors {
+        tracker_config = tracker_config.with_sensor(id, frame, placeholder_error, scan_period);
+    }
     tracker_config.process_noise = ProcessNoise::new(LIVE_PROCESS_NOISE);
     Tracker::new(tracker_config)
 }

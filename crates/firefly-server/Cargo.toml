@@ -26,6 +26,7 @@ firefly-asterix = { workspace = true }
 firefly-multicast = { workspace = true }
 firefly-recorder = { workspace = true }
 firefly-opensky = { workspace = true }
+firefly-flarm = { workspace = true }
 axum = { version = "0.8", features = ["ws"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

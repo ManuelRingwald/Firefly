@@ -5,15 +5,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use firefly_asterix::Cat062Encoder;
-use firefly_core::Plot;
+use firefly_core::{Plot, SensorId};
+use firefly_flarm::FlarmConfig;
 use firefly_geo::Wgs84;
 use firefly_multicast::{MulticastConfig, SensorHealthMonitor};
 use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
 use firefly_server::sources;
 use firefly_server::{
-    build_live_tracker, live_system_reference_point, router, run_live_cat062, run_live_tracker,
-    scene, scene_reference_point, AppState, FrameSource, LiveSnapshot, LiveTracker, Metrics, Scene,
-    ServerConfig, ServerMode, SnapshotRx,
+    build_live_tracker_multi, live_system_reference_point, router, run_live_cat062,
+    run_live_tracker, scene, scene_reference_point, AppState, FrameSource, LiveSnapshot,
+    LiveTracker, Metrics, Scene, ServerConfig, ServerMode, SnapshotRx,
 };
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
@@ -235,36 +236,56 @@ async fn build_live_state(
     // FIREFLY_OPENSKY_* config (standalone/dev). A FIREFLY_SOURCES config fault is
     // fatal, so the orchestrator sees the container fail rather than run
     // mis-sourced.
-    let configs = resolve_live_sources();
+    let resolved = resolve_live_sources();
+    let opensky = resolved.opensky;
+    let flarm = resolved.flarm;
 
-    // Representative config across N sources: union bbox (tracking-frame origin),
-    // min poll interval (output cadence), first sensor id (placeholder for the
-    // geodetic ADS-B path).
-    let representative = sources::representative_config(&configs);
+    // Representative across all sources: union bbox (tracking-frame origin), output
+    // cadence, and a placeholder sensor id. FLARM is folded in (ADR 0026).
+    let representative = sources::representative_config(&opensky, &flarm);
     let sensor_id = representative.sensor_id;
     let output_period = Duration::from_secs(representative.poll_interval_secs);
 
+    // Every source's sensor + scan period: OpenSky uses its poll interval, FLARM a
+    // nominal (it is a push stream). The tracker registers ALL of them so no
+    // adapter's plots are dropped (FR-TRK-010); the same list drives the
+    // sensor-health monitor (CAT063).
+    let sensors: Vec<(SensorId, f64)> = opensky
+        .iter()
+        .map(|c| (c.sensor_id, c.poll_interval_secs as f64))
+        .chain(
+            flarm
+                .iter()
+                .map(|c| (c.sensor_id, sources::FLARM_NOMINAL_SCAN_SECS)),
+        )
+        .collect();
+
     tracing::info!(
-        source_count = configs.len(),
+        opensky_sources = opensky.len(),
+        flarm_sources = flarm.len(),
         lat_min = representative.lat_min,
         lat_max = representative.lat_max,
         lon_min = representative.lon_min,
         lon_max = representative.lon_max,
-        poll_interval_secs = representative.poll_interval_secs,
-        sensor_id = sensor_id.0,
-        "live mode: starting ADS-B tracker"
+        output_period_secs = representative.poll_interval_secs,
+        "live mode: starting tracker over all live sources"
     );
 
-    // Channel: OpenSky pollers → live tracker (bounded; drop batches if the
-    // tracker is busy rather than blocking the network callback). One sender clone
-    // per source feeds this shared channel.
+    // Channel: source adapters → live tracker (bounded; drop batches if the
+    // tracker is busy rather than blocking a network callback). Each source clones
+    // the sender into this shared channel.
     let (plots_tx, plots_rx) = mpsc::channel::<Vec<Plot>>(32);
 
     // Channel: live tracker → WS/CAT062 consumers ("last value wins" watch).
     let (snapshot_tx, snapshot_rx) = watch::channel(LiveSnapshot::empty());
 
-    // Build and spawn the live tracker task.
-    let tracker = build_live_tracker(&representative);
+    // The system reference point (ADR 0021): one origin for both the tracking
+    // frame and the I062/100 projection. FIREFLY_SYSTEM_REF_* overrides it;
+    // otherwise it is the union bounding-box midpoint.
+    let reference = live_system_reference_point(&representative);
+
+    // Build and spawn the live tracker task, registering every source sensor.
+    let tracker = build_live_tracker_multi(reference, sensors.iter().copied());
     let live = LiveTracker::new(tracker, None); // recorder wired in AP9.4c-4
     {
         let m = Arc::clone(&metrics);
@@ -282,23 +303,21 @@ async fn build_live_state(
         ));
     }
 
-    // The system reference point (ADR 0021): one origin for both the tracking
-    // frame (above) and the I062/100 projection (below). FIREFLY_SYSTEM_REF_*
-    // overrides it; otherwise it is the union bounding-box midpoint.
-    let reference = live_system_reference_point(&representative);
+    // Sensor health monitor over all source sensors (CAT063 per-sensor liveness).
+    let sensor_monitor = Arc::new(SensorHealthMonitor::new_live(sensors.iter().copied()));
 
-    // Sensor health monitor: every source's sensor, scan period = its poll
-    // interval (CAT063 per-sensor liveness).
-    let sensor_monitor = Arc::new(SensorHealthMonitor::new_live(
-        configs
-            .iter()
-            .map(|c| (c.sensor_id, c.poll_interval_secs as f64)),
-    ));
-
-    // Spawn one OpenSky poller per source, all feeding the shared plot channel and
-    // notifying the sensor monitor for their own sensor on each batch.
-    for cfg in configs {
+    // Spawn one adapter per source, all feeding the shared plot channel and
+    // notifying the sensor monitor for their own sensor.
+    for cfg in opensky {
         spawn_opensky_poller_live(
+            cfg,
+            plots_tx.clone(),
+            Arc::clone(&metrics),
+            Arc::clone(&sensor_monitor),
+        );
+    }
+    for cfg in flarm {
+        spawn_flarm_listener_live(
             cfg,
             plots_tx.clone(),
             Arc::clone(&metrics),
@@ -331,10 +350,24 @@ async fn build_live_state(
 /// the orchestrator sees the container fail rather than run with the wrong (or no)
 /// sources. Reserved types without an adapter yet are logged and skipped; an empty
 /// effective set runs an idle tracker (the instance still serves an empty sky).
-fn resolve_live_sources() -> Vec<OpenSkyConfig> {
+fn resolve_live_sources() -> sources::ResolvedSources {
     let json = match std::env::var("FIREFLY_SOURCES") {
         Ok(j) if !j.trim().is_empty() => j,
-        _ => return vec![OpenSkyConfig::from_env()],
+        _ => {
+            // Standalone/dev: OpenSky is the implicit primary source in Live mode;
+            // FLARM/OGN is opt-in via FIREFLY_FLARM_ENABLED (ADR 0026).
+            let flarm_cfg = FlarmConfig::from_env();
+            let flarm = if flarm_cfg.enabled {
+                vec![flarm_cfg]
+            } else {
+                Vec::new()
+            };
+            return sources::ResolvedSources {
+                opensky: vec![OpenSkyConfig::from_env()],
+                flarm,
+                skipped: Vec::new(),
+            };
+        }
     };
     let specs = sources::parse_sources(&json).unwrap_or_else(|e| {
         tracing::error!(error = %e, "FIREFLY_SOURCES invalid; aborting");
@@ -351,10 +384,10 @@ fn resolve_live_sources() -> Vec<OpenSkyConfig> {
             "FIREFLY_SOURCES: no adapter for this source type yet; skipping"
         );
     }
-    if resolved.opensky.is_empty() {
+    if resolved.opensky.is_empty() && resolved.flarm.is_empty() {
         tracing::warn!("FIREFLY_SOURCES: no live source adapter active (empty sky)");
     }
-    resolved.opensky
+    resolved
 }
 
 /// Spawn the OpenSky poller in Live mode: every batch of plots is sent into
@@ -405,6 +438,46 @@ fn spawn_opensky_poller_live(
                 },
             )
             .await;
+    });
+}
+
+/// Spawn the FLARM/OGN APRS-IS listener in Live mode (ADR 0026): every decoded
+/// position plot is sent into `plots_tx` so the tracker can fuse it with the
+/// ADS-B/radar inputs. If the channel is full the plot is dropped with a warning
+/// (availability over back-pressure).
+///
+/// Sets `metrics.live_ready = true` on the first plot (AP9.4c-4) and counts plots
+/// in `flarm_plots_received_total`. Notifies `sensor_monitor` on each plot so the
+/// FLARM sensor's liveness is tracked (CAT063). The listener reconnects with
+/// backoff internally and never returns.
+fn spawn_flarm_listener_live(
+    config: FlarmConfig,
+    plots_tx: mpsc::Sender<Vec<Plot>>,
+    metrics: Arc<Metrics>,
+    sensor_monitor: Arc<SensorHealthMonitor>,
+) {
+    let sensor_id = config.sensor_id;
+    tracing::info!(
+        server = %config.server,
+        port = config.port,
+        sensor_id = sensor_id.0,
+        anonymous = config.callsign.is_none(),
+        "FLARM/OGN APRS-IS listener started (live mode)"
+    );
+    tokio::spawn(async move {
+        firefly_flarm::run(&config, move |plot| {
+            metrics
+                .live_ready
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            metrics
+                .flarm_plots_received_total
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
+            if let Err(e) = plots_tx.try_send(vec![plot]) {
+                tracing::warn!("plot channel full; dropping FLARM plot: {e}");
+            }
+        })
+        .await;
     });
 }
 

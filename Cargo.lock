@@ -308,6 +308,7 @@ dependencies = [
  "axum",
  "firefly-asterix",
  "firefly-core",
+ "firefly-flarm",
  "firefly-geo",
  "firefly-io",
  "firefly-multicast",

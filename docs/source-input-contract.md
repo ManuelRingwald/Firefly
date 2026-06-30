@@ -20,6 +20,12 @@
 
 ## Version
 
+**1.2.0** (2026-06-30) — `flarm_aprs` ist **unterstützt** (ADR 0026): Adapter für
+FLARM-Positionen über das Open Glider Network (OGN) via APRS-IS. Felder: `bbox`
+(Pflicht), `sensor_id`?, `cred_env`? mit Wert `callsign:passcode` (read-only
+anonym ohne `cred_env`). **Additiv** — kein Wire-Format-Bruch; bestehende Quellen
+unverändert. Minor-Bump.
+
 **1.1.0** (2026-06-29) — `adsb_opensky`-Cred-Wert ist nun
 `client_id:client_secret` (OpenSky OAuth2 Client-Credentials, ADR 0024) statt
 `benutzer:passwort`. **Wire-Vertrag unverändert** (ein String, ein Doppelpunkt) —
@@ -77,7 +83,7 @@ FIREFLY_CAT062_PORT=8600
 | `type` | Status | Adapter | Felder |
 |--------|--------|---------|--------|
 | `adsb_opensky` | **unterstützt** (ADR 0019) | OpenSky-REST-Poller | `bbox` (Pflicht), `sensor_id`?, `cred_env`? |
-| `flarm_aprs` | **reserviert** (Adapter folgt) | OGN/APRS-IS | `bbox` |
+| `flarm_aprs` | **unterstützt** (ADR 0026) | OGN/APRS-IS-Stream | `bbox` (Pflicht), `sensor_id`?, `cred_env`? |
 | `radar_asterix` | **reserviert** (Adapter folgt) | ASTERIX-Eingang | `sac`/`sic` |
 
 **Behandlung:**
@@ -98,6 +104,13 @@ kurzlebiges Bearer-Token (Basic Auth ist von OpenSky abgeschaltet). Kein `cred_e
 → anonymer Zugang (gedrosseltes Poll-Intervall, ADR 0019). Der **Wire-Vertrag**
 (ein String, ein Doppelpunkt) ist unverändert; nur die Bedeutung der zwei Teile.
 
+**`flarm_aprs` (APRS-IS-Login, ADR 0026):** Der Wert ist `callsign:passcode`; der
+Adapter **splittet am ersten `:`** (APRS-IS-Callsigns enthalten kein `:`) und meldet
+sich damit am APRS-IS-Server an. Kein `cred_env` → **read-only anonymer** Zugang
+(Pseudo-Callsign, Passcode `-1`); Firefly **sendet nie**. Ein benannter Account ist
+nur nötig, wenn der Betreiber ihn ausdrücklich will. Gleiche Ein-String-mit-einem-
+Doppelpunkt-Form wie `adsb_opensky`.
+
 > **Sicherheits-Grenze (ehrlich).** Eine Cred-Env trägt den **Klartext** zur
 > Laufzeit (sichtbar in `docker inspect`/Prozess-Env). Wayfinders Verschlüsselung
 > schützt das Credential **at rest** in der DB, **nicht** den laufenden Container.
@@ -106,6 +119,8 @@ kurzlebiges Bearer-Token (Basic Auth ist von OpenSky abgeschaltet). Kein `cred_e
 
 ## 5. Changelog
 
+- **1.2.0** (2026-06-30, ADR 0026) — `flarm_aprs` unterstützt (OGN/APRS-IS-Adapter);
+  Cred-Wert `callsign:passcode`, read-only anonym ohne `cred_env`. Additiv.
 - **1.1.0** (2026-06-29, ADR 0024) — `adsb_opensky`-Cred-Wert ist
   `client_id:client_secret` (OAuth2 Client-Credentials); Wire-Vertrag unverändert.
 - **1.0.0** (2026-06-29, ADR 0023) — Erstdefinition.
