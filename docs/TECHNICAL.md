@@ -248,6 +248,10 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_opensky_poll_errors_total` | counter | **Live-Modus:** HTTP/Netz-Fehler beim OpenSky-Poll |
 | `firefly_flarm_plots_received_total` | counter | **Live-Modus:** Empfangene FLARM/OGN-Plots (APRS-IS, ADR 0026) |
 | `firefly_radar_plots_received_total` | counter | **Live-Modus:** Dekodierte Radar-ASTERIX-Plots (CAT048/UDP, ADR 0028) |
+| `firefly_live_plot_batches_dropped_total` | counter | **Live-Modus:** Plot-Batches verworfen, weil der Quell→Tracker-Kanal voll war (Back-Pressure-Verlust). Wächst nur unter Überlast — Operator-Signal zum Skalieren/Drosseln. |
+| `firefly_sources_opensky` | gauge | Anzahl konfigurierter `adsb_opensky`-Quellen (Quell-Mix, ADR 0023) |
+| `firefly_sources_flarm` | gauge | Anzahl konfigurierter `flarm_aprs`-Quellen |
+| `firefly_sources_radar` | gauge | Anzahl konfigurierter `radar_asterix`-Quellen |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |
@@ -275,6 +279,13 @@ rate(firefly_cat062_send_errors_total[5m])
 
 # Aktuelle Track-Anzahl:
 firefly_tracks_active
+
+# Back-Pressure-Verlust (Live-Pipeline): verworfene Plot-Batches/min.
+# > 0 bedeutet, der Tracker kommt mit der Quell-Rate nicht mit.
+rate(firefly_live_plot_batches_dropped_total[1m])
+
+# Konfigurierter Quell-Mix dieser Instanz:
+firefly_sources_opensky + firefly_sources_flarm + firefly_sources_radar
 ```
 
 ---

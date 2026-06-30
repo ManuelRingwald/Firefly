@@ -295,6 +295,20 @@ async fn build_live_state(
         "live mode: starting tracker over all live sources"
     );
 
+    // Expose the configured source mix as gauges (Betriebs-Härtung): an operator
+    // can confirm at a glance that the instance runs the sources the orchestrator
+    // intended (ADR 0023). Set before the spawn loops consume the config vecs.
+    use std::sync::atomic::Ordering;
+    metrics
+        .sources_opensky
+        .store(opensky.len() as u64, Ordering::Relaxed);
+    metrics
+        .sources_flarm
+        .store(flarm.len() as u64, Ordering::Relaxed);
+    metrics
+        .sources_radar
+        .store(radar.len() as u64, Ordering::Relaxed);
+
     // Channel: source adapters → live tracker (bounded; drop batches if the
     // tracker is busy rather than blocking a network callback). Each source clones
     // the sender into this shared channel.
@@ -469,6 +483,9 @@ fn spawn_opensky_poller_live(
                     // Notify the sensor health monitor: this sensor is alive.
                     sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
                     if let Err(e) = plots_tx.try_send(plots) {
+                        metrics
+                            .live_plot_batches_dropped_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         tracing::warn!("plot channel full; dropping batch: {e}");
                     }
                 },
@@ -516,6 +533,9 @@ fn spawn_flarm_listener_live(
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
             if let Err(e) = plots_tx.try_send(vec![plot]) {
+                metrics
+                    .live_plot_batches_dropped_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 tracing::warn!("plot channel full; dropping FLARM plot: {e}");
             }
         })
@@ -557,6 +577,9 @@ fn spawn_radar_listener_live(
                 .fetch_add(plots.len() as u64, std::sync::atomic::Ordering::Relaxed);
             sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
             if let Err(e) = plots_tx.try_send(plots) {
+                metrics
+                    .live_plot_batches_dropped_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 tracing::warn!("plot channel full; dropping radar batch: {e}");
             }
         })
