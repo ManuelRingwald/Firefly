@@ -179,28 +179,54 @@ pub fn build_live_tracker(config: &OpenSkyConfig) -> Tracker {
     build_live_tracker_multi(
         live_system_reference_point(config),
         std::iter::once((config.sensor_id, config.poll_interval_secs as f64)),
+        std::iter::empty(),
     )
 }
 
+/// A polar (radar) live sensor: unlike the geodetic adapters it has its **own**
+/// site frame and a real polar error model, because CAT048 plots are polar
+/// relative to the radar (ADR 0028). Built from a `radar_asterix` source.
+pub struct RadarSensor {
+    /// The radar's tracker [`SensorId`].
+    pub id: SensorId,
+    /// The radar site position (anchors this sensor's local frame).
+    pub position: Wgs84,
+    /// 1σ slant-range measurement noise, metres.
+    pub sigma_range_m: f64,
+    /// 1σ azimuth measurement noise, degrees.
+    pub sigma_azimuth_deg: f64,
+    /// Antenna revolution (scan) period, seconds.
+    pub scan_period: f64,
+}
+
 /// Build the live [`Tracker`] anchored at `reference`, registering **every** live
-/// source sensor (ADR 0026): one sensor per `(SensorId, scan_period_secs)` so the
-/// tracker accepts plots from all adapters (OpenSky ADS-B, FLARM/OGN, …) rather
-/// than dropping those whose sensor is unregistered (FR-TRK-010). Every live
-/// source is on the geodetic path, so each sensor shares the common tracking
-/// frame and a placeholder polar error model (irrelevant for geodetic
-/// measurements). The slowest registered scan period floors the deletion cadence
+/// source sensor so the tracker accepts plots from all adapters (FR-TRK-010).
+///
+/// `geodetic_sensors` (OpenSky ADS-B, FLARM/OGN) carry their own world position
+/// and an isotropic covariance, so they share the common tracking frame and a
+/// placeholder polar error model (unused for the geodetic path). `radar_sensors`
+/// (ADR 0028) are **polar**: each registers with its **own site frame** and a
+/// real [`SensorErrorModel`], so range/azimuth plots lift correctly into the
+/// tracking frame. The slowest registered scan period floors the deletion cadence
 /// (ADR 0013), so a track is not churned away between a slow sensor's updates.
 pub fn build_live_tracker_multi(
     reference: Wgs84,
-    sensors: impl IntoIterator<Item = (SensorId, f64)>,
+    geodetic_sensors: impl IntoIterator<Item = (SensorId, f64)>,
+    radar_sensors: impl IntoIterator<Item = RadarSensor>,
 ) -> Tracker {
     let frame = LocalFrame::new(reference);
     // Placeholder polar model — irrelevant for the geodetic ADS-B/FLARM path.
     let placeholder_error = SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.1);
 
     let mut tracker_config = TrackerConfig::new(frame);
-    for (id, scan_period) in sensors {
+    for (id, scan_period) in geodetic_sensors {
         tracker_config = tracker_config.with_sensor(id, frame, placeholder_error, scan_period);
+    }
+    for r in radar_sensors {
+        let site_frame = LocalFrame::new(r.position);
+        let error =
+            SensorErrorModel::from_range_and_azimuth_deg(r.sigma_range_m, r.sigma_azimuth_deg);
+        tracker_config = tracker_config.with_sensor(r.id, site_frame, error, r.scan_period);
     }
     tracker_config.process_noise = ProcessNoise::new(LIVE_PROCESS_NOISE);
     Tracker::new(tracker_config)

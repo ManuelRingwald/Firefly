@@ -20,11 +20,19 @@
 
 ## Version
 
-**1.2.0** (2026-06-30) — `flarm_aprs` ist **unterstützt** (ADR 0026): Adapter für
-FLARM-Positionen über das Open Glider Network (OGN) via APRS-IS. Felder: `bbox`
-(Pflicht), `sensor_id`?, `cred_env`? mit Wert `callsign:passcode` (read-only
-anonym ohne `cred_env`). **Additiv** — kein Wire-Format-Bruch; bestehende Quellen
+**1.3.0** (2026-06-30) — `radar_asterix` ist **unterstützt** (ADR 0028): Adapter
+für einen realen Monoradar via **ASTERIX CAT048 über UDP**. Felder: `sac`/`sic`
+(Sensor-Identität), `lat`/`lon` (Pflicht — Radar-Standort; CAT048 ist polar und
+trägt ihn nicht), `height_m`? (Default 0), `listen`? (`group:port`, Default
+`0.0.0.0:8048`), `sensor_id`?. **Kein** `cred_env` (roher UDP-Strom; Vertrauens-
+grenze ist Netz-Isolation, ADR 0017). **Additiv** — bestehende Quellen
 unverändert. Minor-Bump.
+
+Vorgänger **1.2.0** (2026-06-30) — `flarm_aprs` ist **unterstützt** (ADR 0026):
+Adapter für FLARM-Positionen über das Open Glider Network (OGN) via APRS-IS.
+Felder: `bbox` (Pflicht), `sensor_id`?, `cred_env`? mit Wert `callsign:passcode`
+(read-only anonym ohne `cred_env`). **Additiv** — kein Wire-Format-Bruch;
+bestehende Quellen unverändert. Minor-Bump.
 
 **1.1.0** (2026-06-29) — `adsb_opensky`-Cred-Wert ist nun
 `client_id:client_secret` (OpenSky OAuth2 Client-Credentials, ADR 0024) statt
@@ -57,9 +65,12 @@ Ein JSON-Array. Jeder Eintrag:
 |------|-----|---------|----------|-----------|
 | `type` | string | ja | alle | Quell-Art (Abschnitt 3). |
 | `bbox` | object | Flächenquellen | `adsb_opensky`, `flarm_aprs` | `{min_lat, min_lon, max_lat, max_lon}` (WGS84, Grad). |
-| `sac` / `sic` | int 0..255 | Radar | `radar_asterix` | Sensor-Identität. |
-| `sensor_id` | int | optional | `adsb_opensky` | Auf die Plots gestempelte `SensorId`. Fehlt → Firefly vergibt einen Default je Quell-Index. |
-| `cred_env` | string | optional | quellenabhängig | **Name** der Env, die den Credential-Klartext trägt (Abschnitt 4) — **nie** der Wert selbst. Fehlt → anonymer/credential-loser Zugang. |
+| `sac` / `sic` | int 0..255 | Radar | `radar_asterix` | Sensor-Identität (I048/010). |
+| `lat` / `lon` | float | Radar (Pflicht) | `radar_asterix` | **Radar-Standort** (WGS84, Grad). CAT048 ist polar relativ zum Radar und trägt den Standort nicht — Firefly braucht ihn, um Polar-Plots ins Tracking-Frame zu heben (ADR 0028). |
+| `height_m` | float | optional | `radar_asterix` | Radar-Standort-Höhe über dem WGS84-Ellipsoid, Meter. Default `0`. |
+| `listen` | string | optional | `radar_asterix` | UDP-Endpoint `group:port` für den ASTERIX-Eingang. Multicast-Gruppe → beigetreten; sonst Unicast-Bind. Default `0.0.0.0:8048`. |
+| `sensor_id` | int | optional | `adsb_opensky`, `flarm_aprs`, `radar_asterix` | Auf die Plots gestempelte `SensorId`. Fehlt → Firefly vergibt einen Default je Adapter. |
+| `cred_env` | string | optional | `adsb_opensky`, `flarm_aprs` | **Name** der Env, die den Credential-Klartext trägt (Abschnitt 4) — **nie** der Wert selbst. Fehlt → anonymer/credential-loser Zugang. (`radar_asterix` trägt keine Credentials.) |
 
 Die `bbox`-Feldnamen sind identisch zu Wayfinders `source_config`, sodass der
 Orchestrator nahezu pass-through serialisieren kann.
@@ -84,11 +95,13 @@ FIREFLY_CAT062_PORT=8600
 |--------|--------|---------|--------|
 | `adsb_opensky` | **unterstützt** (ADR 0019) | OpenSky-REST-Poller | `bbox` (Pflicht), `sensor_id`?, `cred_env`? |
 | `flarm_aprs` | **unterstützt** (ADR 0026) | OGN/APRS-IS-Stream | `bbox` (Pflicht), `sensor_id`?, `cred_env`? |
-| `radar_asterix` | **reserviert** (Adapter folgt) | ASTERIX-Eingang | `sac`/`sic` |
+| `radar_asterix` | **unterstützt** (ADR 0028) | ASTERIX-CAT048-UDP-Listener | `sac`/`sic`, `lat`/`lon` (Pflicht), `height_m`?, `listen`?, `sensor_id`? |
 
 **Behandlung:**
-- Ein **reservierter** Typ ohne Adapter → **WARN-Log + überspringen** (die Instanz
-  dient die Quellen, die sie kann; Verfügbarkeit vor Vollständigkeit).
+- Alle drei Vokabular-Typen haben jetzt einen Adapter (keine reservierten Typen mehr).
+- Ein **fehlerhaft konfigurierter** Eintrag (fehlende `bbox`/`lat`/`lon`, ungültiges
+  `listen`) → **Startfehler** (eine konfigurierte Quelle, die nicht laufen kann,
+  wird nicht still verworfen).
 - Ein **unbekannter** (vokabular-fremder) Typ → **Startfehler** (Konfigurationsfehler).
 
 ## 4. Credentials
@@ -119,6 +132,9 @@ Doppelpunkt-Form wie `adsb_opensky`.
 
 ## 5. Changelog
 
+- **1.3.0** (2026-06-30, ADR 0028) — `radar_asterix` unterstützt (ASTERIX-CAT048-
+  UDP-Listener); neue Felder `lat`/`lon` (Pflicht, Radar-Standort), `height_m`?,
+  `listen`? (`group:port`, Default `0.0.0.0:8048`). Kein `cred_env`. Additiv.
 - **1.2.0** (2026-06-30, ADR 0026) — `flarm_aprs` unterstützt (OGN/APRS-IS-Adapter);
   Cred-Wert `callsign:passcode`, read-only anonym ohne `cred_env`. Additiv.
 - **1.1.0** (2026-06-29, ADR 0024) — `adsb_opensky`-Cred-Wert ist

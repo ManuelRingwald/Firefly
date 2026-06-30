@@ -30,7 +30,18 @@ Schnittstellen-Themen, die in Firefly entstehen und Wayfinder-Arbeit auslösen.
 > Ein-String-Form wie `adsb_opensky`. **Additiv** — kein Wire-Format-Bruch.
 > **Wayfinder-Folge: keine** — das Docker-Backend serialisiert `flarm_aprs` bereits
 > aus `source_config` nach `FIREFLY_SOURCES` (ORCH-5, Vokabular war reserviert).
-> Von Issue #35 ist auf Firefly-Seite damit nur noch **`radar_asterix`** offen.
+
+> **`radar_asterix`-Adapter unterstützt (ADR 0028, Kontrakt v1.3.0, Issue #91).**
+> Firefly hat den **dritten und letzten** reservierten Live-Quell-Adapter
+> implementiert: ein realer Monoradar über **ASTERIX CAT048 über UDP** (Decoder
+> `firefly-asterix::cat048` · Crate `firefly-radar` · Verdrahtung). Damit ist
+> **Issue #35 auf Firefly-Seite vollständig** (alle drei Vokabular-Typen haben
+> Adapter). Im Kontrakt wechselt `radar_asterix` „reserviert" → „unterstützt" mit
+> **neuen Pflicht-Feldern `lat`/`lon`** (Radar-Standort — CAT048 ist polar und
+> trägt ihn nicht) und optional `height_m`/`listen` (`group:port`). **Additiv**,
+> aber **Wayfinder-Folge nötig (Issue #91):** das Docker-Backend muss für eine
+> `radar_asterix`-Quelle künftig `lat`/`lon`/`listen` aus dem `source_config`
+> nach `FIREFLY_SOURCES` serialisieren (heute nur `sac`/`sic`).
 
 > **Per-Track-Provenienz: I062/290 Per-Technologie-Alter (ADR 0027, ICD 2.6.0,
 > additiv).** Firefly liefert die Track-Herkunft jetzt **autoritativ im Strom**

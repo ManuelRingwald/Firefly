@@ -262,6 +262,37 @@ Vertrauensgrenze ist die Netz-/Quellen-Isolation (ADR 0017), wie bei ADS-B.
 > (Vertrag `docs/source-input-contract.md` v1.2.0); `FIREFLY_SOURCES` hat dann
 > **Vorrang** vor `FIREFLY_FLARM_*`.
 
+### Schritt 4c (optional): Radar-ASTERIX-Quelle (CAT048 über UDP)
+
+Ein **realer Monoradar** kann seine Ziel-Meldungen als **ASTERIX CAT048 über UDP**
+senden (ADR 0028). Der Adapter ist im Live-Modus per `FIREFLY_RADAR_ENABLED=true`
+zuschaltbar und speist **Polar-Plots** in denselben Tracker wie ADS-B/FLARM —
+alle Quellen werden fusioniert. Da CAT048 polar **relativ zum Radar** ist und
+den Standort nicht trägt, **muss** der Radar-Standort (`LAT`/`LON`) gesetzt werden.
+
+```bash
+export FIREFLY_RADAR_ENABLED=true
+export FIREFLY_RADAR_SAC=1
+export FIREFLY_RADAR_SIC=4
+export FIREFLY_RADAR_LAT=50.03      # Radar-Standort (Pflicht)
+export FIREFLY_RADAR_LON=8.57
+# Listen-Endpoint: Multicast-Gruppe (wird beigetreten) oder 0.0.0.0 (Unicast).
+export FIREFLY_RADAR_GROUP=239.255.0.48
+export FIREFLY_RADAR_PORT=8048
+```
+
+Weitere Variablen mit Defaults: `FIREFLY_RADAR_HEIGHT_M` (`0`),
+`FIREFLY_RADAR_SENSOR_ID` (`220`), `FIREFLY_RADAR_SCAN_SECS` (`4`),
+`FIREFLY_RADAR_SIGMA_RANGE_M` (`50`), `FIREFLY_RADAR_SIGMA_AZ_DEG` (`0.1`).
+ASTERIX-UDP ist **nicht authentifiziert** — die Vertrauensgrenze ist die
+Netz-/Quellen-Isolation (ADR 0017), wie bei den anderen Feeds.
+
+> **Orchestrierter Betrieb:** Im auto-orchestrierten Pfad (ADR 0023) setzt der
+> Orchestrator den Radar stattdessen als `radar_asterix`-Eintrag in
+> `FIREFLY_SOURCES` (Vertrag `docs/source-input-contract.md` v1.3.0, Felder
+> `sac`/`sic`/`lat`/`lon`/`listen`); `FIREFLY_SOURCES` hat dann **Vorrang** vor
+> `FIREFLY_RADAR_*`.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den

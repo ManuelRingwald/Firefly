@@ -290,6 +290,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-radar"
+version = "0.1.0"
+dependencies = [
+ "firefly-asterix",
+ "firefly-core",
+ "firefly-geo",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "firefly-recorder"
 version = "0.1.0"
 dependencies = [
@@ -314,6 +325,7 @@ dependencies = [
  "firefly-multicast",
  "firefly-opensky",
  "firefly-player",
+ "firefly-radar",
  "firefly-recorder",
  "firefly-sim",
  "firefly-track",

@@ -13,10 +13,12 @@
 //! pollers or touching the process environment.
 
 use std::fmt;
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use firefly_core::SensorId;
 use firefly_flarm::FlarmConfig;
 use firefly_opensky::OpenSkyConfig;
+use firefly_radar::RadarConfig;
 use serde::Deserialize;
 
 /// Nominal scan period (seconds) attributed to a `flarm_aprs` source. FLARM/OGN
@@ -29,9 +31,10 @@ pub const FLARM_NOMINAL_SCAN_SECS: f64 = 5.0;
 /// Closed source-type vocabulary (mirrors Wayfinder's `source_config`). An
 /// unknown string fails deserialization → a startup configuration error, never a
 /// silently ignored source (ADR 0023).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceType {
+    #[default]
     AdsbOpensky,
     FlarmAprs,
     RadarAsterix,
@@ -49,7 +52,7 @@ pub struct BBox {
 
 /// One entry of `FIREFLY_SOURCES`. `cred_env` names the env that carries the
 /// credential *value* (never the value itself).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 pub struct SourceSpec {
     #[serde(rename = "type")]
     pub source_type: SourceType,
@@ -63,6 +66,22 @@ pub struct SourceSpec {
     pub sensor_id: Option<u16>,
     #[serde(default)]
     pub cred_env: Option<String>,
+    /// Radar site latitude, degrees (`radar_asterix` only — CAT048 is polar
+    /// relative to the radar and carries no site; ADR 0028).
+    #[serde(default)]
+    pub lat: Option<f64>,
+    /// Radar site longitude, degrees (`radar_asterix` only).
+    #[serde(default)]
+    pub lon: Option<f64>,
+    /// Radar site height above the WGS84 ellipsoid, metres (`radar_asterix`,
+    /// optional; default `0`).
+    #[serde(default)]
+    pub height_m: Option<f64>,
+    /// UDP endpoint to receive the ASTERIX feed on, `group:port` (`radar_asterix`).
+    /// A multicast group is joined; any other address is a unicast bind. Absent →
+    /// `0.0.0.0:<default port>`.
+    #[serde(default)]
+    pub listen: Option<String>,
 }
 
 /// Why a `FIREFLY_SOURCES` value could not be turned into runnable sources. All
@@ -81,6 +100,10 @@ pub enum SourceError {
     /// The credential value is not in `client_id:client_secret` form (no `:`
     /// separator).
     MalformedCredential { index: usize, env: String },
+    /// A `radar_asterix` source is missing or has an invalid site/listen field
+    /// (ADR 0028 — CAT048 is polar and carries no radar site, so it must be
+    /// configured).
+    InvalidRadar { index: usize, reason: &'static str },
 }
 
 impl fmt::Display for SourceError {
@@ -101,6 +124,9 @@ impl fmt::Display for SourceError {
                 f,
                 "FIREFLY_SOURCES[{index}]: credential in {env} is malformed (expected two colon-separated parts)"
             ),
+            SourceError::InvalidRadar { index, reason } => {
+                write!(f, "FIREFLY_SOURCES[{index}]: invalid radar source: {reason}")
+            }
         }
     }
 }
@@ -213,6 +239,78 @@ pub fn flarm_config_from_spec(
     Ok(cfg)
 }
 
+/// Build a [`RadarConfig`] from a `radar_asterix` spec at list position `index`
+/// (ADR 0028). CAT048 reports are polar relative to the radar and carry no site,
+/// so `lat`/`lon` are **required** (and validated to WGS84 range); `height_m`
+/// defaults to `0`. `listen` (`group:port`) selects the UDP endpoint (a multicast
+/// group is joined); absent → `0.0.0.0:<default port>`. `sac`/`sic` (0..255) and
+/// `sensor_id` come from the spec. Radar takes **no** credential (the feed is a
+/// raw UDP stream; its trust boundary is network isolation, ADR 0017).
+///
+/// The caller guarantees `spec.source_type == SourceType::RadarAsterix`.
+pub fn radar_config_from_spec(spec: &SourceSpec, index: usize) -> Result<RadarConfig, SourceError> {
+    let lat = spec.lat.ok_or(SourceError::InvalidRadar {
+        index,
+        reason: "radar source requires a lat",
+    })?;
+    let lon = spec.lon.ok_or(SourceError::InvalidRadar {
+        index,
+        reason: "radar source requires a lon",
+    })?;
+    if !lat.is_finite() || !(-90.0..=90.0).contains(&lat) {
+        return Err(SourceError::InvalidRadar {
+            index,
+            reason: "lat must be finite and within [-90,90]",
+        });
+    }
+    if !lon.is_finite() || !(-180.0..=180.0).contains(&lon) {
+        return Err(SourceError::InvalidRadar {
+            index,
+            reason: "lon must be finite and within [-180,180]",
+        });
+    }
+    let height_m = spec.height_m.filter(|h| h.is_finite()).unwrap_or(0.0);
+    let (listen_group, listen_port) = match &spec.listen {
+        Some(s) => parse_listen(s).ok_or(SourceError::InvalidRadar {
+            index,
+            reason: "listen must be a group:port address",
+        })?,
+        None => (Ipv4Addr::UNSPECIFIED, firefly_radar::DEFAULT_PORT),
+    };
+    let to_byte = |v: Option<u16>, what: &'static str| -> Result<u8, SourceError> {
+        match v {
+            None => Ok(0),
+            Some(x) if x <= u8::MAX as u16 => Ok(x as u8),
+            Some(_) => Err(SourceError::InvalidRadar {
+                index,
+                reason: what,
+            }),
+        }
+    };
+
+    let mut cfg = RadarConfig {
+        enabled: true,
+        sac: to_byte(spec.sac, "sac must be 0..255")?,
+        sic: to_byte(spec.sic, "sic must be 0..255")?,
+        lat_deg: lat,
+        lon_deg: lon,
+        height_m,
+        listen_group,
+        listen_port,
+        ..RadarConfig::default()
+    };
+    if let Some(sid) = spec.sensor_id {
+        cfg.sensor_id = SensorId(sid);
+    }
+    Ok(cfg)
+}
+
+/// Parse a `group:port` listen endpoint into its IPv4 address and port.
+fn parse_listen(s: &str) -> Option<(Ipv4Addr, u16)> {
+    let sock: SocketAddrV4 = s.trim().parse().ok()?;
+    Some((*sock.ip(), sock.port()))
+}
+
 /// Reject a bbox that is non-finite, outside WGS84 range, or inverted — config
 /// faults that would otherwise silently yield an empty OpenSky query window.
 fn validate_bbox(b: &BBox, index: usize) -> Result<(), SourceError> {
@@ -253,8 +351,11 @@ pub struct ResolvedSources {
     pub opensky: Vec<OpenSkyConfig>,
     /// One [`FlarmConfig`] per `flarm_aprs` source, in list order (ADR 0026).
     pub flarm: Vec<FlarmConfig>,
+    /// One [`RadarConfig`] per `radar_asterix` source, in list order (ADR 0028).
+    pub radar: Vec<RadarConfig>,
     /// Reserved types present but without an adapter yet — the caller logs a WARN
-    /// and skips them (availability over completeness, ADR 0023).
+    /// and skips them (availability over completeness, ADR 0023). Empty now that
+    /// all three vocabulary types have adapters; kept for forward compatibility.
     pub skipped: Vec<SourceType>,
 }
 
@@ -270,68 +371,91 @@ pub fn resolve_sources(
 ) -> Result<ResolvedSources, SourceError> {
     let mut opensky = Vec::new();
     let mut flarm = Vec::new();
-    let mut skipped = Vec::new();
+    let mut radar = Vec::new();
+    let skipped = Vec::new();
     for (index, spec) in specs.iter().enumerate() {
         match spec.source_type {
             SourceType::AdsbOpensky => {
                 opensky.push(opensky_config_from_spec(spec, index, &get_env)?)
             }
             SourceType::FlarmAprs => flarm.push(flarm_config_from_spec(spec, index, &get_env)?),
-            other => skipped.push(other),
+            SourceType::RadarAsterix => radar.push(radar_config_from_spec(spec, index)?),
         }
     }
     Ok(ResolvedSources {
         opensky,
         flarm,
+        radar,
         skipped,
     })
 }
 
-/// A representative config across all live sources (OpenSky **and** FLARM), used
-/// for the tracking-frame origin (the **union** bbox midpoint, unless
-/// `FIREFLY_SYSTEM_REF_*` overrides) and the tracker's output cadence (the fastest
-/// OpenSky poll interval, or a FLARM nominal when there is no OpenSky source). The
-/// sensor id is the first OpenSky source's, else the first FLARM source's — a
-/// placeholder for the geodetic path. Falls back to the default with no source.
-pub fn representative_config(opensky: &[OpenSkyConfig], flarm: &[FlarmConfig]) -> OpenSkyConfig {
+/// A representative config across all live sources (OpenSky, FLARM **and**
+/// radar), used for the tracking-frame origin (the **union** bbox midpoint,
+/// unless `FIREFLY_SYSTEM_REF_*` overrides) and the tracker's output cadence (the
+/// fastest source tick). A radar source contributes its **site point**
+/// (`lat`/`lon`) to the bbox union and its `scan_period` to the cadence. The
+/// sensor id is the first OpenSky source's, else the first FLARM's, else the
+/// first radar's — a placeholder for the frame anchor. Falls back to the default
+/// with no source.
+pub fn representative_config(
+    opensky: &[OpenSkyConfig],
+    flarm: &[FlarmConfig],
+    radar: &[RadarConfig],
+) -> OpenSkyConfig {
     let mut rep = opensky.first().cloned().unwrap_or_default();
 
-    // With no OpenSky source, anchor the representative on the first FLARM source
-    // so a FLARM-only feed still has a meaningful sensor id and output tick.
+    // With no OpenSky source, anchor the representative on the first FLARM source,
+    // else the first radar source, so a non-OpenSky feed still has a meaningful
+    // sensor id and output tick.
     if opensky.is_empty() {
         if let Some(f) = flarm.first() {
             rep.sensor_id = f.sensor_id;
             rep.poll_interval_secs = FLARM_NOMINAL_SCAN_SECS as u64;
+        } else if let Some(r) = radar.first() {
+            rep.sensor_id = r.sensor_id;
+            rep.poll_interval_secs = r.scan_period_secs.max(1.0) as u64;
         }
     }
 
-    // Union bbox over every *present* source; leave the default bbox untouched
-    // when there is no source at all.
-    if !opensky.is_empty() || !flarm.is_empty() {
-        rep.lat_min = opensky
+    // Union bbox over every *present* source. Each radar contributes its site as a
+    // degenerate point (lat/lon as both min and max). Leave the default bbox
+    // untouched when there is no source at all.
+    if !opensky.is_empty() || !flarm.is_empty() || !radar.is_empty() {
+        let lat_lo = opensky
             .iter()
             .map(|c| c.lat_min)
             .chain(flarm.iter().map(|c| c.lat_min))
-            .fold(f64::INFINITY, f64::min);
-        rep.lat_max = opensky
+            .chain(radar.iter().map(|c| c.lat_deg));
+        let lat_hi = opensky
             .iter()
             .map(|c| c.lat_max)
             .chain(flarm.iter().map(|c| c.lat_max))
-            .fold(f64::NEG_INFINITY, f64::max);
-        rep.lon_min = opensky
+            .chain(radar.iter().map(|c| c.lat_deg));
+        let lon_lo = opensky
             .iter()
             .map(|c| c.lon_min)
             .chain(flarm.iter().map(|c| c.lon_min))
-            .fold(f64::INFINITY, f64::min);
-        rep.lon_max = opensky
+            .chain(radar.iter().map(|c| c.lon_deg));
+        let lon_hi = opensky
             .iter()
             .map(|c| c.lon_max)
             .chain(flarm.iter().map(|c| c.lon_max))
-            .fold(f64::NEG_INFINITY, f64::max);
+            .chain(radar.iter().map(|c| c.lon_deg));
+        rep.lat_min = lat_lo.fold(f64::INFINITY, f64::min);
+        rep.lat_max = lat_hi.fold(f64::NEG_INFINITY, f64::max);
+        rep.lon_min = lon_lo.fold(f64::INFINITY, f64::min);
+        rep.lon_max = lon_hi.fold(f64::NEG_INFINITY, f64::max);
     }
 
-    // Output cadence: publish at least as often as the fastest OpenSky poll.
-    if let Some(min) = opensky.iter().map(|c| c.poll_interval_secs).min() {
+    // Output cadence: publish at least as often as the fastest source tick —
+    // the quickest OpenSky poll or radar scan.
+    if let Some(min) = opensky
+        .iter()
+        .map(|c| c.poll_interval_secs)
+        .chain(radar.iter().map(|c| c.scan_period_secs.max(1.0) as u64))
+        .min()
+    {
         rep.poll_interval_secs = min;
     }
 
@@ -397,6 +521,7 @@ mod tests {
             sic: None,
             sensor_id: Some(201),
             cred_env: None,
+            ..SourceSpec::default()
         };
         let cfg = opensky_config_from_spec(&spec, 0, no_env).expect("valid");
         assert!(cfg.enabled);
@@ -467,6 +592,7 @@ mod tests {
             sic: None,
             sensor_id: None,
             cred_env: None,
+            ..SourceSpec::default()
         };
         assert!(matches!(
             opensky_config_from_spec(&spec, 1, no_env),
@@ -514,14 +640,16 @@ mod tests {
                 sic: None,
                 sensor_id: None,
                 cred_env: None,
+                ..SourceSpec::default()
             },
             SourceSpec {
                 source_type: SourceType::RadarAsterix,
-                bbox: None,
                 sac: Some(1),
                 sic: Some(4),
-                sensor_id: None,
-                cred_env: None,
+                lat: Some(50.03),
+                lon: Some(8.57),
+                listen: Some("239.255.0.48:8048".into()),
+                ..SourceSpec::default()
             },
             adsb_spec(None, Some(202)),
         ];
@@ -531,10 +659,119 @@ mod tests {
         assert_eq!(resolved.opensky[1].sensor_id, SensorId(202));
         assert_eq!(resolved.flarm.len(), 1, "one flarm_aprs config");
         assert!(resolved.flarm[0].enabled);
+        assert_eq!(resolved.radar.len(), 1, "one radar_asterix config");
+        assert_eq!(resolved.radar[0].sac, 1);
+        assert_eq!(resolved.radar[0].sic, 4);
+        assert!(resolved.radar[0].is_multicast());
+        assert!(
+            resolved.skipped.is_empty(),
+            "all three vocabulary types now have adapters"
+        );
+    }
+
+    #[test]
+    fn radar_config_maps_site_identity_and_listen() {
+        let spec = SourceSpec {
+            source_type: SourceType::RadarAsterix,
+            sac: Some(1),
+            sic: Some(4),
+            sensor_id: Some(221),
+            lat: Some(50.03),
+            lon: Some(8.57),
+            height_m: Some(111.0),
+            listen: Some("239.255.0.48:8048".into()),
+            ..SourceSpec::default()
+        };
+        let cfg = radar_config_from_spec(&spec, 0).expect("valid");
+        assert!(cfg.enabled);
+        assert_eq!((cfg.sac, cfg.sic), (1, 4));
+        assert_eq!(cfg.sensor_id, SensorId(221));
+        assert!((cfg.lat_deg - 50.03).abs() < 1e-12);
+        assert!((cfg.lon_deg - 8.57).abs() < 1e-12);
+        assert!((cfg.height_m - 111.0).abs() < 1e-12);
+        assert_eq!(cfg.listen_group, std::net::Ipv4Addr::new(239, 255, 0, 48));
+        assert_eq!(cfg.listen_port, 8048);
+        assert!(cfg.is_multicast());
+    }
+
+    #[test]
+    fn radar_without_listen_defaults_to_unicast_default_port() {
+        let spec = SourceSpec {
+            source_type: SourceType::RadarAsterix,
+            sac: Some(1),
+            sic: Some(4),
+            lat: Some(50.0),
+            lon: Some(8.0),
+            ..SourceSpec::default()
+        };
+        let cfg = radar_config_from_spec(&spec, 0).expect("valid");
+        assert_eq!(cfg.listen_group, std::net::Ipv4Addr::UNSPECIFIED);
+        assert_eq!(cfg.listen_port, firefly_radar::DEFAULT_PORT);
+        assert!(!cfg.is_multicast());
+    }
+
+    #[test]
+    fn radar_missing_or_out_of_range_site_is_an_error() {
+        let no_lat = SourceSpec {
+            source_type: SourceType::RadarAsterix,
+            lon: Some(8.0),
+            ..SourceSpec::default()
+        };
+        assert!(matches!(
+            radar_config_from_spec(&no_lat, 2),
+            Err(SourceError::InvalidRadar { index: 2, .. })
+        ));
+
+        let bad_lat = SourceSpec {
+            source_type: SourceType::RadarAsterix,
+            lat: Some(95.0),
+            lon: Some(8.0),
+            ..SourceSpec::default()
+        };
+        assert!(matches!(
+            radar_config_from_spec(&bad_lat, 0),
+            Err(SourceError::InvalidRadar { .. })
+        ));
+
+        let bad_listen = SourceSpec {
+            source_type: SourceType::RadarAsterix,
+            lat: Some(50.0),
+            lon: Some(8.0),
+            listen: Some("not-an-address".into()),
+            ..SourceSpec::default()
+        };
+        assert!(matches!(
+            radar_config_from_spec(&bad_listen, 0),
+            Err(SourceError::InvalidRadar { .. })
+        ));
+    }
+
+    #[test]
+    fn representative_covers_a_radar_only_feed() {
+        let radar = radar_config_from_spec(
+            &SourceSpec {
+                source_type: SourceType::RadarAsterix,
+                sac: Some(1),
+                sic: Some(4),
+                sensor_id: Some(222),
+                lat: Some(50.0),
+                lon: Some(8.0),
+                ..SourceSpec::default()
+            },
+            0,
+        )
+        .unwrap();
+
+        let rep = representative_config(&[], &[], &[radar]);
+        // The radar site anchors the frame as a degenerate point.
+        assert_eq!(rep.lat_min, 50.0);
+        assert_eq!(rep.lat_max, 50.0);
+        assert_eq!(rep.lon_min, 8.0);
+        assert_eq!(rep.lon_max, 8.0);
         assert_eq!(
-            resolved.skipped,
-            vec![SourceType::RadarAsterix],
-            "only radar_asterix has no adapter yet"
+            rep.sensor_id,
+            SensorId(222),
+            "radar sensor anchors the frame"
         );
     }
 
@@ -552,6 +789,7 @@ mod tests {
             sic: None,
             sensor_id: Some(212),
             cred_env: Some("FLARM_SECRET".into()),
+            ..SourceSpec::default()
         };
         let cfg = flarm_config_from_spec(&spec, 0, |k| {
             (k == "FLARM_SECRET").then(|| "EDXY:12345".to_string())
@@ -579,6 +817,7 @@ mod tests {
             sic: None,
             sensor_id: None,
             cred_env: None,
+            ..SourceSpec::default()
         };
         let cfg = flarm_config_from_spec(&spec, 0, no_env).expect("valid");
         assert!(cfg.callsign.is_none() && cfg.passcode.is_none());
@@ -593,6 +832,7 @@ mod tests {
             sic: None,
             sensor_id: None,
             cred_env: None,
+            ..SourceSpec::default()
         };
         assert!(matches!(
             flarm_config_from_spec(&no_bbox, 3, no_env),
@@ -611,6 +851,7 @@ mod tests {
             sic: None,
             sensor_id: None,
             cred_env: Some("C".into()),
+            ..SourceSpec::default()
         };
         // Passcode part is not an integer → malformed.
         assert!(matches!(
@@ -628,6 +869,7 @@ mod tests {
             sic: None,
             sensor_id: None,
             cred_env: None,
+            ..SourceSpec::default()
         }];
         assert!(matches!(
             resolve_sources(&specs, no_env),
@@ -662,7 +904,7 @@ mod tests {
         .unwrap();
         b.poll_interval_secs = 5;
 
-        let rep = representative_config(&[a, b], &[]);
+        let rep = representative_config(&[a, b], &[], &[]);
         assert_eq!(rep.lat_min, 48.0);
         assert_eq!(rep.lat_max, 52.0);
         assert_eq!(rep.lon_min, 6.0);
@@ -672,7 +914,10 @@ mod tests {
 
     #[test]
     fn representative_of_empty_is_the_default() {
-        assert_eq!(representative_config(&[], &[]), OpenSkyConfig::default());
+        assert_eq!(
+            representative_config(&[], &[], &[]),
+            OpenSkyConfig::default()
+        );
     }
 
     #[test]
@@ -690,13 +935,14 @@ mod tests {
                 sic: None,
                 sensor_id: Some(213),
                 cred_env: None,
+                ..SourceSpec::default()
             },
             0,
             no_env,
         )
         .unwrap();
 
-        let rep = representative_config(&[], &[flarm]);
+        let rep = representative_config(&[], &[flarm], &[]);
         // Union bbox comes from the FLARM source, not the OpenSky default.
         assert_eq!(rep.lat_min, 49.0);
         assert_eq!(rep.lat_max, 52.0);
@@ -725,6 +971,7 @@ mod tests {
             sic: None,
             sensor_id,
             cred_env: cred_env.map(str::to_string),
+            ..SourceSpec::default()
         }
     }
 
@@ -736,6 +983,7 @@ mod tests {
             sic: None,
             sensor_id: None,
             cred_env: None,
+            ..SourceSpec::default()
         }
     }
 }

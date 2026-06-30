@@ -32,11 +32,13 @@
 //!
 //! REQ: FR-IO-003, FR-TRK-008
 
+mod cat048;
 mod cat062;
 mod cat063;
 mod cat065;
 mod fspec;
 
+pub use cat048::{decode_target_reports, Cat048DecodeError, DecodedTargetReport, Detection};
 pub use cat062::{
     decode_data_block, unproject_cartesian_position, Cat062Encoder, DataSourceId, DecodeError,
     DecodedRecord,

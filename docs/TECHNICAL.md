@@ -104,6 +104,32 @@ denselben Tracker wie OpenSky (Fusion).
 > **Sicherheit:** APRS-IS-Daten sind öffentlich und nicht authentifiziert; Firefly
 > sendet nie (read-only). Vertrauensgrenze = Netz-/Quellen-Isolation (ADR 0017).
 
+#### Radar-ASTERIX-Adapter (`FIREFLY_RADAR_*`, ADR 0028)
+
+Dritter Live-Quell-Adapter: ein realer Monoradar über **ASTERIX CAT048 über UDP**.
+Im Live-Modus per `FIREFLY_RADAR_ENABLED=true` zuschaltbar (standalone) oder als
+`radar_asterix`-Eintrag in `FIREFLY_SOURCES` (orchestriert). Liefert **Polar-Plots**
+(`Measurement::Polar`); der Sensor wird mit seinem **eigenen Standort-Frame** +
+realem Polar-Fehlermodell registriert (anders als die geodätischen Adapter). Plots
+fließen in denselben Tracker (Fusion mit ADS-B/FLARM).
+
+| Variable | Typ | Default | Bedeutung |
+|----------|-----|---------|-----------|
+| `FIREFLY_RADAR_ENABLED` | bool | `false` | Adapter im Standalone-Live-Modus aktivieren |
+| `FIREFLY_RADAR_SAC` / `_SIC` | u8 | `0` / `0` | Erwartete Radar-Identität (I048/010) |
+| `FIREFLY_RADAR_LAT` / `_LON` | f64 | `0.0` / `0.0` | **Radar-Standort** (Grad) — CAT048 trägt ihn nicht |
+| `FIREFLY_RADAR_HEIGHT_M` | f64 | `0.0` | Radar-Standort-Höhe (m über WGS84-Ellipsoid) |
+| `FIREFLY_RADAR_GROUP` | IPv4 | `0.0.0.0` | Listen-Adresse: Multicast-Gruppe → beigetreten, sonst Unicast-Bind |
+| `FIREFLY_RADAR_PORT` | u16 | `8048` | UDP-Port des ASTERIX-Eingangs |
+| `FIREFLY_RADAR_SENSOR_ID` | u16 | `220` | Sensor-ID der Radar-Plots |
+| `FIREFLY_RADAR_SCAN_SECS` | f64 | `4.0` | Antennen-Umlaufzeit (Revisit-Budget, CAT063-Staleness) |
+| `FIREFLY_RADAR_SIGMA_RANGE_M` | f64 | `50.0` | 1σ-Schrägentfernungs-Rauschen (m) |
+| `FIREFLY_RADAR_SIGMA_AZ_DEG` | f64 | `0.1` | 1σ-Azimut-Rauschen (Grad) |
+
+> **Sicherheit:** ASTERIX-UDP ist nicht authentifiziert; der Decoder ist robust
+> (kein Panic auf Eingabe, length-checked, Mutations-/Trunkierungs-getestet).
+> Vertrauensgrenze = Netz-/Quellen-Isolation (ADR 0017).
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.0.0. Im **Live-Modus** liest Firefly
@@ -221,6 +247,7 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_plot_records_written_total` | counter | **Live-Modus:** In `.ffplots`-Datei geschriebene Records |
 | `firefly_opensky_poll_errors_total` | counter | **Live-Modus:** HTTP/Netz-Fehler beim OpenSky-Poll |
 | `firefly_flarm_plots_received_total` | counter | **Live-Modus:** Empfangene FLARM/OGN-Plots (APRS-IS, ADR 0026) |
+| `firefly_radar_plots_received_total` | counter | **Live-Modus:** Dekodierte Radar-ASTERIX-Plots (CAT048/UDP, ADR 0028) |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |

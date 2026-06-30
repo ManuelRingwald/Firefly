@@ -41,3 +41,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - *(0025 — reserviert/geparkt: Assurance-Dokumenten-Architektur)*
 - [0026 — FLARM/OGN-Eingangs-Adapter (`flarm_aprs` via APRS-IS)](0026-flarm-ogn-eingangs-adapter.md)
 - [0027 — Per-Track-Provenienz & Source-Ages (CAT062 I062/290 additiv)](0027-per-track-provenienz-source-ages.md)
+- [0028 — Radar-ASTERIX-Eingangs-Adapter (`radar_asterix`, CAT048 über UDP)](0028-radar-asterix-eingangs-adapter.md)
