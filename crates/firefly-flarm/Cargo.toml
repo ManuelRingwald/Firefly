@@ -1,0 +1,17 @@
+[package]
+name = "firefly-flarm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "FLARM/OGN adapter: consumes the Open Glider Network APRS-IS stream and converts position reports to firefly-core Plots (ADR 0026)."
+
+[dependencies]
+firefly-core = { workspace = true }
+firefly-geo = { workspace = true }
+tokio = { version = "1", features = ["net", "io-util", "time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util"] }

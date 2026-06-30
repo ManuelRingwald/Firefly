@@ -42,6 +42,10 @@ pub struct Metrics {
     /// Total number of OpenSky poll errors (HTTP / network failures, counter).
     /// Stays 0 in Replay mode (OpenSky poller not started).
     pub opensky_poll_errors_total: AtomicU64,
+    /// Total number of FLARM/OGN position plots received from the APRS-IS stream
+    /// (counter, ADR 0026). Stays 0 in Replay mode or without a `flarm_aprs`
+    /// source.
+    pub flarm_plots_received_total: AtomicU64,
 
     // --- Sensor health metrics (Firefly #32, CAT063) ---
     /// Total number of CAT063 sensor status blocks sent over multicast (counter).
@@ -152,6 +156,13 @@ pub fn render(metrics: &Metrics, frames_total: usize) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_flarm_plots_received_total",
+        "counter",
+        "Total number of FLARM/OGN plots received from APRS-IS (Live mode only).",
+        metrics.flarm_plots_received_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
         "firefly_cat063_status_sent_total",
         "counter",
         "Total number of CAT063 sensor status blocks sent over multicast.",
@@ -206,6 +217,9 @@ mod tests {
         metrics
             .opensky_poll_errors_total
             .store(3, Ordering::Relaxed);
+        metrics
+            .flarm_plots_received_total
+            .store(11, Ordering::Relaxed);
         metrics.cat063_status_sent_total.store(7, Ordering::Relaxed);
         metrics.sensors_total.store(3, Ordering::Relaxed);
         metrics.sensors_active.store(2, Ordering::Relaxed);
@@ -222,6 +236,7 @@ mod tests {
         assert!(text.contains("firefly_live_plots_ingested_total 100"));
         assert!(text.contains("firefly_plot_records_written_total 100"));
         assert!(text.contains("firefly_opensky_poll_errors_total 3"));
+        assert!(text.contains("firefly_flarm_plots_received_total 11"));
         assert!(text.contains("firefly_cat063_status_sent_total 7"));
         assert!(text.contains("firefly_sensors_total 3"));
         assert!(text.contains("firefly_sensors_active 2"));

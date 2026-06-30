@@ -15,8 +15,16 @@
 use std::fmt;
 
 use firefly_core::SensorId;
+use firefly_flarm::FlarmConfig;
 use firefly_opensky::OpenSkyConfig;
 use serde::Deserialize;
+
+/// Nominal scan period (seconds) attributed to a `flarm_aprs` source. FLARM/OGN
+/// is a push stream with no poll interval, but the tracker needs a per-sensor
+/// scan period for its asynchronous deletion-cadence floor (ADR 0013) and the
+/// sensor-health monitor (CAT063). FLARM beacons typically arrive every few
+/// seconds; this is a sensible, slightly conservative nominal.
+pub const FLARM_NOMINAL_SCAN_SECS: f64 = 5.0;
 
 /// Closed source-type vocabulary (mirrors Wayfinder's `source_config`). An
 /// unknown string fails deserialization → a startup configuration error, never a
@@ -91,7 +99,7 @@ impl fmt::Display for SourceError {
             ),
             SourceError::MalformedCredential { index, env } => write!(
                 f,
-                "FIREFLY_SOURCES[{index}]: credential in {env} is not in client_id:client_secret form"
+                "FIREFLY_SOURCES[{index}]: credential in {env} is malformed (expected two colon-separated parts)"
             ),
         }
     }
@@ -151,6 +159,60 @@ pub fn opensky_config_from_spec(
     Ok(cfg)
 }
 
+/// Build a [`FlarmConfig`] from a `flarm_aprs` spec at list position `index`
+/// (ADR 0026). `bbox` is required (the APRS-IS server-side area filter); a
+/// `cred_env` is optional and, when present, carries `callsign:passcode` (split
+/// at the **first** `:` — APRS-IS callsigns contain no `:`). A missing `cred_env`
+/// yields read-only anonymous access. A malformed bbox or credential is a hard
+/// error — a configured source that cannot run must not be silently dropped.
+///
+/// The caller guarantees `spec.source_type == SourceType::FlarmAprs`.
+pub fn flarm_config_from_spec(
+    spec: &SourceSpec,
+    index: usize,
+    get_env: impl Fn(&str) -> Option<String>,
+) -> Result<FlarmConfig, SourceError> {
+    let bbox = spec.bbox.ok_or(SourceError::MissingBBox { index })?;
+    validate_bbox(&bbox, index)?;
+
+    let mut cfg = FlarmConfig {
+        enabled: true,
+        lat_min: bbox.min_lat,
+        lat_max: bbox.max_lat,
+        lon_min: bbox.min_lon,
+        lon_max: bbox.max_lon,
+        ..FlarmConfig::default()
+    };
+    if let Some(sid) = spec.sensor_id {
+        cfg.sensor_id = SensorId(sid);
+    }
+    if let Some(env_name) = &spec.cred_env {
+        let raw = get_env(env_name).filter(|s| !s.is_empty()).ok_or_else(|| {
+            SourceError::MissingCredential {
+                index,
+                env: env_name.clone(),
+            }
+        })?;
+        let (callsign, passcode) =
+            raw.split_once(':')
+                .ok_or_else(|| SourceError::MalformedCredential {
+                    index,
+                    env: env_name.clone(),
+                })?;
+        let passcode =
+            passcode
+                .trim()
+                .parse::<i32>()
+                .map_err(|_| SourceError::MalformedCredential {
+                    index,
+                    env: env_name.clone(),
+                })?;
+        cfg.callsign = Some(callsign.to_string());
+        cfg.passcode = Some(passcode);
+    }
+    Ok(cfg)
+}
+
 /// Reject a bbox that is non-finite, outside WGS84 range, or inverted — config
 /// faults that would otherwise silently yield an empty OpenSky query window.
 fn validate_bbox(b: &BBox, index: usize) -> Result<(), SourceError> {
@@ -189,65 +251,90 @@ fn validate_bbox(b: &BBox, index: usize) -> Result<(), SourceError> {
 pub struct ResolvedSources {
     /// One [`OpenSkyConfig`] per `adsb_opensky` source, in list order.
     pub opensky: Vec<OpenSkyConfig>,
+    /// One [`FlarmConfig`] per `flarm_aprs` source, in list order (ADR 0026).
+    pub flarm: Vec<FlarmConfig>,
     /// Reserved types present but without an adapter yet — the caller logs a WARN
     /// and skips them (availability over completeness, ADR 0023).
     pub skipped: Vec<SourceType>,
 }
 
 /// Resolve a parsed source list into runnable adapter configs. An `adsb_opensky`
-/// entry becomes an [`OpenSkyConfig`] (credentials resolved via `get_env`);
-/// `flarm_aprs`/`radar_asterix` go to `skipped` (reserved, no adapter yet). A
-/// malformed `adsb_opensky` entry (missing/invalid bbox, bad credential) is a hard
-/// error — a configured source that cannot run must not be silently dropped.
+/// entry becomes an [`OpenSkyConfig`] and a `flarm_aprs` entry a [`FlarmConfig`]
+/// (credentials resolved via `get_env`); `radar_asterix` goes to `skipped`
+/// (reserved, no adapter yet). A malformed entry (missing/invalid bbox, bad
+/// credential) is a hard error — a configured source that cannot run must not be
+/// silently dropped.
 pub fn resolve_sources(
     specs: &[SourceSpec],
     get_env: impl Fn(&str) -> Option<String>,
 ) -> Result<ResolvedSources, SourceError> {
     let mut opensky = Vec::new();
+    let mut flarm = Vec::new();
     let mut skipped = Vec::new();
     for (index, spec) in specs.iter().enumerate() {
         match spec.source_type {
             SourceType::AdsbOpensky => {
                 opensky.push(opensky_config_from_spec(spec, index, &get_env)?)
             }
+            SourceType::FlarmAprs => flarm.push(flarm_config_from_spec(spec, index, &get_env)?),
             other => skipped.push(other),
         }
     }
-    Ok(ResolvedSources { opensky, skipped })
+    Ok(ResolvedSources {
+        opensky,
+        flarm,
+        skipped,
+    })
 }
 
-/// A representative config across N source configs, used for the tracking frame
-/// origin (its bbox midpoint, unless `FIREFLY_SYSTEM_REF_*` overrides) and the
-/// tracker's output cadence: the **union** of all bboxes, the **minimum** poll
-/// interval (publish at least as often as the fastest source), and the first
-/// source's sensor id (a placeholder for the geodetic ADS-B path). Falls back to
-/// the default when there is no source.
-pub fn representative_config(configs: &[OpenSkyConfig]) -> OpenSkyConfig {
-    let mut rep = match configs.first() {
-        Some(first) => first.clone(),
-        None => return OpenSkyConfig::default(),
-    };
-    rep.lat_min = configs
-        .iter()
-        .map(|c| c.lat_min)
-        .fold(f64::INFINITY, f64::min);
-    rep.lat_max = configs
-        .iter()
-        .map(|c| c.lat_max)
-        .fold(f64::NEG_INFINITY, f64::max);
-    rep.lon_min = configs
-        .iter()
-        .map(|c| c.lon_min)
-        .fold(f64::INFINITY, f64::min);
-    rep.lon_max = configs
-        .iter()
-        .map(|c| c.lon_max)
-        .fold(f64::NEG_INFINITY, f64::max);
-    rep.poll_interval_secs = configs
-        .iter()
-        .map(|c| c.poll_interval_secs)
-        .min()
-        .unwrap_or(rep.poll_interval_secs);
+/// A representative config across all live sources (OpenSky **and** FLARM), used
+/// for the tracking-frame origin (the **union** bbox midpoint, unless
+/// `FIREFLY_SYSTEM_REF_*` overrides) and the tracker's output cadence (the fastest
+/// OpenSky poll interval, or a FLARM nominal when there is no OpenSky source). The
+/// sensor id is the first OpenSky source's, else the first FLARM source's — a
+/// placeholder for the geodetic path. Falls back to the default with no source.
+pub fn representative_config(opensky: &[OpenSkyConfig], flarm: &[FlarmConfig]) -> OpenSkyConfig {
+    let mut rep = opensky.first().cloned().unwrap_or_default();
+
+    // With no OpenSky source, anchor the representative on the first FLARM source
+    // so a FLARM-only feed still has a meaningful sensor id and output tick.
+    if opensky.is_empty() {
+        if let Some(f) = flarm.first() {
+            rep.sensor_id = f.sensor_id;
+            rep.poll_interval_secs = FLARM_NOMINAL_SCAN_SECS as u64;
+        }
+    }
+
+    // Union bbox over every *present* source; leave the default bbox untouched
+    // when there is no source at all.
+    if !opensky.is_empty() || !flarm.is_empty() {
+        rep.lat_min = opensky
+            .iter()
+            .map(|c| c.lat_min)
+            .chain(flarm.iter().map(|c| c.lat_min))
+            .fold(f64::INFINITY, f64::min);
+        rep.lat_max = opensky
+            .iter()
+            .map(|c| c.lat_max)
+            .chain(flarm.iter().map(|c| c.lat_max))
+            .fold(f64::NEG_INFINITY, f64::max);
+        rep.lon_min = opensky
+            .iter()
+            .map(|c| c.lon_min)
+            .chain(flarm.iter().map(|c| c.lon_min))
+            .fold(f64::INFINITY, f64::min);
+        rep.lon_max = opensky
+            .iter()
+            .map(|c| c.lon_max)
+            .chain(flarm.iter().map(|c| c.lon_max))
+            .fold(f64::NEG_INFINITY, f64::max);
+    }
+
+    // Output cadence: publish at least as often as the fastest OpenSky poll.
+    if let Some(min) = opensky.iter().map(|c| c.poll_interval_secs).min() {
+        rep.poll_interval_secs = min;
+    }
+
     rep
 }
 
@@ -442,10 +529,94 @@ mod tests {
         assert_eq!(resolved.opensky.len(), 2, "two adsb_opensky configs");
         assert_eq!(resolved.opensky[0].sensor_id, SensorId(201));
         assert_eq!(resolved.opensky[1].sensor_id, SensorId(202));
+        assert_eq!(resolved.flarm.len(), 1, "one flarm_aprs config");
+        assert!(resolved.flarm[0].enabled);
         assert_eq!(
             resolved.skipped,
-            vec![SourceType::FlarmAprs, SourceType::RadarAsterix]
+            vec![SourceType::RadarAsterix],
+            "only radar_asterix has no adapter yet"
         );
+    }
+
+    #[test]
+    fn flarm_config_maps_bbox_sensor_and_credentials() {
+        let spec = SourceSpec {
+            source_type: SourceType::FlarmAprs,
+            bbox: Some(BBox {
+                min_lat: 48.0,
+                min_lon: 7.0,
+                max_lat: 50.0,
+                max_lon: 9.0,
+            }),
+            sac: None,
+            sic: None,
+            sensor_id: Some(212),
+            cred_env: Some("FLARM_SECRET".into()),
+        };
+        let cfg = flarm_config_from_spec(&spec, 0, |k| {
+            (k == "FLARM_SECRET").then(|| "EDXY:12345".to_string())
+        })
+        .expect("valid");
+        assert!(cfg.enabled);
+        assert_eq!(cfg.lat_min, 48.0);
+        assert_eq!(cfg.lon_max, 9.0);
+        assert_eq!(cfg.sensor_id, SensorId(212));
+        assert_eq!(cfg.callsign.as_deref(), Some("EDXY"));
+        assert_eq!(cfg.passcode, Some(12345));
+    }
+
+    #[test]
+    fn flarm_without_cred_is_read_only_anonymous() {
+        let spec = SourceSpec {
+            source_type: SourceType::FlarmAprs,
+            bbox: Some(BBox {
+                min_lat: 48.0,
+                min_lon: 7.0,
+                max_lat: 50.0,
+                max_lon: 9.0,
+            }),
+            sac: None,
+            sic: None,
+            sensor_id: None,
+            cred_env: None,
+        };
+        let cfg = flarm_config_from_spec(&spec, 0, no_env).expect("valid");
+        assert!(cfg.callsign.is_none() && cfg.passcode.is_none());
+    }
+
+    #[test]
+    fn flarm_missing_bbox_and_bad_cred_are_errors() {
+        let no_bbox = SourceSpec {
+            source_type: SourceType::FlarmAprs,
+            bbox: None,
+            sac: None,
+            sic: None,
+            sensor_id: None,
+            cred_env: None,
+        };
+        assert!(matches!(
+            flarm_config_from_spec(&no_bbox, 3, no_env),
+            Err(SourceError::MissingBBox { index: 3 })
+        ));
+
+        let bad_cred = SourceSpec {
+            source_type: SourceType::FlarmAprs,
+            bbox: Some(BBox {
+                min_lat: 48.0,
+                min_lon: 7.0,
+                max_lat: 50.0,
+                max_lon: 9.0,
+            }),
+            sac: None,
+            sic: None,
+            sensor_id: None,
+            cred_env: Some("C".into()),
+        };
+        // Passcode part is not an integer → malformed.
+        assert!(matches!(
+            flarm_config_from_spec(&bad_cred, 0, |_| Some("EDXY:notanumber".to_string())),
+            Err(SourceError::MalformedCredential { .. })
+        ));
     }
 
     #[test]
@@ -491,7 +662,7 @@ mod tests {
         .unwrap();
         b.poll_interval_secs = 5;
 
-        let rep = representative_config(&[a, b]);
+        let rep = representative_config(&[a, b], &[]);
         assert_eq!(rep.lat_min, 48.0);
         assert_eq!(rep.lat_max, 52.0);
         assert_eq!(rep.lon_min, 6.0);
@@ -501,7 +672,42 @@ mod tests {
 
     #[test]
     fn representative_of_empty_is_the_default() {
-        assert_eq!(representative_config(&[]), OpenSkyConfig::default());
+        assert_eq!(representative_config(&[], &[]), OpenSkyConfig::default());
+    }
+
+    #[test]
+    fn representative_covers_a_flarm_only_feed() {
+        let flarm = flarm_config_from_spec(
+            &SourceSpec {
+                source_type: SourceType::FlarmAprs,
+                bbox: Some(BBox {
+                    min_lat: 49.0,
+                    min_lon: 6.0,
+                    max_lat: 52.0,
+                    max_lon: 8.0,
+                }),
+                sac: None,
+                sic: None,
+                sensor_id: Some(213),
+                cred_env: None,
+            },
+            0,
+            no_env,
+        )
+        .unwrap();
+
+        let rep = representative_config(&[], &[flarm]);
+        // Union bbox comes from the FLARM source, not the OpenSky default.
+        assert_eq!(rep.lat_min, 49.0);
+        assert_eq!(rep.lat_max, 52.0);
+        assert_eq!(rep.lon_min, 6.0);
+        assert_eq!(rep.lon_max, 8.0);
+        assert_eq!(
+            rep.sensor_id,
+            SensorId(213),
+            "flarm sensor anchors the frame"
+        );
+        assert_eq!(rep.poll_interval_secs, FLARM_NOMINAL_SCAN_SECS as u64);
     }
 
     // --- helpers ---------------------------------------------------------

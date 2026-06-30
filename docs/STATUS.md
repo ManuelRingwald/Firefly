@@ -13,30 +13,29 @@
 ## 🎯 Stand 2026-06-30
 
 - **Zuletzt aktualisiert:** 2026-06-30
-- **Großes Bild:** Die **Firefly-Seite des Quell-Eingangs-Kontrakts (#35) ist für
-  `adsb_opensky` fertig** — Kontrakt (ADR 0023) + Live-Verdrahtung + **OpenSky
-  OAuth2 Client-Credentials** (ADR 0024). Die Wayfinder-Auto-Orchestrierung ist
-  drüben **komplett** (ORCH-1…5c + E2E-Harness, gehärtet/reviewed); damit kann
-  „Feed zuweisen ⇒ Firefly-Instanz startet ⇒ Tracks im ASD" end-to-end gefahren
-  werden (realer Abnahme-Lauf steht beim Betreiber an). Alles auf `main`, alle
-  Gates grün (`cargo test/clippy/fmt --workspace`).
+- **Großes Bild:** Die **Firefly-Seite des Quell-Eingangs-Kontrakts (#35)** ist für
+  **`adsb_opensky` *und* `flarm_aprs`** fertig — Kontrakt (ADR 0023, jetzt v1.2.0) +
+  Live-Verdrahtung + OpenSky OAuth2 (ADR 0024) + **FLARM/OGN-Adapter (ADR 0026)**.
+  Von #35 ist auf Firefly-Seite nur noch `radar_asterix` offen. Die Wayfinder-Auto-
+  Orchestrierung ist drüben **komplett** (ORCH-1…5c + E2E-Harness); „Feed zuweisen ⇒
+  Firefly-Instanz startet ⇒ Tracks im ASD" ist end-to-end fahrbar (realer Abnahme-
+  Lauf steht beim Betreiber an). Alles auf `main`, alle Gates grün.
 
-- **Letzte Arbeit (2026-06-29/30):** **ADR 0024** — OpenSky-Auth Basic → OAuth2
-  Client-Credentials. `auth.rs`-Token-Manager (`TokenCache`: Reuse bis Skew-vor-
-  Ablauf, proaktiver Refresh, 401-Recovery; reine `needs_refresh` + injizierter
-  Fetch → ohne Netz/Uhr testbar). `config.rs`: `client_id`/`client_secret`/
-  `token_url` (`FIREFLY_OPENSKY_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`).
-  `poller.rs`: Bearer + Einmal-Retry bei 401; anonym unverändert. Cred-Wert jetzt
-  `client_id:client_secret` (Wire-Vertrag unverändert, `source-input-contract.md`
-  v1.1.0). Davor: Schritt 2b (Live-Verdrahtung `FIREFLY_SOURCES`), ADR 0023.
+- **Letzte Arbeit (2026-06-30):** **ADR 0026 — FLARM/OGN-Eingangs-Adapter
+  (`flarm_aprs` via APRS-IS).** Schritt A (ADR) · B (neues Crate `firefly-flarm`:
+  `config`/`ogn`-Parser/`plot`/`aprsis`; robuster OGN-Parser ohne Panic, gegen echte
+  Beispielzeilen + adversarisch geprüft; APRS-IS-Stream + Reconnect; ICAO-Adresse nur
+  bei echtem ICAO-Adresstyp → bereitet #30 vor) · C (Verdrahtung: `sources.rs`
+  `flarm_config_from_spec` + `ResolvedSources.flarm`, `build_live_tracker_multi`
+  registriert **alle** Quell-Sensoren, `spawn_flarm_listener_live`, Metrik
+  `firefly_flarm_plots_received_total`; Kontrakt **v1.2.0** additiv; Doku/Register
+  FR-NET-012). 20 Crate-Tests + Server-Tests grün. Standalone via `FIREFLY_FLARM_*`,
+  orchestriert via `flarm_aprs` in `FIREFLY_SOURCES`. PR #42.
 
 - **Nächste Schritte (für die frische Session):**
-  1. **Live-Input-Adapter aus #35** — je eigener ADR + Meilenstein, Ports &
-     Adapters (Tracker-Kern format-neutral). Vokabular im Kontrakt bereits
-     reserviert, Wayfinder rendert beide schon in `FIREFLY_SOURCES`:
-     - **`flarm_aprs`** (OGN/APRS-IS, BBox-gefiltert),
-     - **`radar_asterix`** (ASTERIX-Eingang CAT048/CAT001 eines realen Radars,
-       SAC/SIC-identifiziert; SDPS-001 #19).
+  1. **Letzter Adapter aus #35 — `radar_asterix`** (ASTERIX-Eingang CAT048/CAT001
+     eines realen Radars, SAC/SIC-identifiziert; SDPS-001 #19): eigener ADR +
+     Meilenstein, Ports & Adapters. (`flarm_aprs` ✅ erledigt, ADR 0026.)
   2. **Offenes Issue #30** (`from-wayfinder`) — CAT062-ICD **v2.5.0** explizite
      Per-Track-Provenienz (`provenance`-Enum + `source_ages`), ersetzt die
      Frontend-Heuristik; additiv, byte-genaue Encoder-Vektoren liefern.

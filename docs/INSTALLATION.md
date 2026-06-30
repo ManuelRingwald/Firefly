@@ -232,6 +232,36 @@ Die Readiness-Probe (`/ready`) gibt `503` zurück, bis der erste OpenSky-Poll
 erfolgreich war — danach `200 ready`. Wayfinder zeigt Tracks sobald `/ready`
 positiv antwortet.
 
+### Schritt 4b (optional): FLARM/OGN als zusätzliche Quelle
+
+FLARM-getragene Luftfahrzeuge (Segelflieger, UL, tiefe GA) sind über das **Open
+Glider Network (OGN)** via APRS-IS verfügbar (ADR 0026). Der Adapter ist im
+Live-Modus per `FIREFLY_FLARM_ENABLED=true` zuschaltbar und speist seine Plots in
+denselben Tracker wie OpenSky — beide Quellen werden fusioniert.
+
+```bash
+export FIREFLY_FLARM_ENABLED=true
+export FIREFLY_FLARM_LAT_MIN=49.0
+export FIREFLY_FLARM_LAT_MAX=51.0
+export FIREFLY_FLARM_LON_MIN=7.0
+export FIREFLY_FLARM_LON_MAX=10.0
+# Standard: read-only anonym (kein Login nötig — Firefly sendet nie).
+# Optional ein benannter APRS-IS-Account:
+# export FIREFLY_FLARM_CALLSIGN=EDXY
+# export FIREFLY_FLARM_PASSCODE=12345
+```
+
+Weitere Variablen mit Defaults: `FIREFLY_FLARM_SERVER` (`aprs.glidernet.org`),
+`FIREFLY_FLARM_PORT` (`14580`), `FIREFLY_FLARM_SENSOR_ID` (`210`),
+`FIREFLY_FLARM_SIGMA_M` (`20`), `FIREFLY_FLARM_RECONNECT_MIN_SECS`/`_MAX_SECS`
+(`5`/`300`). APRS-IS-Daten sind **öffentlich und nicht authentifiziert** — die
+Vertrauensgrenze ist die Netz-/Quellen-Isolation (ADR 0017), wie bei ADS-B.
+
+> **Orchestrierter Betrieb:** Im auto-orchestrierten Pfad (ADR 0023) setzt der
+> Orchestrator FLARM stattdessen als `flarm_aprs`-Eintrag in `FIREFLY_SOURCES`
+> (Vertrag `docs/source-input-contract.md` v1.2.0); `FIREFLY_SOURCES` hat dann
+> **Vorrang** vor `FIREFLY_FLARM_*`.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den

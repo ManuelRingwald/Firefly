@@ -81,6 +81,29 @@ echten OpenSky-Plot-Eingang.
 > gesetzt (Abschnitt 1.5.1) — dann haben die `FIREFLY_OPENSKY_*`-Variablen **keinen**
 > Effekt (Vorrang von `FIREFLY_SOURCES`).
 
+#### FLARM/OGN-Adapter (`FIREFLY_FLARM_*`, ADR 0026)
+
+Zweiter Live-Quell-Adapter: FLARM-Positionen über das Open Glider Network via
+APRS-IS. Im Live-Modus per `FIREFLY_FLARM_ENABLED=true` zuschaltbar (standalone)
+oder als `flarm_aprs`-Eintrag in `FIREFLY_SOURCES` (orchestriert). Plots fließen in
+denselben Tracker wie OpenSky (Fusion).
+
+| Variable | Typ | Default | Bedeutung |
+|----------|-----|---------|-----------|
+| `FIREFLY_FLARM_ENABLED` | bool | `false` | Adapter im Standalone-Live-Modus aktivieren |
+| `FIREFLY_FLARM_LAT_MIN` / `_MAX` | f64 | `47.0` / `55.0` | Bounding Box Süd/Nord (Grad) → APRS-IS-Area-Filter |
+| `FIREFLY_FLARM_LON_MIN` / `_MAX` | f64 | `5.0` / `16.0` | Bounding Box West/Ost (Grad) |
+| `FIREFLY_FLARM_SERVER` | string | `aprs.glidernet.org` | APRS-IS-Server-Host |
+| `FIREFLY_FLARM_PORT` | u16 | `14580` | APRS-IS-Port (Filter-Feed) |
+| `FIREFLY_FLARM_CALLSIGN` | string | — | APRS-IS-Login-Callsign (fehlt → read-only anonym) |
+| `FIREFLY_FLARM_PASSCODE` | i32 | `-1` | APRS-IS-Passcode (`-1` = read-only) |
+| `FIREFLY_FLARM_SENSOR_ID` | u16 | `210` | Sensor-ID der FLARM-Plots |
+| `FIREFLY_FLARM_SIGMA_M` | f64 | `20.0` | 1σ-Positionsgenauigkeit (m), isotrop |
+| `FIREFLY_FLARM_RECONNECT_MIN_SECS` / `_MAX_SECS` | u64 | `5` / `300` | Reconnect-Backoff (min/max) |
+
+> **Sicherheit:** APRS-IS-Daten sind öffentlich und nicht authentifiziert; Firefly
+> sendet nie (read-only). Vertrauensgrenze = Netz-/Quellen-Isolation (ADR 0017).
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.0.0. Im **Live-Modus** liest Firefly
@@ -89,8 +112,8 @@ setzt — ein Eintrag je Quelle, mehrere Adapter speisen denselben Live-Tracker.
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
-| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`. Eintrag: `{type, bbox?, sac?, sic?, sensor_id?, cred_env?}`. `type` ∈ `adsb_opensky` (unterstützt) / `flarm_aprs` / `radar_asterix` (reserviert → WARN + übersprungen). Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
-| `FIREFLY_SOURCE_<n>_SECRET` o. ä. | string | — | Beliebig **benannte** Credential-Env, von einem Eintrag per `cred_env` referenziert. Wert = `benutzer:passwort` (Split am ersten `:`), nie im JSON-Blob. |
+| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`/`FIREFLY_FLARM_*`. Eintrag: `{type, bbox?, sac?, sic?, sensor_id?, cred_env?}`. `type` ∈ `adsb_opensky` / `flarm_aprs` (beide unterstützt) / `radar_asterix` (reserviert → WARN + übersprungen). Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
+| `FIREFLY_SOURCE_<n>_SECRET` o. ä. | string | — | Beliebig **benannte** Credential-Env, von einem Eintrag per `cred_env` referenziert. Wert quellenabhängig: `client_id:client_secret` (`adsb_opensky`) bzw. `callsign:passcode` (`flarm_aprs`), Split am ersten `:`; nie im JSON-Blob. |
 
 Beispiel: siehe `docs/source-input-contract.md` §2. Referenzpunkt = Mittelpunkt der
 **Union** aller Quell-BBoxen (`FIREFLY_SYSTEM_REF_*` überschreibt); Ausgabe-Takt =
@@ -197,6 +220,7 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_live_plots_ingested_total` | counter | **Live-Modus:** Plots insgesamt in den Tracker eingespeist |
 | `firefly_plot_records_written_total` | counter | **Live-Modus:** In `.ffplots`-Datei geschriebene Records |
 | `firefly_opensky_poll_errors_total` | counter | **Live-Modus:** HTTP/Netz-Fehler beim OpenSky-Poll |
+| `firefly_flarm_plots_received_total` | counter | **Live-Modus:** Empfangene FLARM/OGN-Plots (APRS-IS, ADR 0026) |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |
