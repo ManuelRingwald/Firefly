@@ -13,38 +13,39 @@
 ## 🎯 Stand 2026-06-30
 
 - **Zuletzt aktualisiert:** 2026-06-30
-- **Großes Bild:** Die **Firefly-Seite des Quell-Eingangs-Kontrakts (#35)** ist für
-  **`adsb_opensky` *und* `flarm_aprs`** fertig — Kontrakt (ADR 0023, jetzt v1.2.0) +
-  Live-Verdrahtung + OpenSky OAuth2 (ADR 0024) + **FLARM/OGN-Adapter (ADR 0026)**.
-  Von #35 ist auf Firefly-Seite nur noch `radar_asterix` offen. Die Wayfinder-Auto-
-  Orchestrierung ist drüben **komplett** (ORCH-1…5c + E2E-Harness); „Feed zuweisen ⇒
-  Firefly-Instanz startet ⇒ Tracks im ASD" ist end-to-end fahrbar (realer Abnahme-
-  Lauf steht beim Betreiber an). Alles auf `main`, alle Gates grün.
+- **Großes Bild:** Die **Firefly-Seite des Quell-Eingangs-Kontrakts (#35)** ist
+  **vollständig** — **alle drei** Vokabular-Typen haben Adapter: `adsb_opensky`
+  (ADR 0019/0024), `flarm_aprs` (ADR 0026) und jetzt **`radar_asterix`** (ADR 0028,
+  CAT048/UDP). Zusätzlich ist die **Per-Track-Provenienz** (#30, ADR 0027, CAT062
+  I062/290 per-Technologie-Alter, ICD **v2.6.0**) geliefert und der erste
+  **Betriebs-Härtung**-Block (Live-Pipeline-Observability). **#35 und #30 sind
+  geschlossen.** Alles auf `main`, alle Gates grün (44 Test-Suites, clippy sauber).
 
-- **Letzte Arbeit (2026-06-30):** **ADR 0026 — FLARM/OGN-Eingangs-Adapter
-  (`flarm_aprs` via APRS-IS).** Schritt A (ADR) · B (neues Crate `firefly-flarm`:
-  `config`/`ogn`-Parser/`plot`/`aprsis`; robuster OGN-Parser ohne Panic, gegen echte
-  Beispielzeilen + adversarisch geprüft; APRS-IS-Stream + Reconnect; ICAO-Adresse nur
-  bei echtem ICAO-Adresstyp → bereitet #30 vor) · C (Verdrahtung: `sources.rs`
-  `flarm_config_from_spec` + `ResolvedSources.flarm`, `build_live_tracker_multi`
-  registriert **alle** Quell-Sensoren, `spawn_flarm_listener_live`, Metrik
-  `firefly_flarm_plots_received_total`; Kontrakt **v1.2.0** additiv; Doku/Register
-  FR-NET-012). 20 Crate-Tests + Server-Tests grün. Standalone via `FIREFLY_FLARM_*`,
-  orchestriert via `flarm_aprs` in `FIREFLY_SOURCES`. PR #42.
+- **Letzte Arbeit (2026-06-30, Vier-Themen-Batch):**
+  1. **ADR 0027 — Per-Track-Provenienz** (#30, PR #43): `SourceKind` am Plot,
+     `SystemTrack.source_ages` + abgeleitete `Provenance`; CAT062 I062/290 additiv
+     um SSR/Mode-S/FLARM-Alter (ICD v2.6.0); JSON-Pfad führt `provenance`+`source_ages`.
+     Bugfix: Treffer-Buchung fehlte an JPDA-Best/Track-Geburt. FR-TRK-034.
+     Wayfinder-Folge #90.
+  2. **ADR 0028 — `radar_asterix`-Adapter** (#35, PR #44): CAT048-Decoder
+     (`firefly-asterix::cat048`, robust/fuzz-getestet, FR-IO-005) + Crate
+     `firefly-radar` (FR-NET-013) + Verdrahtung (Radar-Sensor mit eigenem
+     Standort-Frame). Kontrakt **v1.3.0** (`lat`/`lon` Pflicht). Wayfinder-Folge #91.
+  3. **Wayfinder #57** (Wayfinder PR #92): View-Config-Formular-Captions
+     (Zentrum/Zoom, AOI als harte Grenze, FL-Einheit + fail-open), FR-UI-013.
+  4. **Betriebs-Härtung — Live-Pipeline-Observability** (NFR-OBS-003): Counter
+     `firefly_live_plot_batches_dropped_total` (Back-Pressure-Verlust) + Gauges
+     `firefly_sources_{opensky,flarm,radar}` (konfigurierter Quell-Mix).
 
-- **Nächste Schritte (für die frische Session):**
-  1. **Letzter Adapter aus #35 — `radar_asterix`** (ASTERIX-Eingang CAT048/CAT001
-     eines realen Radars, SAC/SIC-identifiziert; SDPS-001 #19): eigener ADR +
-     Meilenstein, Ports & Adapters. (`flarm_aprs` ✅ erledigt, ADR 0026.)
-  2. **Offenes Issue #30** (`from-wayfinder`) — CAT062-ICD **v2.5.0** explizite
-     Per-Track-Provenienz (`provenance`-Enum + `source_ages`), ersetzt die
-     Frontend-Heuristik; additiv, byte-genaue Encoder-Vektoren liefern.
-  3. **Betriebs-Härtung** (Roadmap-Block ⏳) — Observability-Ausbau, Lastfestigkeit,
-     Deployment.
+- **Nächste Schritte:**
+  1. **Zero-Touch-/Komplett-Setup-Abnahme** durch den Betreiber (steht an).
+  2. **Wayfinder-Folge-Issues** #90 (I062/290-Decoder/Provenienz) und #91
+     (Docker-Backend serialisiert `radar_asterix` lat/lon/listen) drüben umsetzen.
+  3. **Betriebs-Härtung** weiter ausbauen (Lastfestigkeit/Deployment) nach Bedarf.
 
 > 🗺️ Roadmap zentral im **Wayfinder-Repo** (`docs/ROADMAP.md`). Cross-Project:
-> `docs/cross-project/todo-for-wayfinder.md`; offene `from-wayfinder`-Issues: #35
-> (Reststand FLARM/Radar), #30 (Provenienz).
+> `docs/cross-project/todo-for-wayfinder.md`; offene `from-firefly`-Issues bei
+> Wayfinder: #90 (Provenienz-Decoder), #91 (Radar-Quell-Serialisierung).
 
 ---
 

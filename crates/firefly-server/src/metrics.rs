@@ -59,6 +59,21 @@ pub struct Metrics {
     /// Number of sensors currently active — received a plot within their
     /// staleness window (gauge, updated on each CAT063 send).
     pub sensors_active: AtomicU64,
+
+    // --- Live-pipeline hardening (Betriebs-Härtung: Lastfestigkeit) ---
+    /// Total number of plot batches **dropped** because the source→tracker channel
+    /// was full (counter). A non-zero, growing value means the tracker cannot keep
+    /// up with the source rate and surveillance data is being lost to back-pressure
+    /// — the operator's signal to scale up or throttle. Stays 0 outside Live mode.
+    pub live_plot_batches_dropped_total: AtomicU64,
+    /// Number of configured `adsb_opensky` sources for this instance (gauge, static
+    /// per process). Lets an operator confirm at a glance that the instance is
+    /// running the source mix the orchestrator intended (ADR 0023).
+    pub sources_opensky: AtomicU64,
+    /// Number of configured `flarm_aprs` sources (gauge, static per process).
+    pub sources_flarm: AtomicU64,
+    /// Number of configured `radar_asterix` sources (gauge, static per process).
+    pub sources_radar: AtomicU64,
 }
 
 /// A guard that increments `ws_clients_connected` (and `ws_clients_total`) on
@@ -174,6 +189,36 @@ pub fn render(metrics: &Metrics, frames_total: usize) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_live_plot_batches_dropped_total",
+        "counter",
+        "Plot batches dropped because the source->tracker channel was full (back-pressure loss).",
+        metrics
+            .live_plot_batches_dropped_total
+            .load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_sources_opensky",
+        "gauge",
+        "Number of configured adsb_opensky sources for this instance.",
+        metrics.sources_opensky.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_sources_flarm",
+        "gauge",
+        "Number of configured flarm_aprs sources for this instance.",
+        metrics.sources_flarm.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_sources_radar",
+        "gauge",
+        "Number of configured radar_asterix sources for this instance.",
+        metrics.sources_radar.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
         "firefly_cat063_status_sent_total",
         "counter",
         "Total number of CAT063 sensor status blocks sent over multicast.",
@@ -231,6 +276,15 @@ mod tests {
         metrics
             .flarm_plots_received_total
             .store(11, Ordering::Relaxed);
+        metrics
+            .radar_plots_received_total
+            .store(17, Ordering::Relaxed);
+        metrics
+            .live_plot_batches_dropped_total
+            .store(4, Ordering::Relaxed);
+        metrics.sources_opensky.store(1, Ordering::Relaxed);
+        metrics.sources_flarm.store(1, Ordering::Relaxed);
+        metrics.sources_radar.store(2, Ordering::Relaxed);
         metrics.cat063_status_sent_total.store(7, Ordering::Relaxed);
         metrics.sensors_total.store(3, Ordering::Relaxed);
         metrics.sensors_active.store(2, Ordering::Relaxed);
@@ -248,6 +302,12 @@ mod tests {
         assert!(text.contains("firefly_plot_records_written_total 100"));
         assert!(text.contains("firefly_opensky_poll_errors_total 3"));
         assert!(text.contains("firefly_flarm_plots_received_total 11"));
+        assert!(text.contains("firefly_radar_plots_received_total 17"));
+        assert!(text.contains("firefly_live_plot_batches_dropped_total 4"));
+        assert!(text.contains("firefly_sources_opensky 1"));
+        assert!(text.contains("firefly_sources_flarm 1"));
+        assert!(text.contains("firefly_sources_radar 2"));
+        assert!(text.contains("# TYPE firefly_sources_radar gauge"));
         assert!(text.contains("firefly_cat063_status_sent_total 7"));
         assert!(text.contains("firefly_sensors_total 3"));
         assert!(text.contains("firefly_sensors_active 2"));
