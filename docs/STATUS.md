@@ -10,24 +10,42 @@
 
 ---
 
-## 🎯 Stand 2026-06-29
+## 🎯 Stand 2026-06-30
 
-- **Zuletzt aktualisiert:** 2026-06-29
-- **Letzte Arbeit:** **ADR 0024 — OpenSky OAuth2 Client-Credentials.** OpenSky hat
-  Basic Auth abgeschaltet; der Adapter holt jetzt ein OAuth2-Bearer-Token. Neuer
-  `auth.rs`-Token-Manager (`TokenCache`: Reuse bis Skew-vor-Ablauf, proaktiver
-  Refresh, 401-Recovery; reine `needs_refresh` + injizierter Fetch → ohne Netz/Uhr
-  testbar). `config.rs`: `client_id`/`client_secret`/`token_url`
-  (`FIREFLY_OPENSKY_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`). `poller.rs`: Bearer
-  + Einmal-Retry bei 401; anonym unverändert. Cred-Split (`sources.rs`) bleibt am
-  ersten `:`, jetzt `client_id:client_secret`. Wire-Vertrag unverändert,
-  `source-input-contract.md` → v1.1.0. Alle Gates grün (15 opensky-Unit-Tests).
-  Davor: Schritt 2b (Live-Verdrahtung `FIREFLY_SOURCES`), Firefly-Seite von #35.
-- **Nächster Schritt:** zurück zu **Wayfinder** — (1) UI-Labels „Benutzername/
-  Passwort" → „Client-ID/Client-Secret", (2) **E2E-Abnahme-Harness** (Compose:
-  DB + Server + Orchestrator + Docker-Socket) + Anonym-Trockenlauf; authentifizierte
-  Live-Abnahme dann lokal beim Betreiber. FLARM/APRS- + Radar-ASTERIX-Adapter bleiben
-  spätere ADRs.
+- **Zuletzt aktualisiert:** 2026-06-30
+- **Großes Bild:** Die **Firefly-Seite des Quell-Eingangs-Kontrakts (#35) ist für
+  `adsb_opensky` fertig** — Kontrakt (ADR 0023) + Live-Verdrahtung + **OpenSky
+  OAuth2 Client-Credentials** (ADR 0024). Die Wayfinder-Auto-Orchestrierung ist
+  drüben **komplett** (ORCH-1…5c + E2E-Harness, gehärtet/reviewed); damit kann
+  „Feed zuweisen ⇒ Firefly-Instanz startet ⇒ Tracks im ASD" end-to-end gefahren
+  werden (realer Abnahme-Lauf steht beim Betreiber an). Alles auf `main`, alle
+  Gates grün (`cargo test/clippy/fmt --workspace`).
+
+- **Letzte Arbeit (2026-06-29/30):** **ADR 0024** — OpenSky-Auth Basic → OAuth2
+  Client-Credentials. `auth.rs`-Token-Manager (`TokenCache`: Reuse bis Skew-vor-
+  Ablauf, proaktiver Refresh, 401-Recovery; reine `needs_refresh` + injizierter
+  Fetch → ohne Netz/Uhr testbar). `config.rs`: `client_id`/`client_secret`/
+  `token_url` (`FIREFLY_OPENSKY_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`).
+  `poller.rs`: Bearer + Einmal-Retry bei 401; anonym unverändert. Cred-Wert jetzt
+  `client_id:client_secret` (Wire-Vertrag unverändert, `source-input-contract.md`
+  v1.1.0). Davor: Schritt 2b (Live-Verdrahtung `FIREFLY_SOURCES`), ADR 0023.
+
+- **Nächste Schritte (für die frische Session):**
+  1. **Live-Input-Adapter aus #35** — je eigener ADR + Meilenstein, Ports &
+     Adapters (Tracker-Kern format-neutral). Vokabular im Kontrakt bereits
+     reserviert, Wayfinder rendert beide schon in `FIREFLY_SOURCES`:
+     - **`flarm_aprs`** (OGN/APRS-IS, BBox-gefiltert),
+     - **`radar_asterix`** (ASTERIX-Eingang CAT048/CAT001 eines realen Radars,
+       SAC/SIC-identifiziert; SDPS-001 #19).
+  2. **Offenes Issue #30** (`from-wayfinder`) — CAT062-ICD **v2.5.0** explizite
+     Per-Track-Provenienz (`provenance`-Enum + `source_ages`), ersetzt die
+     Frontend-Heuristik; additiv, byte-genaue Encoder-Vektoren liefern.
+  3. **Betriebs-Härtung** (Roadmap-Block ⏳) — Observability-Ausbau, Lastfestigkeit,
+     Deployment.
+
+> 🗺️ Roadmap zentral im **Wayfinder-Repo** (`docs/ROADMAP.md`). Cross-Project:
+> `docs/cross-project/todo-for-wayfinder.md`; offene `from-wayfinder`-Issues: #35
+> (Reststand FLARM/Radar), #30 (Provenienz).
 
 ---
 
