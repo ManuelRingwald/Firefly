@@ -227,6 +227,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-flarm"
+version = "0.1.0"
+dependencies = [
+ "firefly-core",
+ "firefly-geo",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "firefly-geo"
 version = "0.1.0"
 dependencies = [
