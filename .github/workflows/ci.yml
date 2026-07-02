@@ -1,0 +1,51 @@
+# Continuous Integration — Firefly (Rust workspace).
+#
+# Runs the same quality gates the charter (CLAUDE.md §5) requires, on every push
+# to main and every pull request against main: formatting, clippy (warnings are
+# errors), and the full workspace test suite. --locked pins dependencies to the
+# committed Cargo.lock so CI is reproducible and a stale lockfile fails loudly.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: CI only needs to read the repository.
+permissions:
+  contents: read
+
+# A newer push to the same ref cancels the older, still-running CI.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (fmt · clippy · test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable + rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Caches the cargo registry and target/ dir keyed on Cargo.lock — the
+      # second run onward is much faster.
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Formatting (cargo fmt --check)
+        run: cargo fmt --all --check
+
+      - name: Lint (cargo clippy, warnings = errors)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests (cargo test --workspace)
+        run: cargo test --workspace --locked
