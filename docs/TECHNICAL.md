@@ -246,6 +246,7 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_live_plots_ingested_total` | counter | **Live-Modus:** Plots insgesamt in den Tracker eingespeist |
 | `firefly_plot_records_written_total` | counter | **Live-Modus:** In `.ffplots`-Datei geschriebene Records |
 | `firefly_opensky_poll_errors_total` | counter | **Live-Modus:** HTTP/Netz-Fehler beim OpenSky-Poll |
+| `firefly_opensky_rate_limited_total` | counter | **Live-Modus:** OpenSky-Polls mit HTTP 429 (Rate-Limit; Teilmenge der Poll-Fehler). Jeder 429 dehnt das Poll-Intervall exponentiell (Backoff), Reset bei Erfolg (#49). |
 | `firefly_flarm_plots_received_total` | counter | **Live-Modus:** Empfangene FLARM/OGN-Plots (APRS-IS, ADR 0026) |
 | `firefly_radar_plots_received_total` | counter | **Live-Modus:** Dekodierte Radar-ASTERIX-Plots (CAT048/UDP, ADR 0028) |
 | `firefly_live_plot_batches_dropped_total` | counter | **Live-Modus:** Plot-Batches verworfen, weil der Quell→Tracker-Kanal voll war (Back-Pressure-Verlust). Wächst nur unter Überlast — Operator-Signal zum Skalieren/Drosseln. |

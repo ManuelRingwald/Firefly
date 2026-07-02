@@ -42,6 +42,11 @@ pub struct Metrics {
     /// Total number of OpenSky poll errors (HTTP / network failures, counter).
     /// Stays 0 in Replay mode (OpenSky poller not started).
     pub opensky_poll_errors_total: AtomicU64,
+    /// Total number of OpenSky polls rejected with HTTP 429 (rate limit, counter).
+    /// A **subset** of `opensky_poll_errors_total`, split out so a rate limit is
+    /// distinguishable from generic failures; each 429 also triggers an
+    /// exponential backoff of the poll loop. Stays 0 in Replay mode.
+    pub opensky_rate_limited_total: AtomicU64,
     /// Total number of FLARM/OGN position plots received from the APRS-IS stream
     /// (counter, ADR 0026). Stays 0 in Replay mode or without a `flarm_aprs`
     /// source.
@@ -175,6 +180,13 @@ pub fn render(metrics: &Metrics, frames_total: usize) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_opensky_rate_limited_total",
+        "counter",
+        "Total number of OpenSky polls rejected with HTTP 429 (subset of poll errors; Live mode only).",
+        metrics.opensky_rate_limited_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
         "firefly_flarm_plots_received_total",
         "counter",
         "Total number of FLARM/OGN plots received from APRS-IS (Live mode only).",
@@ -274,6 +286,9 @@ mod tests {
             .opensky_poll_errors_total
             .store(3, Ordering::Relaxed);
         metrics
+            .opensky_rate_limited_total
+            .store(2, Ordering::Relaxed);
+        metrics
             .flarm_plots_received_total
             .store(11, Ordering::Relaxed);
         metrics
@@ -301,6 +316,7 @@ mod tests {
         assert!(text.contains("firefly_live_plots_ingested_total 100"));
         assert!(text.contains("firefly_plot_records_written_total 100"));
         assert!(text.contains("firefly_opensky_poll_errors_total 3"));
+        assert!(text.contains("firefly_opensky_rate_limited_total 2"));
         assert!(text.contains("firefly_flarm_plots_received_total 11"));
         assert!(text.contains("firefly_radar_plots_received_total 17"));
         assert!(text.contains("firefly_live_plot_batches_dropped_total 4"));
