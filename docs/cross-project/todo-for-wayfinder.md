@@ -2,6 +2,19 @@
 
 Schnittstellen-Themen, die in Firefly entstehen und Wayfinder-Arbeit auslösen.
 
+> **`adsb_opensky` trägt optionales `poll_interval_secs` (ADR 0029, Kontrakt
+> v1.4.0, additiv).** Antwort auf Wayfinder-Wunsch #3 (Poll-Schutz): das
+> OpenSky-Poll-Intervall ist jetzt **pro Quelle** über `FIREFLY_SOURCES` setzbar
+> (ganze Sekunden, `> 0`; fehlt/`0` → Firefly-Default 10 s). Nur für
+> `adsb_opensky` (FLARM ist Push, Radar hat eigene Scan-Periode). **Additiv** —
+> `SourceSpec` trägt kein `deny_unknown_fields`, ein älterer Firefly ignoriert das
+> Feld, ein neuer nimmt bei fehlendem Feld den Default (Merge-Reihenfolge
+> entkoppelt). **Wayfinder-Folge (bereits umgesetzt, gleicher 4-Punkte-Batch):**
+> `store.Source`/Docker-Backend serialisieren `poll_interval_secs` nach
+> `FIREFLY_SOURCES`; Admin-UI-Feld (nur ADS-B, Default 10 s, Wertebereich
+> 5–3600 s) + Infobox zum OpenSky-Rate-Limit. **Nicht** enthalten: echter
+> 429-Backoff (separater Härtungsschritt, Wayfinder #2).
+
 > **Quell-Eingangs-Kontrakt ratifiziert (ADR 0023, Antwort auf Wayfinder-Issue
 > #35).** Firefly liest die Live-Quellen einer orchestrierten Instanz aus einer
 > env-getriebenen **JSON-Liste `FIREFLY_SOURCES`** (Credentials isoliert in
