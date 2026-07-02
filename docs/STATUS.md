@@ -13,6 +13,17 @@
 ## 🎯 Stand 2026-07-02
 
 - **Zuletzt aktualisiert:** 2026-07-02
+- **OpenSky 429-Backoff (Issue #49, Branch `claude/wayfinder-tenant-radius-bug-w99r8q`):**
+  Folge-Härtung zu ADR 0029 aus dem Wayfinder-E2E — ein rate-limitierter Feed wurde
+  im festen Takt weitergepollt und provozierte weitere 429. Jetzt: `HTTP 429` als
+  eigener `PollError::RateLimited` (erkannt vor `error_for_status`, `is_rate_limited()`,
+  testbar); `OpenSkyPoller::run` nutzt eine kleine, reine `Backoff`-Zustandsmaschine
+  (base=`poll_interval_secs`; bei Fehler ×2 wachsend, Cap 300 s bzw. ≥ base; Reset
+  bei Erfolg); 429 bekommt eigenen Warn-Log + Metrik `firefly_opensky_rate_limited_total`
+  (Teilmenge der Poll-Fehler, in der `on_error`-Closure gebumpt). **Rein
+  Firefly-intern** — kein Wire-/Kontrakt-Change, kein ADR nötig. FR-NET-004 +
+  FR-OBS-003 + TECHNICAL.md aktualisiert. Gates: `cargo test -p firefly-opensky`
+  (22, +7) + `-p firefly-server metrics`, `clippy`/`fmt` grün.
 - **Konfigurierbares OpenSky-Poll-Intervall (ADR 0029, Kontrakt v1.4.0, Branch
   `claude/wayfinder-tenant-radius-bug-w99r8q`):** Antwort auf Wayfinder-Wunsch #3
   (Poll-Schutz) — der E2E-Lauf lief anonym in **HTTP 429**, weil das Poll-Intervall

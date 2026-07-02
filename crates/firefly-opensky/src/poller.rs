@@ -16,13 +16,78 @@ use crate::{
 /// Base URL of the OpenSky REST API.
 const API_BASE: &str = "https://opensky-network.org/api/states/all";
 
+/// Upper cap (seconds) for the exponential poll backoff. Growth from the base
+/// poll interval is clamped here so a persistently rate-limited (429) or down feed
+/// retries at most once every few minutes — but a single success drops it straight
+/// back to the base cadence. The effective cap is never below the base interval.
+const MAX_BACKOFF_SECS: u64 = 300;
+
+/// Exponential backoff for the poll loop. A successful poll runs at the base
+/// interval; each consecutive failure **doubles** the sleep (2·base, 4·base, 8·base
+/// …) up to [`MAX_BACKOFF_SECS`], so a 429/rate-limited or down OpenSky feed is not
+/// polled at the base cadence. A single success resets the sleep to the base.
+///
+/// Kept as a small, pure state machine so the growth/cap/reset logic is unit-
+/// testable without running the (infinite) poll loop or any real HTTP.
+#[derive(Debug)]
+struct Backoff {
+    base: Duration,
+    cap: Duration,
+    failures: u32,
+}
+
+impl Backoff {
+    fn new(base: Duration) -> Self {
+        let base = base.max(Duration::from_secs(1));
+        // The cap must never sit below the base interval (an operator may configure
+        // a base slower than MAX_BACKOFF_SECS), else backoff could shorten the poll.
+        let cap = Duration::from_secs(MAX_BACKOFF_SECS.max(base.as_secs()));
+        Self {
+            base,
+            cap,
+            failures: 0,
+        }
+    }
+
+    /// Reset after a successful poll; the next sleep is the base interval.
+    fn reset(&mut self) -> Duration {
+        self.failures = 0;
+        self.base
+    }
+
+    /// Grow after a failed poll and return the (capped) next sleep. The first
+    /// failure already backs off to 2·base so a rate limit is respected at once.
+    fn fail(&mut self) -> Duration {
+        self.failures = self.failures.saturating_add(1);
+        // Clamp the shift so `base << shift` cannot overflow u64 on a long outage.
+        let shift = self.failures.min(20);
+        let secs = self.base.as_secs().saturating_mul(1u64 << shift);
+        Duration::from_secs(secs).min(self.cap)
+    }
+}
+
 /// Error returned by a single poll attempt.
 #[derive(Debug)]
 pub enum PollError {
-    /// HTTP-layer failure (network unreachable, timeout, non-2xx response, …).
+    /// HTTP-layer failure (network unreachable, timeout, non-2xx response other
+    /// than 429, …).
     Http(reqwest::Error),
     /// Failure obtaining an OAuth2 access token (ADR 0024).
     Auth(AuthError),
+    /// OpenSky returned HTTP 429 (rate limit). Split out from [`Http`](Self::Http)
+    /// so the poll loop can log it distinctly, count it, and back off — instead of
+    /// hammering the API at the base cadence. Detected explicitly in `fetch_states`
+    /// before `error_for_status`, which makes it trivially unit-testable.
+    RateLimited,
+}
+
+impl PollError {
+    /// True when this poll failed because OpenSky rate-limited the request
+    /// (HTTP 429). Drives a distinct warning log and the
+    /// `firefly_opensky_rate_limited_total` metric.
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, PollError::RateLimited)
+    }
 }
 
 impl std::fmt::Display for PollError {
@@ -30,6 +95,7 @@ impl std::fmt::Display for PollError {
         match self {
             PollError::Http(e) => write!(f, "HTTP error: {e}"),
             PollError::Auth(e) => write!(f, "{e}"),
+            PollError::RateLimited => write!(f, "OpenSky rate limit (HTTP 429)"),
         }
     }
 }
@@ -134,6 +200,12 @@ impl OpenSkyPoller {
             } else {
                 resp
             };
+        // Detect a rate limit explicitly (before error_for_status collapses every
+        // non-2xx into an opaque Http error) so the poll loop can back off and the
+        // 429 is countable/testable as its own error kind.
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(PollError::RateLimited);
+        }
         Ok(resp.error_for_status()?.json().await?)
     }
 
@@ -170,25 +242,122 @@ impl OpenSkyPoller {
     /// successful poll that returns at least one airborne aircraft, and
     /// `on_error` after each failed poll.
     ///
-    /// Transient HTTP errors (network hiccup, rate-limit 429, OpenSky downtime)
-    /// are logged as warnings and skipped; the loop continues at the configured
-    /// interval.  This method never returns.
+    /// Transient failures (network hiccup, rate-limit 429, OpenSky downtime) are
+    /// logged and skipped rather than propagated; the loop **backs off
+    /// exponentially** on consecutive failures (see [`Backoff`]) so a rate-limited
+    /// or down feed is not hammered, and returns to the base interval on the first
+    /// success. A 429 is logged distinctly. This method never returns.
     pub async fn run<F, E>(&self, mut on_plots: F, mut on_error: E)
     where
         F: FnMut(Vec<Plot>),
         E: FnMut(&PollError),
     {
-        let interval = Duration::from_secs(self.config.poll_interval_secs);
+        let mut backoff = Backoff::new(Duration::from_secs(self.config.poll_interval_secs));
         loop {
-            match self.poll().await {
-                Ok(plots) if !plots.is_empty() => on_plots(plots),
-                Ok(_) => debug!("OpenSky poll returned no airborne aircraft"),
-                Err(e) => {
-                    warn!("OpenSky poll failed: {e}");
-                    on_error(&e);
+            let sleep = match self.poll().await {
+                Ok(plots) if !plots.is_empty() => {
+                    on_plots(plots);
+                    backoff.reset()
                 }
-            }
-            tokio::time::sleep(interval).await;
+                Ok(_) => {
+                    debug!("OpenSky poll returned no airborne aircraft");
+                    backoff.reset()
+                }
+                Err(e) => {
+                    if e.is_rate_limited() {
+                        warn!("OpenSky rate-limited (HTTP 429) — backing off");
+                    } else {
+                        warn!("OpenSky poll failed: {e}");
+                    }
+                    on_error(&e);
+                    backoff.fail()
+                }
+            };
+            tokio::time::sleep(sleep).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn secs(d: Duration) -> u64 {
+        d.as_secs()
+    }
+
+    #[test]
+    fn backoff_first_failure_doubles_the_base() {
+        let mut b = Backoff::new(Duration::from_secs(10));
+        assert_eq!(
+            secs(b.fail()),
+            20,
+            "first failure backs off to 2·base at once"
+        );
+    }
+
+    #[test]
+    fn backoff_doubles_on_each_consecutive_failure() {
+        let mut b = Backoff::new(Duration::from_secs(10));
+        assert_eq!(secs(b.fail()), 20);
+        assert_eq!(secs(b.fail()), 40);
+        assert_eq!(secs(b.fail()), 80);
+        assert_eq!(secs(b.fail()), 160);
+    }
+
+    #[test]
+    fn backoff_is_capped_at_the_maximum() {
+        let mut b = Backoff::new(Duration::from_secs(10));
+        // Drive many failures; the delay must never exceed the cap.
+        let mut last = 0;
+        for _ in 0..20 {
+            last = secs(b.fail());
+            assert!(last <= MAX_BACKOFF_SECS, "delay {last} exceeded cap");
+        }
+        assert_eq!(
+            last, MAX_BACKOFF_SECS,
+            "settles at the cap under a long outage"
+        );
+    }
+
+    #[test]
+    fn backoff_resets_to_base_on_success() {
+        let mut b = Backoff::new(Duration::from_secs(10));
+        b.fail();
+        b.fail();
+        assert_eq!(secs(b.reset()), 10, "a success drops straight back to base");
+        // …and growth starts over from 2·base.
+        assert_eq!(secs(b.fail()), 20);
+    }
+
+    #[test]
+    fn backoff_cap_is_never_below_the_base_interval() {
+        // An operator may configure a base slower than MAX_BACKOFF_SECS (up to the
+        // Wayfinder ceiling of 3600 s). Backoff must never shorten the poll below it.
+        let mut b = Backoff::new(Duration::from_secs(3600));
+        for _ in 0..10 {
+            assert!(
+                secs(b.fail()) >= 3600,
+                "backoff must not poll faster than base"
+            );
+        }
+    }
+
+    #[test]
+    fn backoff_floors_a_zero_base_at_one_second() {
+        // A 0 base (should not happen — config rejects it) must not divide-by-zero
+        // or hot-spin; it is floored to 1 s.
+        let mut b = Backoff::new(Duration::from_secs(0));
+        assert_eq!(secs(b.reset()), 1);
+        assert_eq!(secs(b.fail()), 2);
+    }
+
+    #[test]
+    fn rate_limited_error_is_flagged() {
+        assert!(PollError::RateLimited.is_rate_limited());
+        assert_eq!(
+            PollError::RateLimited.to_string(),
+            "OpenSky rate limit (HTTP 429)"
+        );
     }
 }

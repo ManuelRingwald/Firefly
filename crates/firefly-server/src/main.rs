@@ -494,6 +494,13 @@ fn spawn_opensky_poller_live(
                     metrics_err
                         .opensky_poll_errors_total
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    // A 429 is also counted separately so a rate limit is
+                    // distinguishable from generic poll failures (ADR 0029 follow-up).
+                    if e.is_rate_limited() {
+                        metrics_err
+                            .opensky_rate_limited_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
                 },
             )
             .await;
