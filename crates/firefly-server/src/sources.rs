@@ -82,6 +82,14 @@ pub struct SourceSpec {
     /// `0.0.0.0:<default port>`.
     #[serde(default)]
     pub listen: Option<String>,
+    /// Poll interval in whole seconds for a *polled* source (`adsb_opensky` only —
+    /// contract 1.4.0). FLARM/APRS is a push stream and radar has its own scan
+    /// period, so this only affects OpenSky. Optional and additive; absent or `0`
+    /// keeps the OpenSky default (10 s). The orchestrator uses it to let an operator
+    /// slow the poll below the anonymous rate limit (HTTP 429) or, authenticated,
+    /// speed it up.
+    #[serde(default)]
+    pub poll_interval_secs: Option<u64>,
 }
 
 /// Why a `FIREFLY_SOURCES` value could not be turned into runnable sources. All
@@ -142,9 +150,10 @@ pub fn parse_sources(json: &str) -> Result<Vec<SourceSpec>, SourceError> {
 /// Build an [`OpenSkyConfig`] from an `adsb_opensky` spec at list position
 /// `index`. `get_env` resolves the spec's `cred_env` to its
 /// `client_id:client_secret` value (split at the **first** `:` — OAuth2 client ids
-/// contain no `:`; ADR 0024). The poll interval keeps the [`OpenSkyConfig`]
-/// default (anonymous-safe); bbox, sensor id and credentials come from the spec. A
-/// missing `cred_env` yields anonymous access (no OAuth2 credentials).
+/// contain no `:`; ADR 0024). `bbox`, sensor id, credentials and — when set — the
+/// poll interval come from the spec; a `poll_interval_secs` of `0` or absent keeps
+/// the [`OpenSkyConfig`] default (10 s, anonymous-safe). A missing `cred_env`
+/// yields anonymous access (no OAuth2 credentials).
 ///
 /// The caller guarantees `spec.source_type == SourceType::AdsbOpensky`.
 pub fn opensky_config_from_spec(
@@ -165,6 +174,12 @@ pub fn opensky_config_from_spec(
     };
     if let Some(sid) = spec.sensor_id {
         cfg.sensor_id = SensorId(sid);
+    }
+    // Per-source poll interval override (contract 1.4.0). Zero is treated as
+    // "unset" (mirrors OpenSkyConfig::from_env, which rejects 0) so a stray 0
+    // never yields a hot-spin poll loop.
+    if let Some(secs) = spec.poll_interval_secs.filter(|&s| s > 0) {
+        cfg.poll_interval_secs = secs;
     }
     if let Some(env_name) = &spec.cred_env {
         let raw = get_env(env_name).filter(|s| !s.is_empty()).ok_or_else(|| {
@@ -538,6 +553,45 @@ mod tests {
         let spec = adsb_spec(None, None);
         let cfg = opensky_config_from_spec(&spec, 0, no_env).expect("valid");
         assert_eq!(cfg.sensor_id, OpenSkyConfig::default().sensor_id);
+    }
+
+    #[test]
+    fn poll_interval_override_is_honored() {
+        let mut spec = adsb_spec(None, None);
+        spec.poll_interval_secs = Some(20);
+        let cfg = opensky_config_from_spec(&spec, 0, no_env).expect("valid");
+        assert_eq!(cfg.poll_interval_secs, 20);
+    }
+
+    #[test]
+    fn poll_interval_absent_or_zero_keeps_default() {
+        let default = OpenSkyConfig::default().poll_interval_secs;
+
+        let absent = adsb_spec(None, None); // poll_interval_secs is None
+        assert_eq!(
+            opensky_config_from_spec(&absent, 0, no_env)
+                .unwrap()
+                .poll_interval_secs,
+            default
+        );
+
+        let mut zero = adsb_spec(None, None);
+        zero.poll_interval_secs = Some(0); // 0 treated as unset — no hot-spin
+        assert_eq!(
+            opensky_config_from_spec(&zero, 0, no_env)
+                .unwrap()
+                .poll_interval_secs,
+            default
+        );
+    }
+
+    #[test]
+    fn poll_interval_secs_deserializes_from_json() {
+        let json = r#"[{"type":"adsb_opensky",
+            "bbox":{"min_lat":48.0,"min_lon":7.0,"max_lat":50.0,"max_lon":9.0},
+            "poll_interval_secs":30}]"#;
+        let specs = parse_sources(json).expect("valid");
+        assert_eq!(specs[0].poll_interval_secs, Some(30));
     }
 
     #[test]

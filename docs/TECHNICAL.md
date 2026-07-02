@@ -132,13 +132,13 @@ fließen in denselben Tracker (Fusion mit ADS-B/FLARM).
 
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
-Maßgeblich: `docs/source-input-contract.md` v1.0.0. Im **Live-Modus** liest Firefly
+Maßgeblich: `docs/source-input-contract.md` v1.4.0. Im **Live-Modus** liest Firefly
 seine Quellen aus einer JSON-Liste, die ein Orchestrator (Wayfinder) je Instanz
 setzt — ein Eintrag je Quelle, mehrere Adapter speisen denselben Live-Tracker.
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
-| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`/`FIREFLY_FLARM_*`. Eintrag: `{type, bbox?, sac?, sic?, sensor_id?, cred_env?}`. `type` ∈ `adsb_opensky` / `flarm_aprs` (beide unterstützt) / `radar_asterix` (reserviert → WARN + übersprungen). Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
+| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`/`FIREFLY_FLARM_*`. Eintrag: `{type, bbox?, sac?, sic?, sensor_id?, cred_env?, lat?, lon?, height_m?, listen?, poll_interval_secs?}`. `type` ∈ `adsb_opensky` / `flarm_aprs` / `radar_asterix` (alle drei unterstützt). `poll_interval_secs` (nur `adsb_opensky`, `> 0`; fehlt/`0` → Default 10 s, ADR 0029) überschreibt das OpenSky-Poll-Intervall. Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
 | `FIREFLY_SOURCE_<n>_SECRET` o. ä. | string | — | Beliebig **benannte** Credential-Env, von einem Eintrag per `cred_env` referenziert. Wert quellenabhängig: `client_id:client_secret` (`adsb_opensky`) bzw. `callsign:passcode` (`flarm_aprs`), Split am ersten `:`; nie im JSON-Blob. |
 
 Beispiel: siehe `docs/source-input-contract.md` §2. Referenzpunkt = Mittelpunkt der

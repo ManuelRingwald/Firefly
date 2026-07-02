@@ -13,6 +13,20 @@
 ## 🎯 Stand 2026-07-02
 
 - **Zuletzt aktualisiert:** 2026-07-02
+- **Konfigurierbares OpenSky-Poll-Intervall (ADR 0029, Kontrakt v1.4.0, Branch
+  `claude/wayfinder-tenant-radius-bug-w99r8q`):** Antwort auf Wayfinder-Wunsch #3
+  (Poll-Schutz) — der E2E-Lauf lief anonym in **HTTP 429**, weil das Poll-Intervall
+  fix bei 10 s lag und über `FIREFLY_SOURCES` nicht steuerbar war. Jetzt trägt
+  `adsb_opensky` ein optionales **`poll_interval_secs`** (ganze Sekunden):
+  `SourceSpec.poll_interval_secs: Option<u64>` (`#[serde(default)]`, additiv),
+  `opensky_config_from_spec` übernimmt nur `> 0` (sonst Default 10 s — kein
+  Heiß-Lauf, spiegelt `OpenSkyConfig::from_env`); die Ausgabe-Kadenz zieht via
+  `representative_config` automatisch nach. Nur für `adsb_opensky` (FLARM ist Push,
+  Radar hat eigene Scan-Periode). Kontrakt-Doku v1.4.0 + Changelog, ADR 0029,
+  FR-NET-011 + Cross-Project-Todo aktualisiert. **Additiv & bidirektional
+  kompatibel** (kein `deny_unknown_fields`) → Merge-Reihenfolge zu Wayfinder
+  entkoppelt. Gates: `cargo test -p firefly-server` (26 sources-Tests, +3),
+  `clippy`/`fmt` grün.
 - **Hotfix (2026-07-02) — FLARM-Epoch-Zeitstempel (Wayfinder #120):** Ein
   **kombinierter ADS-B+FLARM-Live-Feed** lieferte keine Tracks, obwohl beide
   Quellen einzeln laufen. Root Cause: OpenSky stempelt Plot-Zeit als
