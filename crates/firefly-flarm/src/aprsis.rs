@@ -8,7 +8,7 @@
 //! ([`run_stream`]) are unit-testable without a network; [`run`] adds the TCP
 //! connect + reconnect-with-backoff loop around them.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use firefly_core::{Plot, SensorId};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -70,11 +70,25 @@ where
             continue; // server comment / keep-alive
         }
         match parse_position(trimmed) {
-            Some(pos) => on_plot(position_to_plot(&pos, sensor, sigma_pos_m)),
+            // The OGN beacon carries only a time-of-day; anchor it to the
+            // wall-clock receive instant so the plot time is full Unix-epoch
+            // seconds on the same clock as OpenSky (Wayfinder #120).
+            Some(pos) => on_plot(position_to_plot(&pos, sensor, sigma_pos_m, unix_now_s())),
             None => debug!(line = %trimmed, "APRS line skipped (not an aircraft position)"),
         }
     }
     Ok(())
+}
+
+/// Current wall-clock time as Unix-epoch seconds. Live FLARM beacons are a push
+/// stream received in near-real-time, so the receive instant is the day anchor
+/// for the beacon's time-of-day (see [`position_to_plot`]). A clock before the
+/// epoch (never in practice) clamps to 0.
+fn unix_now_s() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
 }
 
 /// Connect, log in, and stream until the connection ends. One attempt.

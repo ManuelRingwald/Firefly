@@ -10,6 +10,20 @@
 
 ---
 
+## 🎯 Stand 2026-07-02
+
+- **Zuletzt aktualisiert:** 2026-07-02
+- **Hotfix (2026-07-02) — FLARM-Epoch-Zeitstempel (Wayfinder #120):** Ein
+  **kombinierter ADS-B+FLARM-Live-Feed** lieferte keine Tracks, obwohl beide
+  Quellen einzeln laufen. Root Cause: OpenSky stempelt Plot-Zeit als
+  **Unix-Epoch** (`resp.time`), FLARM stempelte **Sekunden-seit-Mitternacht** —
+  der gemeinsame monotone Datenzeit-Wasserstand des Multi-Source-Trackers verwarf
+  daraufhin alle FLARM-Plots als „out-of-order". Fix in `firefly-flarm`
+  (`position_to_plot`/`aprsis`): FLARM stempelt jetzt **Epoch-UTC** (OGN-Tageszeit
+  an den Empfangstag verankert, Tageswechsel-Korrektur, Fallback Empfangszeit).
+  Kein CAT062-Wire-Change. Doku: `docs/milestones/FLARM-Epoch-Time_Multi-Source-Fusion.md`,
+  FR-NET-012. Alle Gates grün (`cargo test --workspace`, clippy, fmt).
+
 ## 🎯 Stand 2026-06-30
 
 - **Zuletzt aktualisiert:** 2026-06-30
