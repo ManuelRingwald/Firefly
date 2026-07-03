@@ -10,6 +10,24 @@
 
 ---
 
+## 🎯 Stand 2026-07-03
+
+- **Zuletzt aktualisiert:** 2026-07-03
+- **Ist-/Gap-Analyse Service-Orientierung & HA (repo-übergreifend, Doku im
+  Wayfinder-Repo):** `docs/design/gap-analyse-service-orientierung-ha.md`
+  (Wayfinder) analysiert beide Systeme: System-Ebene bereits service-orientiert
+  (CAT062-Vertrag, 1 Instanz pro Feed), Binnen-Ebene modulare Monolithen.
+  **Firefly-relevante Befunde:** (a) 1 Instanz pro Feed = Single Point of
+  Failure → **SDPS-002** (HA/State-Sync) bleibt die wichtigste betriebliche
+  Lücke; (b) der `PlotRecorder` (ADR 0020, `.ffplots`-Replay als
+  Wiederherstellungs-Weg) ist im Live-Pfad **nicht verdrahtet**
+  (`crates/firefly-server/src/main.rs:329`, `LiveTracker::new(tracker, None)`)
+  — als SDPS-002-Vorstufe einplanen (S3–S4); (c) Tracker-Strukturen sind
+  serialisierbar, aber kein Snapshot/Restore-Codepfad existiert; (d) keine
+  K8s-Manifeste (Probes/SIGTERM/12-Factor sind fertig vorbereitet). Empfohlene
+  Reihenfolge und Backlog-Anker (WF2-52/53, ORCH-6, SDPS-002) im Dokument.
+  Reine Doku, kein Code.
+
 ## 🎯 Stand 2026-07-02
 
 - **Zuletzt aktualisiert:** 2026-07-02
