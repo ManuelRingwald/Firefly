@@ -21,7 +21,9 @@
 
 ## Version
 
-**2.6.0** (2026-06-30) — **Additiv (ADR 0027, Firefly #30):** I062/290 (System Track Update Ages) trägt jetzt optional **per-Technologie-Alter** — **SSR** (`0x20`), **Mode S** (`0x10`) und **FLARM** (`0x04`, Firefly-Vendor-Subfeld) — zusätzlich zu PSR (`0x40`) und ES/ADS-B (`0x08`). Die Age-Oktette folgen der Bit-Priorität MSB→LSB. Damit liefert Firefly die **autoritative Track-Provenienz** im Strom; der Konsument leitet ◆ ADS-B / ▢ SSR / ○ PSR / FLARM aus den Age-Subfeldern ab statt zu raten (ersetzt Wayfinders `provenance.js`-Heuristik). Strikt additiv — bestehende PSR/ES-Subfelder unverändert, kein Wire-Format-Bruch. Details: Abschnitt 4.2.
+**2.6.1** (2026-07-04) — **Dokumentarisch (ADR 0030, kein Wire-Format-Bruch):** Der Replay-/Szenen-Modus des Senders wurde ausgebaut; Firefly läuft ausschließlich als quellen-getriebener Live-Tracker. Für den Vertrag ändert sich **nichts am Format** — alle Replay-Bezüge dieser ICD (Szenen-Ursprung als I062/100-Referenz, CAT063-Replay-Verhalten, feste Szenen-SICs) sind durch die quellen-getriebenen Formulierungen ersetzt. Eine Instanz **ohne** Quellen sendet weiterhin CAT065-Heartbeats (und CAT063), aber keine CAT062-Tracks — „leerer Himmel" bleibt vom „toten Feed" unterscheidbar (ADR 0018).
+
+Vorgänger **2.6.0** (2026-06-30) — **Additiv (ADR 0027, Firefly #30):** I062/290 (System Track Update Ages) trägt jetzt optional **per-Technologie-Alter** — **SSR** (`0x20`), **Mode S** (`0x10`) und **FLARM** (`0x04`, Firefly-Vendor-Subfeld) — zusätzlich zu PSR (`0x40`) und ES/ADS-B (`0x08`). Die Age-Oktette folgen der Bit-Priorität MSB→LSB. Damit liefert Firefly die **autoritative Track-Provenienz** im Strom; der Konsument leitet ◆ ADS-B / ▢ SSR / ○ PSR / FLARM aus den Age-Subfeldern ab statt zu raten (ersetzt Wayfinders `provenance.js`-Heuristik). Strikt additiv — bestehende PSR/ES-Subfelder unverändert, kein Wire-Format-Bruch. Details: Abschnitt 4.2.
 
 Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Sensor Status Messages, `0x3F`) auf demselben Multicast-Strom. Periodische Per-Sensor-Statusmeldung (Default 5 s, `FIREFLY_CAT063_PERIOD`): je Tick ein Block mit einem Record pro registriertem Sensor (I063/010 SAC/SIC, I063/030 ToD, I063/060 NOGO operationell/degradiert). Erlaubt dem Konsumenten einen ausgefallenen Sensor von einem leeren Himmel zu unterscheiden — Grundlage für Wayfinders Sensor-Degradierungs-Banner. Konsument dispatcht am CAT-Oktett (`0x3F`). Details: Abschnitt 9.
 
@@ -36,6 +38,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 2.6.1 | 2026-07-04 | **Dokumentarisch (ADR 0030).** Replay-/Szenen-Modus des Senders ausgebaut — Firefly ist ausschließlich quellen-getrieben (`FIREFLY_SOURCES`/Adapter-Envs). **Kein Wire-Format-Bruch:** CAT062/065/063 byte-identisch. ICD-Anpassungen rein redaktionell: I062/100-Referenz = System-Referenzpunkt (Union-Bbox-Mitte bzw. `FIREFLY_SYSTEM_REF_*`), CAT063-SICs = `sensor_id` der Quellen, CAT063-Liveness folgt immer dem echten Plot-Eingang. Instanz ohne Quellen: CAT065/CAT063 laufen, keine CAT062-Tracks (leerer Himmel). |
 | 2.6.0 | 2026-06-30 | **Additiv (ADR 0027, Firefly #30).** I062/290 (System Track Update Ages) trägt jetzt **per-Technologie-Alter**: zusätzlich zu PSR (`0x40`) und ES/ADS-B (`0x08`) optional **SSR-Age** (`0x20`), **Mode-S-Age** (`0x10`) und **FLARM-Age** (`0x04`). Die Age-Oktette folgen der Bit-Priorität MSB→LSB im Primary-Subfeld (PSR → SSR → MDS → ES → FLARM), je 1 Oktett, u8, LSB 0,25 s. Ein Age-Oktett ist nur vorhanden, wenn das zugehörige Bit gesetzt ist (Track hat einen Treffer dieser Technologie). PSR-only-Tracks: **kein** Unterschied zum bisherigen Wire-Format (2 Byte). Quelle: `SystemTrack.source_ages`. Damit kann der Konsument die **Track-Provenienz** (◆ ADS-B / ▢ SSR / ○ PSR / FLARM) aus den Age-Subfeldern ableiten, statt im Frontend zu raten. **Firefly-Bit-Map bleibt:** `0x40`/`0x08` unverändert (Wayfinder-Decoder bricht nicht); neue Subfelder auf freien Bits; **FLARM (`0x04`) ist ein dokumentiertes Firefly-Vendor-Subfeld** (kein EUROCONTROL-Standard-Subfeld, vom toleranten Decoder überspringbar). **Konsument (Wayfinder): kein Breaking Change** — I062/290 muss ohnehin variabel lang dekodiert werden (Länge/Reihenfolge aus dem Primary-Subfeld). Details: Abschnitt 4.2. |
 | 2.5.0 | 2026-06-25 | **Additiv (ADR 0022, Firefly #32).** Neue Kategorie **CAT063** (Sensor Status Messages, CAT-Oktett `0x3F`) auf **derselben** Multicast-Gruppe/Port wie CAT062/CAT065. Periodische Per-Sensor-Statusmeldung (wall-clock-getaktet, Default 5 s, `FIREFLY_CAT063_PERIOD`): **ein Block pro Tick mit einem Record je registriertem Sensor**, FSPEC `0xE0` → I063/010 (SAC/SIC), I063/030 (Time of Day, 1/128 s), I063/060 (NOGO: `0x00` operationell / `0x40` degradiert). Ein Sensor gilt als degradiert, wenn er innerhalb von `2.5 × scan_period` keinen Plot geliefert hat. Erlaubt dem Konsumenten, einen **ausgefallenen Sensor** von einem **leeren Himmel** zu unterscheiden (CAT065 sagt „SDPS lebt", CAT063 sagt „welche Sensoren liefern"). **Konsument muss am CAT-Oktett dispatchen** (`0x3E` Track, `0x41` Heartbeat, `0x3F` Sensor-Status) und unbekannte Kategorien überspringen — robuste-Decoder-Regel galt ohnehin. Kein Eingriff in CAT062/CAT065. Details: Abschnitt 9. |
 | 2.4.0 | 2026-06-18 | **Additiv (AP9.5).** I062/290 (System Track Update Ages) trägt jetzt optional das **ES-Age-Subfeld** (Extended Squitter / ADS-B): Bit `0x08` im primären Subfeld-Oktett signalisiert, dass ein ES-Age-Byte folgt. Das ES-Age-Byte kodiert das ADS-B-Trefferalter in 1/4-Sekunden (identisch zum PSR-Age). Ist `0x08` nicht gesetzt, fehlt das Byte und das Item ist weiterhin 2 Byte lang (Subfeld + PSR-Age). Für Tracks ohne ADS-B-Treffer: kein Unterschied zum bisherigen Wire-Format. **Konsument (Wayfinder): kein Breaking Change** — vorhandene Decoder müssen I062/290 als variabel lang behandeln (bisher in der Praxis immer 2 Byte; robust implementiert wenn der Decoder `bytes.len()` prüft). Die ES-Age-Präsenz signalisiert „dieser Track hat mindestens einen ADS-B-Update erhalten" und kann von Wayfinder als ADS-B-Badge genutzt werden (AP9.9). |
@@ -240,9 +243,10 @@ Kennung getragen hat (sticky wie Mode 3/A und die Flugfläche).
   optional verwertbar (z. B. für Debugging/Vergleich). Referenzpunkt der
   Projektion ist der **System-Referenzpunkt** (ADR 0021) — die *eine* Quelle,
   die zugleich der Tracking-Frame-Ursprung ist, sodass I062/100 stets kohärent
-  mit der Track-Berechnung ist. Im **Replay-Modus** ist das der Szenen-Ursprung
-  (Demo 48/11, Frankfurt 50,04/8,56); im **Live-Modus** standardmäßig die Mitte
-  der OpenSky-Bounding-Box, überschreibbar über `FIREFLY_SYSTEM_REF_LAT/_LON`.
+  mit der Track-Berechnung ist. Standardmäßig ist das die Mitte der
+  Union-Bounding-Box der konfigurierten Quellen, überschreibbar über
+  `FIREFLY_SYSTEM_REF_LAT/_LON`. (Der frühere Replay-Modus mit festem
+  Szenen-Ursprung wurde entfernt — ADR 0030, ICD 2.6.1.)
   I062/105 (WGS-84) bleibt unabhängig davon die primäre, kontextfreie Position.
   **Hinweis:** Diese Klärung betrifft nur die *Semantik* des Referenzpunkts —
   das Wire-Format von I062/100 (24-Bit-Zweierkomplement, LSB 0,5 m) ist
@@ -367,7 +371,7 @@ FSPEC-Oktett `0xE0`.
 
 | FRN | Item | Länge | Inhalt |
 |-----|------|-------|--------|
-| 1 | I063/010 | 2 | Data Source Identifier (SAC/SIC) des **Sensors**. SAC = `FIREFLY_CAT062_SAC` (Default 0); **SIC identifiziert den einzelnen Sensor** (Frankfurt: 1/2/3; Demo/Live: 1). |
+| 1 | I063/010 | 2 | Data Source Identifier (SAC/SIC) des **Sensors**. SAC = `FIREFLY_CAT062_SAC` (Default 0); **SIC identifiziert den einzelnen Sensor** (die `sensor_id` der jeweiligen Quelle). |
 | 2 | I063/030 | 3 | Time of Day, 24-Bit, **1/128 s** seit UTC-Mitternacht (wie I062/070). **Wall-clock-Aussendezeit**, nicht Datenzeit. |
 | 3 | I063/060 | 1 | Sensor Configuration & Status. **NOGO-Feld** (Bits 8/7): `00` = operationell (`0x00`), `01` = degradiert (`0x40`), `10` = nicht verbunden (`0x80`), `11` = nicht initialisiert (`0xC0`). Firefly sendet nur `0x00` (aktiv) oder `0x40` (kein Plot innerhalb `2.5 × scan_period`). |
 
@@ -398,10 +402,9 @@ Zeitskala der Antennenumläufe (4–12 s) ändert, nicht im Sekundentakt.
 
 **Degradiertes-Kriterium (Sender).** Ein Sensor gilt als **aktiv**, solange er
 innerhalb von `2.5 × scan_period` Sekunden mindestens einen Plot geliefert hat
-(`SensorHealthMonitor`); andernfalls **degradiert** (NOGO `0x40`). Im
-**Replay-Modus** werden alle Sensoren der Szene als dauerhaft aktiv geführt
-(deterministische Wiedergabe meldet keine Degradierung). Im **Live-Modus** wird
-die Liveness aus dem echten Plot-Eingang (OpenSky) abgeleitet.
+(`SensorHealthMonitor`); andernfalls **degradiert** (NOGO `0x40`). Die
+Liveness wird aus dem echten Plot-Eingang des jeweiligen Quell-Adapters
+(OpenSky/FLARM/Radar) abgeleitet (seit ADR 0030 der einzige Betrieb).
 
 **Konfiguration (Sender).** `FIREFLY_CAT063_PERIOD` (Sekunden, Default 5).
 CAT063 läuft mit, sobald **sowohl** der Feed (`FIREFLY_CAT062_ENABLED`) **als

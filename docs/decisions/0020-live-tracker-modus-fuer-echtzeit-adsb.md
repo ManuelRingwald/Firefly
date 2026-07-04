@@ -287,3 +287,12 @@ Neue Metriken: `firefly_live_plots_ingested_total`, `firefly_live_tracks_current
 4. **Aufbewahrungspolitik `.ffplots`:** ✅ zunächst keine Auto-Rotation (YAGNI),
    eine Datei pro Lauf; Rotation/Größenlimit als eigenes Vorhaben, wenn der
    operative Bedarf entsteht.
+
+---
+
+## Nachtrag (2026-07-04, ADR 0030)
+
+Der hier eingeführte Live-Modus ist seit ADR 0030 der **einzige**
+Betriebsmodus: der Replay-/Szenen-Pfad (und damit `FIREFLY_MODE` selbst) wurde
+ausgebaut. Die Beschreibung des Live-Pfads in diesem ADR bleibt gültig; nur
+die Modus-Weiche existiert nicht mehr.

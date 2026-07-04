@@ -15,7 +15,7 @@
 //! - [`SensorHealthMonitor::new_live`]: each sensor starts with no activity
 //!   recorded; activity is reported by calling [`SensorHealthMonitor::record_activity`]
 //!   on each plot batch. For OpenSky Live mode.
-//! - [`SensorHealthMonitor::new_replay`]: all sensors are pre-seeded as active
+//! - [`SensorHealthMonitor::new_preseeded`]: all sensors are pre-seeded as active
 //!   (last-seen = creation time, timeout = 1 hour), so a deterministic Replay
 //!   never falsely reports degradation.
 //!
@@ -86,10 +86,11 @@ impl SensorHealthMonitor {
         }
     }
 
-    /// Create a monitor for **Replay mode**: all sensors are pre-seeded as
-    /// active with a one-hour timeout, so they remain green throughout a
-    /// deterministic replay without needing any wall-clock plot callbacks.
-    pub fn new_replay(sensor_ids: impl IntoIterator<Item = SensorId>) -> Self {
+    /// Create a monitor whose sensors are all **pre-seeded as active** with a
+    /// one-hour timeout — for tests and static sensor sets that produce no
+    /// wall-clock plot callbacks. (Formerly `new_preseeded`; the scene replay
+    /// mode itself was removed, ADR 0030.)
+    pub fn new_preseeded(sensor_ids: impl IntoIterator<Item = SensorId>) -> Self {
         let now = Instant::now();
         let timeout = Duration::from_secs(3600);
         let sensors: BTreeMap<SensorId, SensorEntry> = sensor_ids
@@ -241,7 +242,7 @@ mod tests {
     /// Replay mode pre-seeds all sensors as active.
     #[test]
     fn replay_mode_all_sensors_start_active() {
-        let m = SensorHealthMonitor::new_replay([sid(1), sid(2), sid(3)]);
+        let m = SensorHealthMonitor::new_preseeded([sid(1), sid(2), sid(3)]);
         let snap = m.snapshot(Instant::now());
         assert_eq!(snap.sensors_total, 3);
         assert_eq!(snap.sensors_active, 3);

@@ -2,7 +2,8 @@
 
 > **Zielgruppe:** Systembetreiber, die Firefly erstmalig einrichten.
 > Dieses Handbuch deckt den Weg von Null bis zum laufenden System ab —
-> Quellcode-Build, Docker-Betrieb, Frankfurt-Szenario und ADS-B-Echtbetrieb.
+> Quellcode-Build, Docker-Betrieb und quellen-getriebener Echtbetrieb
+> (OpenSky-ADS-B, FLARM, Radar-ASTERIX).
 
 ---
 
@@ -62,10 +63,13 @@ cargo build --release -p firefly-server
 
 ---
 
-## 4. Schnellstart: Demo-Modus (ohne Netz)
+## 4. Schnellstart: nackter Start (leerer Himmel)
 
-Der einfachste Einstieg — zwei simulierte Flugzeuge, ein Radar, keine externe
-Abhängigkeit.
+Firefly läuft immer als **quellen-getriebener Live-Tracker** (ADR 0030). Ohne
+konfigurierte Quelle startet der Server mit **leerem Himmel** — er dient die
+Karte, beantwortet `/health`/`/ready` und sendet (falls aktiviert) den
+CAT065-Heartbeat, verarbeitet aber keine Plots. Kein Überraschungs-Egress:
+alle Quell-Adapter sind Opt-in.
 
 ```bash
 cargo run --release -p firefly-server
@@ -79,31 +83,14 @@ Firefly startet auf Port **8080**. Im Browser öffnen:
 http://localhost:8080
 ```
 
-Die Karte zeigt zwei sich bewegende Tracks (Demo-Szenario).
-Die Konsole gibt strukturierte JSON-Logs aus (Verbosity: `info`).
+Die Karte bleibt leer, die Konsole gibt strukturierte JSON-Logs aus
+(Verbosity: `info`). Tracks erscheinen, sobald eine Quelle konfiguriert ist —
+Abschnitt 7 (OpenSky) ist der schnellste Weg.
 
----
-
-## 5. Frankfurt-Szenario einrichten
-
-Das Frankfurt-Szenario zeigt drei Radare und acht Luftfahrzeuge im Raum
-Frankfurt/Main — deutlich realistischer als der Demo-Modus.
-
-```bash
-FIREFLY_SCENE=frankfurt cargo run --release -p firefly-server
-```
-
-Oder als separate Env-Variable beim bereits gebauten Binary:
-
-```bash
-FIREFLY_SCENE=frankfurt ./target/release/firefly-server
-```
-
-Wahlweise die Wiedergabegeschwindigkeit erhöhen (4× Echtzeit):
-
-```bash
-FIREFLY_SCENE=frankfurt FIREFLY_SPEED=4.0 ./target/release/firefly-server
-```
+> **Frühere Demo-Szenen:** `FIREFLY_SCENE`/`FIREFLY_SPEED`/`FIREFLY_MODE`
+> wurden mit ADR 0030 ausgebaut und werden ignoriert (Warn-Log). Die
+> Frankfurt-Mehrradar-Szene lebt als Regressions-Fixture in
+> `firefly-player/tests/frankfurt_regression.rs` weiter.
 
 ---
 
@@ -115,32 +102,22 @@ FIREFLY_SCENE=frankfurt FIREFLY_SPEED=4.0 ./target/release/firefly-server
 docker build -t firefly-server:latest .
 ```
 
-### Demo starten
+### Start ohne Quellen (leerer Himmel)
 
 ```bash
 docker run --rm -p 8080:8080 firefly-server:latest
 ```
 
-### Frankfurt-Szenario im Container
-
-```bash
-docker run --rm \
-  -p 8080:8080 \
-  -e FIREFLY_SCENE=frankfurt \
-  -e FIREFLY_SPEED=1.0 \
-  firefly-server:latest
-```
-
-### Mit CAT062-Multicast-Feed (für Wayfinder)
+### Mit OpenSky-Quelle und CAT062-Multicast-Feed (für Wayfinder)
 
 Der Multicast-Feed ist standardmäßig deaktiviert (kein unbeabsichtigter
 UDP-Verkehr). Für den Verbund mit Wayfinder:
 
 ```bash
 docker run --rm \
-  -p 8080:8080 \
   --network host \                         # Multicast benötigt Host-Netz
-  -e FIREFLY_SCENE=frankfurt \
+  -e FIREFLY_OPENSKY_ENABLED=true \
+  -e FIREFLY_OPENSKY_CREDENTIALS=client_id:client_secret \
   -e FIREFLY_CAT062_ENABLED=true \
   -e FIREFLY_CAT062_GROUP=239.255.0.62 \
   -e FIREFLY_CAT062_PORT=8600 \
@@ -153,17 +130,14 @@ docker run --rm \
 
 ---
 
-## 7. ADS-B-Echtbetrieb mit OpenSky Network (`FIREFLY_MODE=live`)
+## 7. ADS-B-Echtbetrieb mit OpenSky Network
 
-Im **Live-Modus** bezieht Firefly Echtzeit-ADS-B-Positionen vom OpenSky Network
-REST API, speist sie direkt in den Tracker und sendet kontinuierlich CAT062-
-und WebSocket-Daten an Wayfinder bzw. den Browser. Alle eingehenden Plots werden
-parallel in einer `.ffplots`-Datei aufgezeichnet (ADR 0020).
-
-> **Wichtig:** Der Live-Modus wird ausschließlich über `FIREFLY_MODE=live`
-> aktiviert — nicht über `FIREFLY_OPENSKY_ENABLED`. Letztere Variable aktiviert
-> den OpenSky-Poller nur als **Log-only**-Sonde im Replay-Modus (Plots werden
-> geloggt, aber nicht verarbeitet).
+Mit aktivierter OpenSky-Quelle (`FIREFLY_OPENSKY_ENABLED=true`, ADR 0030:
+alle Adapter sind Opt-in) bezieht Firefly Echtzeit-ADS-B-Positionen vom
+OpenSky Network REST API, speist sie direkt in den Tracker und sendet
+kontinuierlich CAT062- und WebSocket-Daten an Wayfinder bzw. den Browser.
+Alle eingehenden Plots werden parallel in einer `.ffplots`-Datei
+aufgezeichnet (ADR 0020).
 
 > **Orchestrierter Betrieb (ADR 0023).** Dieser Abschnitt beschreibt die
 > **Standalone**-Konfiguration über `FIREFLY_OPENSKY_*` (eine Quelle, von Hand
@@ -209,10 +183,10 @@ export FIREFLY_OPENSKY_POLL_INTERVAL_SECS=5   # mit Account: 5 s möglich
 > **Sicherheitshinweis:** Client-Secrets nie direkt in Shell-Skripten hartkodieren.
 > Im Produktionsbetrieb über Kubernetes Secrets oder ein Vault-System injizieren.
 
-### Schritt 4: Im Live-Modus starten
+### Schritt 4: Mit aktivierter OpenSky-Quelle starten
 
 ```bash
-FIREFLY_MODE=live \
+FIREFLY_OPENSKY_ENABLED=true \
 FIREFLY_OPENSKY_LAT_MIN=49.0 \
 FIREFLY_OPENSKY_LAT_MAX=51.0 \
 FIREFLY_OPENSKY_LON_MIN=7.0 \
@@ -223,7 +197,7 @@ FIREFLY_OPENSKY_LON_MAX=10.0 \
 Im Log erscheinen dann Meldungen wie:
 
 ```
-INFO firefly starting mode=live
+INFO starting Firefly server (sources-driven live tracker)
 INFO OpenSky ADS-B poller started lat_min=49 lat_max=51 lon_min=7 lon_max=10
 INFO live tracker tick tracks=12 plots_ingested=47
 ```
@@ -383,12 +357,10 @@ curl http://localhost:8080/metrics
 
 ---
 
-## 11. Vollständiges Beispiel: Frankfurt + ADS-B + Wayfinder
+## 11. Vollständiges Beispiel: ADS-B-Quelle + Wayfinder
 
 ```bash
-# Alle Optionen kombiniert (Produktionsnahes Demo):
-FIREFLY_SCENE=frankfurt \
-FIREFLY_SPEED=1.0 \
+# Alle Optionen kombiniert (produktionsnah, quellen-getrieben):
 FIREFLY_PORT=8080 \
 FIREFLY_CAT062_ENABLED=true \
 FIREFLY_CAT062_GROUP=239.255.0.62 \

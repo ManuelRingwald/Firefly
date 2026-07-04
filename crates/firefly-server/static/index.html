@@ -36,18 +36,6 @@
   .layer-toggle button.active {
     background: #2196f3; border-color: #1976d2;
   }
-  #delay-btn {
-    width: 100%; padding: 6px 8px; font-size: 12px;
-    background: #2a3543; color: #e8eef6; border: 1px solid #44566b;
-    border-radius: 6px; cursor: pointer;
-  }
-  #delay-btn:disabled { opacity: 0.5; cursor: default; }
-  #delay-banner {
-    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-    z-index: 1; background: rgba(245, 176, 65, 0.92); color: #1a1406;
-    padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); display: none;
-  }
   .track-label {
     font-size: 11px; color: #e8eef6; white-space: nowrap;
     text-shadow: 0 0 2px #0b0e13, 0 0 2px #0b0e13, 0 0 2px #0b0e13;
@@ -72,9 +60,7 @@
     <button id="btn-airspaces" class="active">airspaces</button>
     <button id="btn-plots">raw plots</button>
   </div>
-  <button id="delay-btn" type="button">Verzug simulieren (5 s)</button>
 </div>
-<div id="delay-banner">Zustellung verzögert — Tracks werden extrapoliert (Dead-Reckoning), dann eingerastet…</div>
 
 <script>
   // A track is only shown as "coasting" once it has gone without a fresh
@@ -299,9 +285,6 @@
   const countEl = document.getElementById('count');
   const airspacesBtn = document.getElementById('btn-airspaces');
   const plotsBtn = document.getElementById('btn-plots');
-  const delayBtn = document.getElementById('delay-btn');
-  const delayBanner = document.getElementById('delay-banner');
-
   airspacesBtn.addEventListener('click', () => {
     toggleAirspaces();
     airspacesBtn.classList.toggle('active');
@@ -312,70 +295,12 @@
     plotsBtn.classList.toggle('active');
   });
 
-  // Ask the server to pause delivery for a few seconds (NFR-CLOUD-004): the
-  // tracks resume exactly where data-time says they should — nothing here
-  // touches the tracker, only how fast we *receive* its output.
-  delayBtn.addEventListener('click', () => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send('delay');
-    }
-  });
-
-  function showDelayBanner(durationS) {
-    delayBanner.style.display = 'block';
-    delayBtn.disabled = true;
-    setTimeout(() => {
-      delayBanner.style.display = 'none';
-      delayBtn.disabled = false;
-    }, durationS * 1000);
-  }
-
-  // ---- Dead-reckoning during a delivery delay -----------------------------
-  // While the server pauses *delivery* (the "delay" demo), no fresh frames
-  // arrive — but the real aircraft keep flying. Rather than freeze the picture,
-  // we extrapolate (dead-reckon) each track forward from its last known
-  // velocity, so the symbols keep gliding. When delivery resumes, the server's
-  // absolute pacing has caught the schedule up to the present, so the next real
-  // frame *snaps* the tracks to where they truly are (NFR-CLOUD-004). This is a
-  // display-only bridge; the track data itself is never altered.
-  let lastTracks = [];
-  let lastTime = 0;
-  const deadReckon = { active: false, raf: 0 };
-
   // Rolling history buffers for the comet tails (kept in data-time order).
   let plotTrail = [];   // { lng, lat, has_ssr, time }
   let trackTrail = [];  // { lng, lat, time }
 
-  function stopDeadReckoning() {
-    deadReckon.active = false;
-    if (deadReckon.raf) { cancelAnimationFrame(deadReckon.raf); deadReckon.raf = 0; }
-  }
-
-  function startDeadReckoning(speed) {
-    stopDeadReckoning();
-    const baseTracks = lastTracks;
-    const baseTime = lastTime;
-    const start = performance.now();
-    deadReckon.active = true;
-    const tick = () => {
-      if (!deadReckon.active) return;
-      const wallElapsed = (performance.now() - start) / 1000;
-      const dataElapsed = wallElapsed * speed;   // data-seconds advanced so far
-      const extrapolated = baseTracks.map(t => {
-        const dist = t.ground_speed_mps * dataElapsed;
-        const a = t.track_angle_deg * Math.PI / 180.0;
-        const [lng, lat] = offset(t.lon_deg, t.lat_deg, dist * Math.sin(a), dist * Math.cos(a));
-        return { ...t, lon_deg: lng, lat_deg: lat };
-      });
-      drawTracks(extrapolated, baseTime + dataElapsed);
-      deadReckon.raf = requestAnimationFrame(tick);
-    };
-    deadReckon.raf = requestAnimationFrame(tick);
-  }
-
   // Draw the track dots, uncertainty rings, velocity leaders and labels for a
-  // list of tracks, and update the clock/count. Shared by live frames and the
-  // dead-reckoning loop so both look identical.
+  // list of tracks, and update the clock/count.
   function drawTracks(trackList, clockTime) {
     const tracks = [], unc = [], vel = [];
     for (const t of trackList) {
@@ -417,11 +342,6 @@
   }
 
   function render(frame) {
-    // A real frame arrived: stop any dead-reckoning and snap to the truth.
-    stopDeadReckoning();
-    lastTracks = frame.tracks;
-    lastTime = frame.time;
-
     // Raw-plot comet tail: append this frame's plots, drop those older than
     // PLOT_TRAIL_S data-seconds, render the rest with an age for fading.
     for (const p of (frame.plots || [])) {
@@ -471,15 +391,7 @@
     socket.onclose = () => { statusEl.textContent = 'stream complete'; statusEl.className = 'done'; };
     socket.onerror = () => { statusEl.textContent = 'connection error'; statusEl.className = 'done'; };
     socket.onmessage = (ev) => {
-      const data = JSON.parse(ev.data);
-      if (data.event === 'delay_triggered') {
-        showDelayBanner(data.duration_s);
-        // Bridge the delivery gap by extrapolating the tracks forward at the
-        // playback speed; the next real frame will snap them back to truth.
-        startDeadReckoning(data.speed || 1.0);
-      } else {
-        render(data);
-      }
+      render(JSON.parse(ev.data));
     };
   }
 

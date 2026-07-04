@@ -5,11 +5,13 @@ Firefly läuft jetzt auch in Containern — ideal für Cloud-Deployment, Entwick
 ## Schnellstart
 
 ```bash
-# Demo-Szenario (zwei Flugzeuge): ~5 Sekunden, dann fertig.
+# Ohne Quellen: leerer Himmel + Heartbeat (ADR 0030) — Server, Karte, Probes laufen.
 docker-compose up
 
-# Oder: Frankfurt-Showcase (40 Minuten, drei Radare, acht Flugzeuge).
-FIREFLY_SCENE=frankfurt docker-compose up
+# Mit OpenSky-ADS-B-Quelle (Opt-in; Konto siehe docs/INSTALLATION.md §7):
+FIREFLY_OPENSKY_ENABLED=true \
+FIREFLY_OPENSKY_CREDENTIALS=client_id:client_secret \
+docker-compose up
 ```
 
 Dann im Browser: **http://localhost:8080**
@@ -29,21 +31,22 @@ Dann im Browser: **http://localhost:8080**
 **Service `firefly-server`:**
 - Port: `8080` (HTTP, WebSocket)
 - Umgebungsvariablen:
-  - `FIREFLY_SCENE`: `demo` (default) oder `frankfurt`
+  - Quellen: `FIREFLY_SOURCES` (orchestriert, ADR 0023) oder die
+    Opt-in-Adapter-Envs `FIREFLY_OPENSKY_*`/`FIREFLY_FLARM_*`/`FIREFLY_RADAR_*`
   - `RUST_LOG`: `info` (default) — setze auf `debug` für ausführliches Logging
 - Healthcheck: prüft alle 10 Sekunden
 - Restart-Policy: `unless-stopped`
 
-**Beispiel mit Custom-Szenario:**
+**Beispiel mit ausführlichem Logging:**
 ```bash
-FIREFLY_SCENE=frankfurt RUST_LOG=debug docker-compose up
+FIREFLY_OPENSKY_ENABLED=true RUST_LOG=debug docker-compose up
 ```
 
 ## Lokaler Build (ohne docker-compose)
 
 ```bash
 docker build -t firefly-server:latest .
-docker run -p 8080:8080 -e FIREFLY_SCENE=demo firefly-server:latest
+docker run -p 8080:8080 firefly-server:latest
 ```
 
 ## Cloud-Deployment
@@ -54,7 +57,7 @@ Das Docker-Image eignet sich für:
 - **Cloud Run / App Engine / ECS**: Standard OCI-Image, keine speziellen Dependencies
 
 **12-Factor Config:**
-- Alle Parameter via Env-Vars (`FIREFLY_SCENE`, `RUST_LOG`)
+- Alle Parameter via Env-Vars (`FIREFLY_SOURCES`/Adapter-Envs, `RUST_LOG`)
 - Graceful Shutdown via SIGTERM (der Server horcht darauf)
 - Stdout-Logging (strukturiert via `tracing-subscriber`)
 
@@ -75,10 +78,12 @@ Das Docker-Image eignet sich für:
 ## Mit Wayfinder (End-to-End-ASD)
 
 Standardmäßig sendet der Container **keinen** CAT062-Multicast. Für den
-End-to-End-Test mit Wayfinder empfiehlt sich das Frankfurt-Szenario:
+End-to-End-Test mit Wayfinder den Feed aktivieren und eine Quelle konfigurieren
+(empfohlen: gleich Wayfinders orchestrierten Stack nutzen, der je Feed eine
+Firefly-Instanz spawnt — siehe Wayfinders `DOCKER.md`/`docs/CODESPACES.md`):
 
 ```bash
-FIREFLY_SCENE=frankfurt FIREFLY_CAT062_ENABLED=true docker-compose up
+FIREFLY_OPENSKY_ENABLED=true FIREFLY_CAT062_ENABLED=true docker-compose up
 ```
 
 Multicast (`239.255.0.62:8600`) traversiert Docker's Standard-Bridge-Netz

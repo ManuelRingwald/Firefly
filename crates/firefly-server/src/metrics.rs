@@ -106,15 +106,8 @@ impl Drop for ConnectedClientGuard<'_> {
 
 /// Render `metrics` plus the static `frames_total` gauge as a Prometheus text
 /// exposition (version 0.0.4).
-pub fn render(metrics: &Metrics, frames_total: usize) -> String {
+pub fn render(metrics: &Metrics) -> String {
     let mut out = String::new();
-    write_metric(
-        &mut out,
-        "firefly_scene_frames_total",
-        "gauge",
-        "Number of frames in the currently loaded scene.",
-        frames_total as f64,
-    );
     write_metric(
         &mut out,
         "firefly_ws_clients_connected",
@@ -304,9 +297,8 @@ mod tests {
         metrics.sensors_total.store(3, Ordering::Relaxed);
         metrics.sensors_active.store(2, Ordering::Relaxed);
 
-        let text = render(&metrics, 9);
+        let text = render(&metrics);
 
-        assert!(text.contains("firefly_scene_frames_total 9"));
         assert!(text.contains("firefly_ws_clients_connected 2"));
         assert!(text.contains("firefly_ws_clients_total 5"));
         assert!(text.contains("firefly_cat062_scans_sent_total 42"));

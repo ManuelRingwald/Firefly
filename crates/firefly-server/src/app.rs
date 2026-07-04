@@ -1,7 +1,6 @@
 //! The axum application: shared state, routes and the WebSocket frame pump.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -16,34 +15,22 @@ use firefly_io::Frame;
 
 use crate::live::SnapshotRx;
 use crate::metrics::{ConnectedClientGuard, Metrics};
-use crate::pacing::due_at;
 
-/// How the server obtains the frame stream served to WebSocket clients (ADR 0020).
+/// How the server obtains the frame stream served to WebSocket clients.
 ///
-/// In `Replay` mode the stream is pre-computed once at startup (deterministic,
-/// data-time–driven, bit-exact reproducibility via the `.ffrec` recorder).  In
-/// `Live` mode each newly published [`LiveSnapshot`](crate::live::LiveSnapshot)
-/// from the live tracker is forwarded to every connected client as a [`Frame`].
+/// Since the replay/scene demo mode was removed (ADR 0030) there is exactly one
+/// source: the live tracker. Each newly published
+/// [`LiveSnapshot`](crate::live::LiveSnapshot) is forwarded to every connected
+/// client as a [`Frame`]. The enum shape is kept so the wiring stays explicit
+/// at the construction site.
 #[derive(Clone)]
 pub enum FrameSource {
-    /// Pre-computed scene replayed to every client at `speed` data-s / wall-s.
-    Replay { frames: Arc<Vec<Frame>>, speed: f64 },
     /// Live tracker: each new snapshot from the watch channel becomes a Frame.
     /// `sensor` is stamped into the Frame as the reporting sensor id.
     Live {
         snapshots: SnapshotRx,
         sensor: SensorId,
     },
-}
-
-impl FrameSource {
-    /// Number of pre-computed frames, for the Prometheus gauge. Zero in Live mode.
-    pub fn frame_count(&self) -> usize {
-        match self {
-            FrameSource::Replay { frames, .. } => frames.len(),
-            FrameSource::Live { .. } => 0,
-        }
-    }
 }
 
 /// Shared, read-only application state handed to every request.
@@ -92,19 +79,16 @@ async fn health() -> impl IntoResponse {
 
 /// Readiness probe: ready to accept load.
 ///
-/// In Replay mode the frame stream is fully built at startup, so the server is
-/// always ready. In Live mode the server is only ready after the first
-/// successful OpenSky poll has delivered at least one airborne aircraft — until
-/// then `/ready` returns 503 so Kubernetes will not route traffic to a pod that
-/// has no air picture yet (ADR 0020, AP9.4c-4).
+/// Ready once the first source plot has arrived (`live_ready`, ADR 0020,
+/// AP9.4c-4) — until then 503, so Kubernetes will not route traffic to a pod
+/// that has no air picture yet. An instance deliberately running with **no**
+/// sources is ready immediately (main pre-sets the flag): its empty sky IS the
+/// complete picture (ADR 0030).
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
-    let is_ready = match &state.source {
-        FrameSource::Replay { .. } => true,
-        FrameSource::Live { .. } => state
-            .metrics
-            .live_ready
-            .load(std::sync::atomic::Ordering::Relaxed),
-    };
+    let is_ready = state
+        .metrics
+        .live_ready
+        .load(std::sync::atomic::Ordering::Relaxed);
     if is_ready {
         (StatusCode::OK, "ready")
     } else {
@@ -119,7 +103,7 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     (
         [("Content-Type", "text/plain; version=0.0.4; charset=utf-8")],
-        crate::metrics::render(&state.metrics, state.source.frame_count()),
+        crate::metrics::render(&state.metrics),
     )
 }
 
@@ -178,29 +162,11 @@ async fn ws_handler(
         .into_response()
 }
 
-/// Wall-clock pause inserted when a client asks to see the "delay" demo
-/// (Häppchen 3.5, NFR-CLOUD-004). Purely a delivery-edge effect — the frame
-/// stream itself, and therefore every track id and position, is unchanged.
-pub const DELAY_TRIGGER_PAUSE: Duration = Duration::from_secs(5);
-
-/// Replay the whole frame stream to one client, paced by data-time.
-///
-/// All wall-clock waiting lives here, at the delivery edge — never in the
-/// tracker (see [`crate::pacing`]). If the client goes away mid-stream the send
-/// fails and we simply stop.
-///
-/// While waiting, the socket is also watched for an incoming `"delay"` text
-/// message. On receipt, an [`event: "delay_triggered"`](DELAY_TRIGGER_PAUSE)
-/// notice is sent and the wait is extended by [`DELAY_TRIGGER_PAUSE`] — a
-/// deliberately paused *delivery* that demonstrates the tracks resume exactly
-/// where data-time says they should (NFR-CLOUD-004).
+/// Pump the live frame stream to one connected WebSocket client.
 async fn pump_frames(socket: WebSocket, state: AppState) {
     let _client_guard = ConnectedClientGuard::new(&state.metrics);
-
-    match state.source {
-        FrameSource::Replay { frames, speed } => pump_replay(socket, frames, speed).await,
-        FrameSource::Live { snapshots, sensor } => pump_live(socket, snapshots, sensor).await,
-    }
+    let FrameSource::Live { snapshots, sensor } = state.source;
+    pump_live(socket, snapshots, sensor).await
 }
 
 /// Stream live-tracker snapshots to one WebSocket client (ADR 0020, AP9.4c-3).
@@ -237,82 +203,6 @@ async fn pump_live(mut socket: WebSocket, mut rx: SnapshotRx, sensor: SensorId) 
     }
 }
 
-/// Pump a pre-computed Replay frame sequence to one WebSocket client.
-async fn pump_replay(mut socket: WebSocket, frames: Arc<Vec<Frame>>, speed: f64) {
-    tracing::info!(frames = frames.len(), "client connected; replaying scene");
-    // Absolute pacing: every frame's due time is measured from this fixed
-    // origin and the stream's first data-time, so a delivery hiccup is caught
-    // up afterwards instead of shifting the whole schedule (see `crate::pacing`).
-    let origin = Instant::now();
-    let first = frames.first().map(|f| f.time.as_secs());
-    let mut sent = 0usize;
-
-    for frame in frames.iter() {
-        let delay = match first {
-            Some(first) => due_at(origin, first, frame.time.as_secs(), speed)
-                .saturating_duration_since(Instant::now()),
-            None => Duration::ZERO,
-        };
-        if !wait_or_handle_delay_trigger(&mut socket, delay, speed).await {
-            tracing::info!(sent, "client disconnected mid-stream");
-            return;
-        }
-
-        let json = match frame.to_json() {
-            Ok(json) => json,
-            Err(error) => {
-                tracing::error!(%error, "failed to serialise frame; skipping");
-                continue;
-            }
-        };
-
-        if socket.send(Message::Text(json.into())).await.is_err() {
-            tracing::info!(sent, "client disconnected mid-stream");
-            return;
-        }
-        sent += 1;
-    }
-
-    tracing::info!(sent, "scene complete; closing");
-    let _ = socket.send(Message::Close(None)).await;
-}
-
-/// Wait out `delay`, while watching for a `"delay"` trigger from the client.
-///
-/// Each time the trigger arrives, an `delay_triggered` event is sent and the
-/// wait restarts from [`DELAY_TRIGGER_PAUSE`]. Returns `false` if the socket
-/// closed or errored, in which case the caller should stop.
-async fn wait_or_handle_delay_trigger(socket: &mut WebSocket, delay: Duration, speed: f64) -> bool {
-    let sleep = tokio::time::sleep(delay);
-    tokio::pin!(sleep);
-
-    loop {
-        tokio::select! {
-            _ = &mut sleep => return true,
-            message = socket.recv() => match message {
-                Some(Ok(Message::Text(text))) if text == "delay" => {
-                    tracing::info!(pause_s = DELAY_TRIGGER_PAUSE.as_secs_f64(), "delay trigger received");
-                    // The notice carries the playback speed so the client can
-                    // dead-reckon the tracks forward over the pause at the same
-                    // data-time rate the live stream would have advanced.
-                    let notice = format!(
-                        r#"{{"event":"delay_triggered","duration_s":{},"speed":{}}}"#,
-                        DELAY_TRIGGER_PAUSE.as_secs_f64(),
-                        speed,
-                    );
-                    if socket.send(Message::Text(notice.into())).await.is_err() {
-                        return false;
-                    }
-                    sleep.as_mut().reset(tokio::time::Instant::now() + DELAY_TRIGGER_PAUSE);
-                }
-                Some(Ok(Message::Close(_))) | None => return false,
-                Some(Err(_)) => return false,
-                _ => {}
-            },
-        }
-    }
-}
-
 const INDEX_HTML: &str = include_str!("../static/index.html");
 
 #[cfg(test)]
@@ -322,13 +212,21 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt; // for `oneshot`
 
+    /// A live-source state whose readiness flag is pre-set — the shape every
+    /// route test needs since live is the only mode (ADR 0030). The watch
+    /// sender is dropped deliberately: no test here pumps frames.
     fn state() -> AppState {
+        use std::sync::atomic::Ordering;
+        use tokio::sync::watch;
+        let (_tx, rx) = watch::channel(crate::live::LiveSnapshot::empty());
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        metrics.live_ready.store(true, Ordering::Relaxed);
         AppState {
-            source: FrameSource::Replay {
-                frames: Arc::new(crate::scene::demo_frames()),
-                speed: 1.0,
+            source: FrameSource::Live {
+                snapshots: rx,
+                sensor: firefly_core::SensorId(1),
             },
-            metrics: Arc::new(crate::metrics::Metrics::default()),
+            metrics,
             ws_token: None,
             ws_allowed_origin: None,
         }
@@ -348,15 +246,17 @@ mod tests {
         assert_eq!(get_status("/health").await, StatusCode::OK);
     }
 
-    /// The readiness probe answers 200 in Replay mode. REQ: FR-NET-001
+    /// The readiness probe answers 200 once `live_ready` is set (here pre-set
+    /// by the test state, as main does for a deliberately source-less
+    /// instance — ADR 0030). REQ: FR-NET-001
     #[tokio::test]
     async fn ready_probe_is_ok() {
         assert_eq!(get_status("/ready").await, StatusCode::OK);
     }
 
-    /// In Live mode, `/ready` returns 503 until the first ADS-B poll succeeds
-    /// (ADR 0020, AP9.4c-4). The server should not report ready to Kubernetes
-    /// while it has no air picture yet.
+    /// `/ready` returns 503 until the first source plot arrives (ADR 0020,
+    /// AP9.4c-4). The server should not report ready to Kubernetes while it
+    /// has no air picture yet.
     #[tokio::test]
     async fn ready_probe_returns_503_in_live_mode_before_first_poll() {
         use tokio::sync::watch;
@@ -413,10 +313,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    /// The metrics endpoint answers 200 with a Prometheus exposition of the
-    /// scene's frame count. REQ: NFR-OBS-001
+    /// The metrics endpoint answers 200 with a Prometheus exposition.
+    /// REQ: NFR-OBS-001
     #[tokio::test]
-    async fn metrics_endpoint_exposes_frame_count() {
+    async fn metrics_endpoint_renders_prometheus() {
         let response = router(state())
             .oneshot(
                 Request::builder()
@@ -432,7 +332,7 @@ mod tests {
             .await
             .unwrap();
         let text = String::from_utf8(body.to_vec()).unwrap();
-        assert!(text.contains("firefly_scene_frames_total"));
+        assert!(text.contains("firefly_ws_clients_connected"));
     }
 
     /// The index page is served. REQ: FR-NET-001
@@ -467,15 +367,6 @@ mod tests {
             INDEX_HTML.contains("position_uncertainty_m"),
             "draws the uncertainty ring"
         );
-        // The delay demo (Häppchen 3.5, NFR-CLOUD-004) is wired up.
-        assert!(
-            INDEX_HTML.contains("delay-btn") && INDEX_HTML.contains("'delay'"),
-            "offers the delay-trigger button"
-        );
-        assert!(
-            INDEX_HTML.contains("delay_triggered"),
-            "shows the delay banner on the server's notice"
-        );
     }
 
     // ---------------------------------------------------------------------------
@@ -489,27 +380,15 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     fn state_with_token(token: &str) -> AppState {
-        AppState {
-            source: FrameSource::Replay {
-                frames: Arc::new(crate::scene::demo_frames()),
-                speed: 1.0,
-            },
-            metrics: Arc::new(crate::metrics::Metrics::default()),
-            ws_token: Some(token.to_string()),
-            ws_allowed_origin: None,
-        }
+        let mut s = state();
+        s.ws_token = Some(token.to_string());
+        s
     }
 
     fn state_with_origin(origin: &str) -> AppState {
-        AppState {
-            source: FrameSource::Replay {
-                frames: Arc::new(crate::scene::demo_frames()),
-                speed: 1.0,
-            },
-            metrics: Arc::new(crate::metrics::Metrics::default()),
-            ws_token: None,
-            ws_allowed_origin: Some(origin.to_string()),
-        }
+        let mut s = state();
+        s.ws_allowed_origin = Some(origin.to_string());
+        s
     }
 
     fn headers(pairs: &[(&str, &str)]) -> HeaderMap {

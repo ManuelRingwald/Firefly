@@ -1,5 +1,9 @@
-//! Binary entry point: build the demo scene or start the live tracker, then
-//! serve it with graceful shutdown and structured logging.
+//! Binary entry point: start the sources-driven live tracker and serve it with
+//! graceful shutdown and structured logging. The tracker's inputs come from
+//! `FIREFLY_SOURCES` (orchestrated contract, ADR 0023) or the standalone
+//! `FIREFLY_OPENSKY_*`/`FIREFLY_FLARM_*`/`FIREFLY_RADAR_*` env config; with no
+//! active source the instance serves an empty sky and still emits the CAT065
+//! heartbeat. The earlier replay/scene demo mode was removed (ADR 0030).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,8 +18,8 @@ use firefly_radar::RadarConfig;
 use firefly_server::sources;
 use firefly_server::{
     build_live_tracker_multi, live_system_reference_point, router, run_live_cat062,
-    run_live_tracker, scene, scene_reference_point, AppState, FrameSource, LiveSnapshot,
-    LiveTracker, Metrics, RadarSensor, Scene, ServerConfig, ServerMode, SnapshotRx,
+    run_live_tracker, AppState, FrameSource, LiveSnapshot, LiveTracker, Metrics, RadarSensor,
+    ServerConfig, SnapshotRx,
 };
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
@@ -27,9 +31,19 @@ async fn main() {
     let config = ServerConfig::from_env();
     tracing::info!(
         port = config.port,
-        mode = ?config.mode,
-        "starting Firefly server"
+        "starting Firefly server (sources-driven live tracker)"
     );
+
+    // The replay/scene demo mode was removed (ADR 0030). Tolerate the old knobs
+    // loudly instead of failing, per the 12-factor fallback rule.
+    for legacy in ["FIREFLY_MODE", "FIREFLY_SCENE", "FIREFLY_SPEED"] {
+        if std::env::var_os(legacy).is_some() {
+            tracing::warn!(
+                var = legacy,
+                "deprecated and ignored since ADR 0030 (replay/scene mode removed; the server always runs the live tracker)"
+            );
+        }
+    }
 
     let metrics = Arc::new(Metrics::default());
 
@@ -51,13 +65,11 @@ async fn main() {
         );
     }
 
-    // CAT065 heartbeat runs in both modes: wall-clock liveness signal.
+    // CAT065 heartbeat: wall-clock liveness signal, independent of the sources —
+    // it is what lets the ASD tell "empty sky" from "dead feed" (ADR 0018).
     spawn_cat065_heartbeat(Arc::clone(&metrics));
 
-    let state = match config.mode {
-        ServerMode::Replay => build_replay_state(config, metrics, ws_token, ws_allowed_origin),
-        ServerMode::Live => build_live_state(config, metrics, ws_token, ws_allowed_origin).await,
-    };
+    let state = build_live_state(metrics, ws_token, ws_allowed_origin).await;
 
     let listener = match TcpListener::bind(("0.0.0.0", config.port)).await {
         Ok(listener) => listener,
@@ -82,152 +94,13 @@ async fn main() {
 }
 
 // ---------------------------------------------------------------------------
-// Replay mode
+// Live tracker (the only mode, ADR 0030)
 // ---------------------------------------------------------------------------
 
-/// Build the `AppState` for the deterministic Replay mode: load the pre-computed
-/// scene, spawn the replay CAT062 feed, and optionally start the OpenSky poller
-/// in log-only mode if `FIREFLY_OPENSKY_ENABLED=true`.
-fn build_replay_state(
-    config: ServerConfig,
-    metrics: Arc<Metrics>,
-    ws_token: Option<String>,
-    ws_allowed_origin: Option<String>,
-) -> AppState {
-    let frames = match config.scene {
-        Scene::Demo => scene::demo_frames(),
-        Scene::Frankfurt => scene::frankfurt_frames(),
-    };
-    tracing::info!(
-        speed = config.speed,
-        scene = ?config.scene,
-        frames = frames.len(),
-        "replay mode"
-    );
-
-    // The system reference point for I062/100 is the scene origin (ADR 0021),
-    // so the multicast feed's stereographic projection is coherent with the
-    // tracking frame the scene was computed in.
-    let reference = scene_reference_point(config.scene);
-    spawn_cat062_multicast(config.speed, config.scene, reference, Arc::clone(&metrics));
-    spawn_opensky_poller_log_only();
-
-    // CAT063 sensor status — all sensors pre-seeded as active in replay mode.
-    let sensor_ids = scene::scene_sensor_ids(config.scene);
-    let sensor_monitor = Arc::new(SensorHealthMonitor::new_replay(sensor_ids));
-    spawn_cat063_sensor_sender(sensor_monitor, Arc::clone(&metrics));
-
-    AppState {
-        source: FrameSource::Replay {
-            frames: Arc::new(frames),
-            speed: config.speed,
-        },
-        metrics,
-        ws_token,
-        ws_allowed_origin,
-    }
-}
-
-/// Spawn the CAT062 UDP-multicast feed for Replay mode, if enabled
-/// (`FIREFLY_CAT062_ENABLED=true`). Replays the same scan stream the web map
-/// shows, paced into wall-clock at `speed` (ADR 0006). Disabled by default.
-fn spawn_cat062_multicast(speed: f64, scene: Scene, reference: Wgs84, metrics: Arc<Metrics>) {
-    let config = MulticastConfig::from_env();
-    if !config.enabled {
-        tracing::info!(
-            "CAT062 multicast feed disabled (set FIREFLY_CAT062_ENABLED=true to enable)"
-        );
-        return;
-    }
-
-    let destination = config.destination();
-    let encoder = Cat062Encoder::new(config.data_source(), reference, 0.0);
-    let scans = match scene {
-        Scene::Demo => scene::demo_scans(),
-        Scene::Frankfurt => scene::frankfurt_scans(),
-    };
-    tracing::info!(%destination, scans = scans.len(), "CAT062 multicast feed enabled");
-
-    tokio::spawn(async move {
-        let socket = match firefly_multicast::sender_socket().await {
-            Ok(socket) => socket,
-            Err(error) => {
-                tracing::error!(%error, "failed to open CAT062 multicast socket");
-                return;
-            }
-        };
-        let metrics_scan = Arc::clone(&metrics);
-        match firefly_multicast::run(&socket, destination, &encoder, &scans, speed, move |n| {
-            metrics_scan
-                .tracks_active
-                .store(n as u64, std::sync::atomic::Ordering::Relaxed);
-        })
-        .await
-        {
-            Ok(sent) => {
-                metrics
-                    .cat062_scans_sent_total
-                    .fetch_add(sent as u64, std::sync::atomic::Ordering::Relaxed);
-                tracing::info!(sent, "CAT062 multicast feed complete");
-            }
-            Err(error) => {
-                metrics
-                    .cat062_send_errors_total
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                tracing::error!(%error, "CAT062 multicast feed stopped");
-            }
-        }
-    });
-}
-
-/// Optionally start the OpenSky poller in log-only mode (Replay mode only).
-/// Disabled unless `FIREFLY_OPENSKY_ENABLED=true`. Plots are logged but not
-/// fed into a tracker — this path is for diagnostics and manual inspection.
-fn spawn_opensky_poller_log_only() {
-    let config = OpenSkyConfig::from_env();
-    if !config.enabled {
-        tracing::info!(
-            "OpenSky ADS-B poller disabled \
-             (set FIREFLY_OPENSKY_ENABLED=true to enable, \
-              or use FIREFLY_MODE=live to start the live tracker)"
-        );
-        return;
-    }
-
-    tracing::info!(
-        lat_min = config.lat_min,
-        lat_max = config.lat_max,
-        lon_min = config.lon_min,
-        lon_max = config.lon_max,
-        poll_interval_secs = config.poll_interval_secs,
-        sensor_id = config.sensor_id.0,
-        "OpenSky ADS-B poller enabled (log-only; FIREFLY_MODE=live to track)"
-    );
-
-    tokio::spawn(async move {
-        let poller = OpenSkyPoller::new(config);
-        poller
-            .run(
-                |plots| {
-                    tracing::info!(count = plots.len(), "OpenSky plots received (log-only)");
-                },
-                |e| {
-                    tracing::warn!(%e, "OpenSky poll error (log-only mode)");
-                },
-            )
-            .await;
-    });
-}
-
-// ---------------------------------------------------------------------------
-// Live mode
-// ---------------------------------------------------------------------------
-
-/// Build the `AppState` for Live mode: create the tracker + channels, spawn the
-/// OpenSky poller (unconditional in Live mode — it is the plot source), spawn
-/// the live tracker task, and optionally start the live CAT062 feed.
+/// Build the `AppState`: create the tracker + channels, spawn one adapter per
+/// configured source, spawn the live tracker task, and optionally start the
+/// live CAT062 feed.
 async fn build_live_state(
-    _config: ServerConfig,
     metrics: Arc<Metrics>,
     ws_token: Option<String>,
     ws_allowed_origin: Option<String>,
@@ -241,6 +114,16 @@ async fn build_live_state(
     let opensky = resolved.opensky;
     let flarm = resolved.flarm;
     let radar = resolved.radar;
+
+    // With no active source adapter the tracker idles and the instance serves a
+    // deliberate EMPTY SKY (plus the CAT065 heartbeat). That is the complete
+    // picture then, so report ready immediately — live_ready is otherwise set
+    // by the first plot of an adapter, which will never come (ADR 0030).
+    if opensky.is_empty() && flarm.is_empty() && radar.is_empty() {
+        metrics
+            .live_ready
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 
     // Representative across all sources: union bbox (tracking-frame origin), output
     // cadence, and a placeholder sensor id. FLARM and radar are folded in
@@ -402,9 +285,18 @@ fn resolve_live_sources() -> sources::ResolvedSources {
     let json = match std::env::var("FIREFLY_SOURCES") {
         Ok(j) if !j.trim().is_empty() => j,
         _ => {
-            // Standalone/dev: OpenSky is the implicit primary source in Live mode;
-            // FLARM/OGN (ADR 0026) and radar ASTERIX (ADR 0028) are opt-in via
-            // FIREFLY_FLARM_ENABLED / FIREFLY_RADAR_ENABLED.
+            // Standalone/dev: every adapter is opt-in via its _ENABLED flag —
+            // OpenSky (FIREFLY_OPENSKY_ENABLED), FLARM/OGN (ADR 0026,
+            // FIREFLY_FLARM_ENABLED) and radar ASTERIX (ADR 0028,
+            // FIREFLY_RADAR_ENABLED). Since the live tracker became the ONLY
+            // mode (ADR 0030) a bare start must not poll external services
+            // unasked: nothing enabled → idle tracker, empty sky + heartbeat.
+            let opensky_cfg = OpenSkyConfig::from_env();
+            let opensky = if opensky_cfg.enabled {
+                vec![opensky_cfg]
+            } else {
+                Vec::new()
+            };
             let flarm_cfg = FlarmConfig::from_env();
             let flarm = if flarm_cfg.enabled {
                 vec![flarm_cfg]
@@ -418,7 +310,7 @@ fn resolve_live_sources() -> sources::ResolvedSources {
                 Vec::new()
             };
             return sources::ResolvedSources {
-                opensky: vec![OpenSkyConfig::from_env()],
+                opensky,
                 flarm,
                 radar,
                 skipped: Vec::new(),

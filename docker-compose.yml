@@ -8,8 +8,16 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Choose the scenario: "demo" (two aircraft) or "frankfurt" (showcase).
-      FIREFLY_SCENE: ${FIREFLY_SCENE:-demo}
+      # Live sources (ADR 0023): either the orchestrated FIREFLY_SOURCES JSON or
+      # the standalone per-adapter env config. With nothing set the server runs
+      # an idle tracker: empty sky + CAT065 heartbeat (ADR 0030). Example:
+      #   FIREFLY_OPENSKY_ENABLED: "true"
+      #   FIREFLY_OPENSKY_LAT_MIN: "49.0"   # …_LAT_MAX/_LON_MIN/_LON_MAX
+      #   FIREFLY_OPENSKY_CREDENTIALS: "client_id:client_secret"  # OAuth2 (ADR 0024)
+      FIREFLY_SOURCES: ${FIREFLY_SOURCES:-}
+      # CAT062/065/063 multicast feed (off by default; the wire contract with
+      # the ASD — docs/ICD-CAT062.md):
+      #   FIREFLY_CAT062_ENABLED: "true"
       # Structured logging; set to "debug" for verbose output.
       RUST_LOG: ${RUST_LOG:-info}
     healthcheck:

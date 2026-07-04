@@ -13,9 +13,12 @@
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
 | `FIREFLY_PORT` | u16 | `8080` | TCP-Port des HTTP/WebSocket-Servers |
-| `FIREFLY_MODE` | string | `replay` | Betriebsmodus: `replay` (vorberechnete Szene) oder `live` (Echtzeit-ADS-B via OpenSky). `live` impliziert OpenSky als Plot-Quelle. |
-| `FIREFLY_SCENE` | string | `demo` | Szene (nur Replay-Modus): `demo` (2 Flugzeuge, 1 Radar) oder `frankfurt` (8 Flugzeuge, 3 Radare) |
-| `FIREFLY_SPEED` | f64 | `1.0` | Wiedergabe-Geschwindigkeit (nur Replay-Modus). `2.0` = doppelte Geschwindigkeit. Muss positiv und endlich sein. |
+
+> **Entfallen (ADR 0030):** `FIREFLY_MODE`, `FIREFLY_SCENE` und `FIREFLY_SPEED`
+> — der Replay-/Szenen-Modus wurde ausgebaut; der Server läuft immer als
+> quellen-getriebener Live-Tracker (Quellen via `FIREFLY_SOURCES`, ADR 0023,
+> oder die Adapter-Envs unten — alle Opt-in). Gesetzte Alt-Variablen werden
+> mit Warn-Log ignoriert. Ohne aktive Quelle: leerer Himmel + CAT065-Heartbeat.
 
 ### 1.2 CAT062-Multicast-Feed (Wayfinder-Schnittstelle)
 
@@ -26,14 +29,11 @@
 | `FIREFLY_CAT062_PORT` | u16 | `8600` | UDP-Port |
 | `FIREFLY_CAT062_SAC` | u8 | `25` | System Area Code (I062/010) |
 | `FIREFLY_CAT062_SIC` | u8 | `2` | System Identification Code (I062/010) |
-| `FIREFLY_SYSTEM_REF_LAT` | f64 | Bbox-Mitte¹ | **Nur Live-Modus.** Breitengrad des System-Referenzpunkts (ADR 0021) — speist Tracking-Frame **und** I062/100-Projektion |
-| `FIREFLY_SYSTEM_REF_LON` | f64 | Bbox-Mitte¹ | **Nur Live-Modus.** Längengrad des System-Referenzpunkts |
+| `FIREFLY_SYSTEM_REF_LAT` | f64 | Bbox-Mitte¹ | Breitengrad des System-Referenzpunkts (ADR 0021) — speist Tracking-Frame **und** I062/100-Projektion |
+| `FIREFLY_SYSTEM_REF_LON` | f64 | Bbox-Mitte¹ | Längengrad des System-Referenzpunkts |
 
-¹ Default = Mitte der OpenSky-Bounding-Box (`FIREFLY_OPENSKY_LAT/LON_*`). Im
-**Replay-Modus** ist der System-Referenzpunkt fest der Szenen-Ursprung
-(Demo: 48/11, Frankfurt: 50,04/8,56) und **nicht** über Env überschreibbar —
-so bleibt I062/100 kohärent mit der Szene (ADR 0021). I062/105 (WGS84) ist davon
-unabhängig und immer absolut.
+¹ Default = Mitte der Union-Bounding-Box der konfigurierten Quellen (ADR 0021/
+0023). I062/105 (WGS84) ist davon unabhängig und immer absolut.
 
 ### 1.3 CAT065-Heartbeat (Feed-Liveness)
 
@@ -56,10 +56,9 @@ sobald **Feed *und* Heartbeat** aktiv sind — kein eigener Enable-Schalter.
 | `FIREFLY_CAT063_PERIOD` | f64 | `5.0` | Intervall der Sensor-Status-Blöcke in Wanduhrsekunden. Langsamer als der Heartbeat, weil Sensor-Liveness sich auf der Skala der Antennenumläufe (4–12 s) ändert |
 
 **Degradiert-Kriterium:** Ein Sensor gilt als aktiv, solange er innerhalb von
-`2.5 × scan_period` einen Plot lieferte, sonst degradiert (NOGO `0x40`). Im
-**Replay-Modus** sind alle Szenen-Sensoren dauerhaft aktiv (deterministische
-Wiedergabe meldet keine Degradierung); im **Live-Modus** folgt die Liveness dem
-echten OpenSky-Plot-Eingang.
+`2.5 × scan_period` einen Plot lieferte, sonst degradiert (NOGO `0x40`). Die
+Liveness folgt dem echten Plot-Eingang des jeweiligen Quell-Adapters
+(OpenSky/FLARM/Radar).
 
 ### 1.5 OpenSky Network ADS-B-Adapter
 
@@ -176,7 +175,7 @@ Firefly schreibt strukturierte Logs im **JSON-Format** (via `tracing`). Jede
 Zeile ist ein eigenständiges JSON-Objekt:
 
 ```json
-{"timestamp":"2026-06-18T10:23:01.442Z","level":"INFO","target":"firefly_server","message":"starting Firefly server","port":8080,"speed":1.0,"scene":"Frankfurt","frames":312}
+{"timestamp":"2026-07-04T10:23:01.442Z","level":"INFO","target":"firefly_server","message":"starting Firefly server (sources-driven live tracker)","port":8080}
 ```
 
 ### 2.2 Verbosity steuern
@@ -236,7 +235,6 @@ Content-Type: text/plain; version=0.0.4
 
 | Metrik | Typ | Bedeutung |
 |--------|-----|-----------|
-| `firefly_scene_frames_total` | gauge | Anzahl Frames in der aktuell geladenen Szene |
 | `firefly_ws_clients_connected` | gauge | Aktuell verbundene WebSocket-Clients |
 | `firefly_ws_clients_total` | counter | Gesamt-WebSocket-Verbindungen seit Start |
 | `firefly_cat062_scans_sent_total` | counter | Gesendete CAT062-Datenblöcke (Scans) |
@@ -317,17 +315,19 @@ livenessProbe:
 
 Prüft, ob der Server Traffic verarbeiten kann.
 
-- **Replay-Modus:** Immer `200 ready` — die Szene ist beim Start vollständig geladen.
-- **Live-Modus:** `503 not ready` bis zum ersten erfolgreichen OpenSky-Poll (d. h.
-  mindestens ein Luftfahrzeug gemeldet). Danach `200 ready`. Kubernetes sendet damit
-  keinen Traffic an einen Pod, der noch kein Luftlagebild hat (ADR 0020, AP9.4c-4).
+- `503 not ready`, bis der erste Plot einer konfigurierten Quelle eingetroffen
+  ist. Danach `200 ready`. Kubernetes sendet damit keinen Traffic an einen Pod,
+  der noch kein Luftlagebild hat (ADR 0020, AP9.4c-4).
+- **Ausnahme:** Eine Instanz **ohne** konfigurierte Quellen ist **sofort**
+  `200 ready` — ihr leerer Himmel ist das vollständige Lagebild (ADR 0030);
+  der CAT065-Heartbeat läuft unabhängig davon.
 
 ```bash
-# Replay-Modus oder nach erstem Poll im Live-Modus:
+# nach erstem Quell-Plot (oder sofort, wenn quellenlos):
 curl http://localhost:8080/ready
 # → ready  (HTTP 200)
 
-# Live-Modus vor erstem Poll:
+# vor dem ersten Quell-Plot:
 curl -o /dev/null -w "%{http_code}" http://localhost:8080/ready
 # → 503
 ```
@@ -419,23 +419,21 @@ Kubernetes-Empfehlung: `terminationGracePeriodSeconds: 30` im Pod-Spec.
 
 ---
 
-## 8. Betriebsmodus: Replay vs. Live (AP9.4c-0…4, ✅ implementiert)
+## 8. Betriebsart: quellen-getriebener Live-Tracker (einziger Modus, ADR 0030)
 
-| Modus | Beschreibung | Aktivierung |
-|-------|--------------|-------------|
-| **Replay** (Standard) | Vorberechnete Szene (`demo` oder `frankfurt`) in Wanduhrzeit abgespielt | `FIREFLY_MODE=replay` (Default, auch wenn `FIREFLY_MODE` nicht gesetzt) |
-| **Live** ✅ | OpenSky ADS-B-Daten, Tracker läuft in Echtzeit; CAT062 + WebSocket-Feed live | `FIREFLY_MODE=live` (impliziert OpenSky als Plot-Quelle) |
+Der Server betreibt **immer** den Live-Tracker: die konfigurierten Quellen
+(`FIREFLY_SOURCES`, ADR 0023 — oder standalone die Opt-in-Adapter-Envs) speisen
+Plots in den langlebigen Tracker; Snapshots gehen über einen `watch`-Kanal an
+den WebSocket- und den CAT062-Ausgang. Alle Plots werden in eine
+`.ffplots`-Datei aufgezeichnet (ADR 0020) — für deterministisches Replay
+(`firefly-replay-plots`, NFR-REPRO-001) und Debugging.
 
-Im Live-Modus startet Firefly ohne vorberechnete Szene. OpenSky-Plots werden
-in den Tracker eingespeist, Snapshots über `watch`-Kanal an den WebSocket-
-und CAT062-Ausgang geliefert. Gleichzeitig werden alle Plots in eine
-`.ffplots`-Datei aufgezeichnet (ADR 0020) — für deterministisches Replay und
-Debugging.
-
-> **Hinweis:** `FIREFLY_OPENSKY_ENABLED=true` aktiviert den OpenSky-Poller
-> im Replay-Modus als **Log-only**-Pfad (Plots werden geloggt, aber nicht in
-> den Tracker eingespeist). Für echten Live-Betrieb ausschließlich
-> `FIREFLY_MODE=live` verwenden.
+Ohne aktive Quelle läuft der Tracker leer: **leerer Himmel + CAT065-Heartbeat**
+— so unterscheidet der Konsument einen ruhigen Himmel von einem toten Feed
+(ADR 0018). Der frühere Replay-/Szenen-Modus (`FIREFLY_MODE`/`FIREFLY_SCENE`/
+`FIREFLY_SPEED`) wurde ausgebaut (ADR 0030); die Frankfurt-Mehrradar-Szene
+lebt als Regressions-Fixture in `firefly-player/tests/frankfurt_regression.rs`
+weiter.
 
 ---
 
@@ -487,8 +485,6 @@ spec:
           ports:
             - containerPort: 8080
           env:
-            - name: FIREFLY_SCENE
-              value: "frankfurt"
             - name: FIREFLY_CAT062_ENABLED
               value: "true"
             - name: FIREFLY_OPENSKY_ENABLED

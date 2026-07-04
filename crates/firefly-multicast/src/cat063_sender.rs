@@ -86,7 +86,10 @@ mod tests {
         let sender = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
 
         let encoder = Cat063Encoder::new(0);
-        let monitor = Arc::new(SensorHealthMonitor::new_replay([SensorId(1), SensorId(2)]));
+        let monitor = Arc::new(SensorHealthMonitor::new_preseeded([
+            SensorId(1),
+            SensorId(2),
+        ]));
 
         let sent_count = Arc::new(AtomicUsize::new(0));
         let sent_in_task = Arc::clone(&sent_count);
