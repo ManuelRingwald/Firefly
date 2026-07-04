@@ -43,8 +43,12 @@ Dann im Browser öffnen: **http://localhost:8080**
 
 ## Was du im Browser siehst
 
-Nach dem Start zeigt die Karte eine **Demo-Szene**: zwei Flugzeuge, die unter
-einem einzelnen Radar fliegen. Jedes Flugzeug erscheint als Punkt mit:
+Die eingebaute Karte (http://localhost:8080) ist Fireflys **Diagnose-Sicht**
+auf den laufenden Tracker. Was sie zeigt, hängt von den konfigurierten
+**Quellen** ab (ADR 0023/0030): ohne Quelle bleibt der Himmel **leer** — das
+ist kein Fehler, sondern der ehrliche Zustand (der CAT065-Heartbeat läuft
+trotzdem). Mit einer Quelle (z. B. OpenSky-ADS-B, siehe unten) erscheint jedes
+Luftfahrzeug als Punkt mit:
 
 - einem **Pfeil** (Richtung und Geschwindigkeit über Grund),
 - einer **Farbe**, die den Status anzeigt (bestätigter Track = grün,
@@ -57,40 +61,28 @@ einem einzelnen Radar fliegen. Jedes Flugzeug erscheint als Punkt mit:
 
 | Knopf | Was er tut |
 |-------|-----------|
-| **„Verzug simulieren (5 s)"** | Simuliert eine 5 Sekunden lange Zustellverzögerung — die Berechnung läuft unverändert weiter, nur die Anzeige hängt kurz. Zeigt: Firefly ist *robust* gegenüber holpriger Netzwerkzustellung (siehe [M3 — Vom Tracker zum Live-Lagebild](docs/milestones/M3-live-picture.md)). **Hinweis:** Dieser Verzug betrifft ausschließlich den internen Browser-WebSocket (`/ws`) dieses ASD. Der CAT062/UDP-Multicast-Feed — den Wayfinder empfängt — läuft als eigenständiger Task und ist davon **nicht** betroffen. |
 | **„airspaces"** | Blendet eine Luftraum-Übersicht (TMA, CTR, Sperrgebiet) als violette Flächen über die Karte. Beispieldaten rund um Frankfurt (`crates/firefly-server/static/airspaces.geojson`). |
-| **„raw plots"** | Blendet die **rohen Radar-Messungen** ein (kleine rote Punkte) — das, was der Tracker als *Input* bekommt, bevor daraus glatte Tracks werden. Gut zum Vergleich: „was misst das Radar" vs. „was berechnet der Tracker". |
+| **„raw plots"** | Blendet die **rohen Messungen** ein (kleine rote Punkte) — das, was der Tracker als *Input* bekommt, bevor daraus glatte Tracks werden. Gut zum Vergleich: „was misst der Sensor" vs. „was berechnet der Tracker". |
 
-### Die Frankfurt-Showcase-Szene
+### Quellen konfigurieren (Beispiel: OpenSky-ADS-B)
 
-Die Demo-Szene ist bewusst klein und einfach. Für ein realistischeres Bild —
-**drei Radarstandorte, acht Flugzeuge**, mit überlappenden Reichweiten,
-Kurven, Warteschleife und einem Flugzeug ohne Transponder — gibt es die
-**Frankfurt-Szene**. Sie läuft 240 Sekunden lang und zeigt typische
-Situationen, für die der Tracker extra Mechanik braucht:
-
-- zwei parallele Anflüge mit nur ~150 m Abstand (JPDA — die Tracks dürfen
-  sich nicht vertauschen oder verschmelzen),
-- ein Abflug mit Kurve (IMM — Manöver-Erkennung),
-- ein Flugzeug ohne SSR-Transponder (zeigt nur als Roh-Plot, nie als
-  identifizierter Track),
-- ein Nordanflug, der mitten im Flug von einem zweiten Radar übernommen wird
-  (Multi-Radar-Handover).
-
-**Mit Docker:**
+Der Tracker wird von **Live-Quellen** gespeist — orchestriert über
+`FIREFLY_SOURCES` (JSON-Kontrakt, ADR 0023) oder standalone über die
+Adapter-Envs. Alle Adapter sind **Opt-in** (kein Überraschungs-Egress beim
+nackten Start):
 
 ```bash
-FIREFLY_SCENE=frankfurt docker-compose up
+FIREFLY_OPENSKY_ENABLED=true \
+FIREFLY_OPENSKY_LAT_MIN=49.0 FIREFLY_OPENSKY_LAT_MAX=51.0 \
+FIREFLY_OPENSKY_LON_MIN=7.0  FIREFLY_OPENSKY_LON_MAX=10.0 \
+FIREFLY_OPENSKY_CREDENTIALS="client_id:client_secret" \
+cargo run -p firefly-server
 ```
 
-**Lokal:**
-
-```bash
-FIREFLY_SCENE=frankfurt cargo run -p firefly-server
-```
-
-Tipp: Schalte „raw plots" ein und beobachte das primary-only-Flugzeug — du
-siehst die roten Mess-Punkte, aber nie einen grünen Track mit Identität dafür.
+(OpenSky-Konto: kostenlos; OAuth2-Client-Credentials, ADR 0024. Weitere
+Adapter: FLARM/OGN `FIREFLY_FLARM_*` (ADR 0026), Radar-ASTERIX
+`FIREFLY_RADAR_*` (ADR 0028). Die frühere eingebaute Demo-Szene wurde
+entfernt — ADR 0030.)
 
 ---
 
@@ -151,14 +143,18 @@ Run, ECS) stehen in [DOCKER.md](DOCKER.md).
 Firefly sendet seinen Live-Track-Strom als ASTERIX CAT062 über UDP-Multicast
 (ADR 0006) — das **Wayfinder**-Projekt (eigenes Repo) ist der produktive ASD-
 Konsument dafür. Standardmäßig sendet Firefly keinen Multicast (kein
-überraschender Netzwerkverkehr bei `cargo run`). Empfohlen für den
-End-to-End-Test ist das **Frankfurt-Szenario** (siehe oben, drei Radare, acht
-Flugzeuge) mit aktiviertem CAT062-Feed:
+überraschender Netzwerkverkehr bei `cargo run`). Der empfohlene Weg für den
+End-to-End-Test ist der **orchestrierte Wayfinder-Stack** (Wayfinders
+`docker-compose.orchestrated.yml` bzw. Codespace, siehe Wayfinders
+`docs/CODESPACES.md`): dort spawnt der Orchestrator je Feed automatisch eine
+Firefly-Instanz mit den im Admin-UI konfigurierten Quellen.
+
+Standalone (Firefly allein, mit aktiviertem CAT062-Feed und einer Quelle):
 
 ```bash
-FIREFLY_SCENE=frankfurt FIREFLY_CAT062_ENABLED=true cargo run -p firefly-server
-# oder mit Docker:
-FIREFLY_SCENE=frankfurt FIREFLY_CAT062_ENABLED=true docker-compose up
+FIREFLY_CAT062_ENABLED=true \
+FIREFLY_OPENSKY_ENABLED=true FIREFLY_OPENSKY_CREDENTIALS="id:secret" \
+cargo run -p firefly-server
 ```
 
 Mit Wayfinder parallel gestartet (siehe dessen README) erscheinen die Tracks

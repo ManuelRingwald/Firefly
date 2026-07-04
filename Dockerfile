@@ -32,8 +32,8 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
 
 EXPOSE 8080
 
-# The server reads its config from the environment (12-Factor, NFR-CLOUD-001).
-# Default FIREFLY_SCENE=demo; set FIREFLY_SCENE=frankfurt for the showcase.
-ENV FIREFLY_SCENE=demo
+# The server reads its config from the environment (12-Factor, NFR-CLOUD-001):
+# sources via FIREFLY_SOURCES (ADR 0023) or FIREFLY_OPENSKY_*/_FLARM_*/_RADAR_*;
+# with no source configured it serves an empty sky + CAT065 heartbeat (ADR 0030).
 
 ENTRYPOINT ["/app/firefly-server"]

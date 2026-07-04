@@ -18,10 +18,8 @@ path = "src/bin/replay_plots.rs"
 [dependencies]
 firefly-core = { workspace = true }
 firefly-geo = { workspace = true }
-firefly-sim = { workspace = true }
 firefly-track = { workspace = true }
 firefly-io = { workspace = true }
-firefly-player = { workspace = true }
 firefly-asterix = { workspace = true }
 firefly-multicast = { workspace = true }
 firefly-recorder = { workspace = true }

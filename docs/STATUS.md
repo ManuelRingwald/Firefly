@@ -10,6 +10,22 @@
 
 ---
 
+## 🎯 Stand 2026-07-04
+
+- **Zuletzt aktualisiert:** 2026-07-04
+- **ADR 0030 — Replay-/Szenen-Modus ausgebaut:** Der Server läuft nur noch als
+  quellen-getriebener Live-Tracker (`FIREFLY_SOURCES`/Opt-in-Adapter-Envs);
+  `FIREFLY_MODE`/`FIREFLY_SCENE`/`FIREFLY_SPEED` werden ignoriert (Warn-Log).
+  Ohne Quellen: leerer Himmel + CAT065-Heartbeat, `/ready` sofort bereit.
+  OpenSky im Standalone-Fallback jetzt Opt-in (`FIREFLY_OPENSKY_ENABLED`) —
+  kein Überraschungs-Egress beim nackten Start. Frankfurt-Regressionstests als
+  Fixture nach `firefly-player/tests/frankfurt_regression.rs` umgezogen
+  (Nachweise FR-TRK-018…023 lückenlos); `.ffplots`-Replay-Engine und
+  `firefly_multicast::run` (Wire-Level-Tests) bewusst unangetastet. ICD 2.6.1
+  (rein dokumentarisch, kein Wire-Bruch). **Wayfinder zieht nach** (eigener
+  PR: `WAYFINDER_FIREFLY_SCENE`-Platzhalter + `docker-compose.bridge.yml`
+  entfallen; Feed ohne Quellen → leerer Himmel statt Fake-Szene).
+
 ## 🎯 Stand 2026-07-03
 
 - **Zuletzt aktualisiert:** 2026-07-03
