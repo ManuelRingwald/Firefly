@@ -211,6 +211,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
+name = "firefly-adsbagg"
+version = "0.1.0"
+dependencies = [
+ "firefly-core",
+ "firefly-geo",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "firefly-asterix"
 version = "0.1.0"
 dependencies = [
@@ -317,6 +330,7 @@ name = "firefly-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "firefly-adsbagg",
  "firefly-asterix",
  "firefly-core",
  "firefly-flarm",

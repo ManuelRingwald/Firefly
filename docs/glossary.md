@@ -66,6 +66,17 @@ auf den echten geometrischen Abstand zum Boden.
 Das Flugzeug bestimmt seine Position selbst (per Satellitennavigation) und
 funkt sie laufend aus. Kein Radar nötig — der Empfänger hört einfach zu.
 
+**Community-Aggregator (ADS-B)**
+Ein von Freiwilligen betriebener Dienst, der die ADS-B-Empfänge tausender
+privater Boden-Empfänger einsammelt und als **offenes, auth-freies** API wieder
+ausgibt — z. B. **adsb.lol** oder **adsb.fi**. Beide sprechen dasselbe
+ADSBExchange-v2-kompatible JSON-Format (Punkt+Radius-Abfrage, max. 250 NM),
+sodass Fireflys `adsb_aggregator`-Adapter (ADR 0031) mehrere Anbieter mit einem
+Code bedient. Zweiter ADS-B-Bezugsweg neben **OpenSky** (dem
+forschungsorientierten Aggregator mit OAuth2-Zugang, ADR 0019/0024) — Community-
+wie Forschungs-Aggregatoren liefern Hobby-/Forschungsqualität, keine
+zertifizierte Surveillance.
+
 **ASTERIX** (*All-purpose Structured Eurocontrol Surveillance Information
 Exchange*)
 Das europäische Standard-Datenformat, in dem Radare und Systeme ihre Meldungen

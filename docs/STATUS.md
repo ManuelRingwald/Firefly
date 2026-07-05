@@ -10,6 +10,22 @@
 
 ---
 
+## 🎯 Stand 2026-07-05
+
+- **Zuletzt aktualisiert:** 2026-07-05
+- **ADR 0031 — Community-Aggregator-ADS-B-Adapter (`adsb_aggregator`, #53):**
+  Vierter Live-Quell-Adapter, Crate `firefly-adsbagg` — auth-freier ADS-B-Bezug
+  über adsb.lol (Default) / adsb.fi (ADSBEx-v2-kompatibles API). Anlass: OpenSky
+  verwirft Datacenter-IPs (Codespaces-Diagnose 2026-07-05); OpenSky bleibt
+  vollwertig daneben (Anbieterwahl pro Quelle, kein Ersatz). BBox→Umkreis-Query
+  (max 250 NM, Clamp mit WARN) + Rückfilter auf die BBox; `"ground"`/Staleness/
+  `~`-Hex-Robustheit; 429-Backoff (Muster #49); Sensor-Default 230; Metriken
+  `firefly_adsbagg_*`/`firefly_sources_adsbagg`. Kontrakt v1.5.0 (additiv,
+  neues Feld `provider`; `cred_env` ignoriert). airplanes.live zurückgestellt
+  (Radius-Einheit unverifiziert, ADR 0031). **Wayfinder zieht nach (#201):**
+  Store-Vokabular + Orchestrator-Pass-through (`provider`) + UI-Typ
+  „ADS-B (Community-Aggregator)" ohne Credential-Block.
+
 ## 🎯 Stand 2026-07-04
 
 - **Zuletzt aktualisiert:** 2026-07-04

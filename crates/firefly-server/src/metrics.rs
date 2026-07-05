@@ -47,6 +47,15 @@ pub struct Metrics {
     /// distinguishable from generic failures; each 429 also triggers an
     /// exponential backoff of the poll loop. Stays 0 in Replay mode.
     pub opensky_rate_limited_total: AtomicU64,
+    /// Total number of community-aggregator (adsb.lol/adsb.fi) poll errors
+    /// (HTTP / network failures, counter; ADR 0031). Stays 0 without an
+    /// `adsb_aggregator` source.
+    pub adsbagg_poll_errors_total: AtomicU64,
+    /// Total number of aggregator polls rejected with HTTP 429 (rate limit,
+    /// counter) — a **subset** of `adsbagg_poll_errors_total`, split out like
+    /// the OpenSky twin so a rate limit is distinguishable from generic
+    /// failures. Each 429 also triggers the poll loop's exponential backoff.
+    pub adsbagg_rate_limited_total: AtomicU64,
     /// Total number of FLARM/OGN position plots received from the APRS-IS stream
     /// (counter, ADR 0026). Stays 0 in Replay mode or without a `flarm_aprs`
     /// source.
@@ -75,6 +84,9 @@ pub struct Metrics {
     /// per process). Lets an operator confirm at a glance that the instance is
     /// running the source mix the orchestrator intended (ADR 0023).
     pub sources_opensky: AtomicU64,
+    /// Number of configured `adsb_aggregator` sources (gauge, static per
+    /// process; ADR 0031).
+    pub sources_adsbagg: AtomicU64,
     /// Number of configured `flarm_aprs` sources (gauge, static per process).
     pub sources_flarm: AtomicU64,
     /// Number of configured `radar_asterix` sources (gauge, static per process).
@@ -180,6 +192,20 @@ pub fn render(metrics: &Metrics) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_adsbagg_poll_errors_total",
+        "counter",
+        "Total number of community-aggregator (adsb.lol/adsb.fi) poll errors (Live mode only).",
+        metrics.adsbagg_poll_errors_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_adsbagg_rate_limited_total",
+        "counter",
+        "Total number of aggregator polls rejected with HTTP 429 (subset of poll errors; Live mode only).",
+        metrics.adsbagg_rate_limited_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
         "firefly_flarm_plots_received_total",
         "counter",
         "Total number of FLARM/OGN plots received from APRS-IS (Live mode only).",
@@ -207,6 +233,13 @@ pub fn render(metrics: &Metrics) -> String {
         "gauge",
         "Number of configured adsb_opensky sources for this instance.",
         metrics.sources_opensky.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_sources_adsbagg",
+        "gauge",
+        "Number of configured adsb_aggregator sources for this instance.",
+        metrics.sources_adsbagg.load(Ordering::Relaxed) as f64,
     );
     write_metric(
         &mut out,
@@ -282,6 +315,12 @@ mod tests {
             .opensky_rate_limited_total
             .store(2, Ordering::Relaxed);
         metrics
+            .adsbagg_poll_errors_total
+            .store(6, Ordering::Relaxed);
+        metrics
+            .adsbagg_rate_limited_total
+            .store(5, Ordering::Relaxed);
+        metrics
             .flarm_plots_received_total
             .store(11, Ordering::Relaxed);
         metrics
@@ -291,6 +330,7 @@ mod tests {
             .live_plot_batches_dropped_total
             .store(4, Ordering::Relaxed);
         metrics.sources_opensky.store(1, Ordering::Relaxed);
+        metrics.sources_adsbagg.store(1, Ordering::Relaxed);
         metrics.sources_flarm.store(1, Ordering::Relaxed);
         metrics.sources_radar.store(2, Ordering::Relaxed);
         metrics.cat063_status_sent_total.store(7, Ordering::Relaxed);
@@ -309,10 +349,13 @@ mod tests {
         assert!(text.contains("firefly_plot_records_written_total 100"));
         assert!(text.contains("firefly_opensky_poll_errors_total 3"));
         assert!(text.contains("firefly_opensky_rate_limited_total 2"));
+        assert!(text.contains("firefly_adsbagg_poll_errors_total 6"));
+        assert!(text.contains("firefly_adsbagg_rate_limited_total 5"));
         assert!(text.contains("firefly_flarm_plots_received_total 11"));
         assert!(text.contains("firefly_radar_plots_received_total 17"));
         assert!(text.contains("firefly_live_plot_batches_dropped_total 4"));
         assert!(text.contains("firefly_sources_opensky 1"));
+        assert!(text.contains("firefly_sources_adsbagg 1"));
         assert!(text.contains("firefly_sources_flarm 1"));
         assert!(text.contains("firefly_sources_radar 2"));
         assert!(text.contains("# TYPE firefly_sources_radar gauge"));

@@ -15,6 +15,7 @@
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddrV4};
 
+use firefly_adsbagg::AdsbAggConfig;
 use firefly_core::SensorId;
 use firefly_flarm::FlarmConfig;
 use firefly_opensky::OpenSkyConfig;
@@ -36,6 +37,9 @@ pub const FLARM_NOMINAL_SCAN_SECS: f64 = 5.0;
 pub enum SourceType {
     #[default]
     AdsbOpensky,
+    /// ADSBExchange-v2-compatible community aggregator (adsb.lol / adsb.fi) —
+    /// auth-free ADS-B (ADR 0031, contract v1.5.0).
+    AdsbAggregator,
     FlarmAprs,
     RadarAsterix,
 }
@@ -82,14 +86,20 @@ pub struct SourceSpec {
     /// `0.0.0.0:<default port>`.
     #[serde(default)]
     pub listen: Option<String>,
-    /// Poll interval in whole seconds for a *polled* source (`adsb_opensky` only —
-    /// contract 1.4.0). FLARM/APRS is a push stream and radar has its own scan
-    /// period, so this only affects OpenSky. Optional and additive; absent or `0`
-    /// keeps the OpenSky default (10 s). The orchestrator uses it to let an operator
-    /// slow the poll below the anonymous rate limit (HTTP 429) or, authenticated,
-    /// speed it up.
+    /// Poll interval in whole seconds for a *polled* source (`adsb_opensky` since
+    /// contract 1.4.0, `adsb_aggregator` since 1.5.0). FLARM/APRS is a push stream
+    /// and radar has its own scan period, so it does not apply there. Optional and
+    /// additive; absent or `0` keeps the adapter default (10 s). The orchestrator
+    /// uses it to let an operator respect a provider's rate limit (HTTP 429) or,
+    /// authenticated (OpenSky), speed the poll up.
     #[serde(default)]
     pub poll_interval_secs: Option<u64>,
+    /// Which community aggregator an `adsb_aggregator` source polls
+    /// (`adsb_lol` | `adsb_fi`; contract v1.5.0, ADR 0031). Optional; absent →
+    /// `adsb_lol`. An unknown value is a startup config error — never a
+    /// silently substituted provider.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 /// Why a `FIREFLY_SOURCES` value could not be turned into runnable sources. All
@@ -112,6 +122,9 @@ pub enum SourceError {
     /// (ADR 0028 — CAT048 is polar and carries no radar site, so it must be
     /// configured).
     InvalidRadar { index: usize, reason: &'static str },
+    /// An `adsb_aggregator` source names a provider outside the closed
+    /// vocabulary (`adsb_lol` | `adsb_fi`; ADR 0031).
+    UnknownProvider { index: usize, provider: String },
 }
 
 impl fmt::Display for SourceError {
@@ -135,6 +148,10 @@ impl fmt::Display for SourceError {
             SourceError::InvalidRadar { index, reason } => {
                 write!(f, "FIREFLY_SOURCES[{index}]: invalid radar source: {reason}")
             }
+            SourceError::UnknownProvider { index, provider } => write!(
+                f,
+                "FIREFLY_SOURCES[{index}]: unknown aggregator provider {provider:?} (expected adsb_lol or adsb_fi)"
+            ),
         }
     }
 }
@@ -196,6 +213,51 @@ pub fn opensky_config_from_spec(
                 })?;
         cfg.client_id = Some(client_id.to_string());
         cfg.client_secret = Some(client_secret.to_string());
+    }
+    Ok(cfg)
+}
+
+/// Build an [`AdsbAggConfig`] from an `adsb_aggregator` spec at list position
+/// `index` (ADR 0031, contract v1.5.0). `bbox` is required and validated like
+/// every area source; `provider` must come from the closed vocabulary (absent →
+/// `adsb_lol`); `sensor_id` and a `poll_interval_secs > 0` override their
+/// defaults. The source is **auth-free**: a `cred_env` is ignored (mirrors the
+/// radar source), so a stale credential reference left over from a source-type
+/// change never blocks an otherwise valid config.
+///
+/// The caller guarantees `spec.source_type == SourceType::AdsbAggregator`.
+pub fn adsbagg_config_from_spec(
+    spec: &SourceSpec,
+    index: usize,
+) -> Result<AdsbAggConfig, SourceError> {
+    let bbox = spec.bbox.ok_or(SourceError::MissingBBox { index })?;
+    validate_bbox(&bbox, index)?;
+
+    let provider = match &spec.provider {
+        None => firefly_adsbagg::Provider::default(),
+        Some(p) => {
+            firefly_adsbagg::Provider::parse(p).ok_or_else(|| SourceError::UnknownProvider {
+                index,
+                provider: p.clone(),
+            })?
+        }
+    };
+
+    let mut cfg = AdsbAggConfig {
+        enabled: true,
+        provider,
+        lat_min: bbox.min_lat,
+        lat_max: bbox.max_lat,
+        lon_min: bbox.min_lon,
+        lon_max: bbox.max_lon,
+        ..AdsbAggConfig::default()
+    };
+    if let Some(sid) = spec.sensor_id {
+        cfg.sensor_id = SensorId(sid);
+    }
+    // Zero is treated as "unset" (no hot-spin), like the OpenSky mapping.
+    if let Some(secs) = spec.poll_interval_secs.filter(|&s| s > 0) {
+        cfg.poll_interval_secs = secs;
     }
     Ok(cfg)
 }
@@ -364,6 +426,9 @@ fn validate_bbox(b: &BBox, index: usize) -> Result<(), SourceError> {
 pub struct ResolvedSources {
     /// One [`OpenSkyConfig`] per `adsb_opensky` source, in list order.
     pub opensky: Vec<OpenSkyConfig>,
+    /// One [`AdsbAggConfig`] per `adsb_aggregator` source, in list order
+    /// (ADR 0031).
+    pub adsbagg: Vec<AdsbAggConfig>,
     /// One [`FlarmConfig`] per `flarm_aprs` source, in list order (ADR 0026).
     pub flarm: Vec<FlarmConfig>,
     /// One [`RadarConfig`] per `radar_asterix` source, in list order (ADR 0028).
@@ -385,6 +450,7 @@ pub fn resolve_sources(
     get_env: impl Fn(&str) -> Option<String>,
 ) -> Result<ResolvedSources, SourceError> {
     let mut opensky = Vec::new();
+    let mut adsbagg = Vec::new();
     let mut flarm = Vec::new();
     let mut radar = Vec::new();
     let skipped = Vec::new();
@@ -393,38 +459,44 @@ pub fn resolve_sources(
             SourceType::AdsbOpensky => {
                 opensky.push(opensky_config_from_spec(spec, index, &get_env)?)
             }
+            SourceType::AdsbAggregator => adsbagg.push(adsbagg_config_from_spec(spec, index)?),
             SourceType::FlarmAprs => flarm.push(flarm_config_from_spec(spec, index, &get_env)?),
             SourceType::RadarAsterix => radar.push(radar_config_from_spec(spec, index)?),
         }
     }
     Ok(ResolvedSources {
         opensky,
+        adsbagg,
         flarm,
         radar,
         skipped,
     })
 }
 
-/// A representative config across all live sources (OpenSky, FLARM **and**
-/// radar), used for the tracking-frame origin (the **union** bbox midpoint,
-/// unless `FIREFLY_SYSTEM_REF_*` overrides) and the tracker's output cadence (the
-/// fastest source tick). A radar source contributes its **site point**
-/// (`lat`/`lon`) to the bbox union and its `scan_period` to the cadence. The
-/// sensor id is the first OpenSky source's, else the first FLARM's, else the
-/// first radar's — a placeholder for the frame anchor. Falls back to the default
-/// with no source.
+/// A representative config across all live sources (OpenSky, aggregator, FLARM
+/// **and** radar), used for the tracking-frame origin (the **union** bbox
+/// midpoint, unless `FIREFLY_SYSTEM_REF_*` overrides) and the tracker's output
+/// cadence (the fastest source tick). A radar source contributes its **site
+/// point** (`lat`/`lon`) to the bbox union and its `scan_period` to the
+/// cadence. The sensor id is the first OpenSky source's, else the first
+/// aggregator's, else the first FLARM's, else the first radar's — a placeholder
+/// for the frame anchor. Falls back to the default with no source.
 pub fn representative_config(
     opensky: &[OpenSkyConfig],
+    adsbagg: &[AdsbAggConfig],
     flarm: &[FlarmConfig],
     radar: &[RadarConfig],
 ) -> OpenSkyConfig {
     let mut rep = opensky.first().cloned().unwrap_or_default();
 
-    // With no OpenSky source, anchor the representative on the first FLARM source,
-    // else the first radar source, so a non-OpenSky feed still has a meaningful
-    // sensor id and output tick.
+    // With no OpenSky source, anchor the representative on the first aggregator,
+    // else FLARM, else radar source, so any feed has a meaningful sensor id and
+    // output tick.
     if opensky.is_empty() {
-        if let Some(f) = flarm.first() {
+        if let Some(a) = adsbagg.first() {
+            rep.sensor_id = a.sensor_id;
+            rep.poll_interval_secs = a.poll_interval_secs;
+        } else if let Some(f) = flarm.first() {
             rep.sensor_id = f.sensor_id;
             rep.poll_interval_secs = FLARM_NOMINAL_SCAN_SECS as u64;
         } else if let Some(r) = radar.first() {
@@ -436,25 +508,29 @@ pub fn representative_config(
     // Union bbox over every *present* source. Each radar contributes its site as a
     // degenerate point (lat/lon as both min and max). Leave the default bbox
     // untouched when there is no source at all.
-    if !opensky.is_empty() || !flarm.is_empty() || !radar.is_empty() {
+    if !opensky.is_empty() || !adsbagg.is_empty() || !flarm.is_empty() || !radar.is_empty() {
         let lat_lo = opensky
             .iter()
             .map(|c| c.lat_min)
+            .chain(adsbagg.iter().map(|c| c.lat_min))
             .chain(flarm.iter().map(|c| c.lat_min))
             .chain(radar.iter().map(|c| c.lat_deg));
         let lat_hi = opensky
             .iter()
             .map(|c| c.lat_max)
+            .chain(adsbagg.iter().map(|c| c.lat_max))
             .chain(flarm.iter().map(|c| c.lat_max))
             .chain(radar.iter().map(|c| c.lat_deg));
         let lon_lo = opensky
             .iter()
             .map(|c| c.lon_min)
+            .chain(adsbagg.iter().map(|c| c.lon_min))
             .chain(flarm.iter().map(|c| c.lon_min))
             .chain(radar.iter().map(|c| c.lon_deg));
         let lon_hi = opensky
             .iter()
             .map(|c| c.lon_max)
+            .chain(adsbagg.iter().map(|c| c.lon_max))
             .chain(flarm.iter().map(|c| c.lon_max))
             .chain(radar.iter().map(|c| c.lon_deg));
         rep.lat_min = lat_lo.fold(f64::INFINITY, f64::min);
@@ -464,10 +540,11 @@ pub fn representative_config(
     }
 
     // Output cadence: publish at least as often as the fastest source tick —
-    // the quickest OpenSky poll or radar scan.
+    // the quickest OpenSky/aggregator poll or radar scan.
     if let Some(min) = opensky
         .iter()
         .map(|c| c.poll_interval_secs)
+        .chain(adsbagg.iter().map(|c| c.poll_interval_secs))
         .chain(radar.iter().map(|c| c.scan_period_secs.max(1.0) as u64))
         .min()
     {
@@ -816,7 +893,7 @@ mod tests {
         )
         .unwrap();
 
-        let rep = representative_config(&[], &[], &[radar]);
+        let rep = representative_config(&[], &[], &[], &[radar]);
         // The radar site anchors the frame as a degenerate point.
         assert_eq!(rep.lat_min, 50.0);
         assert_eq!(rep.lat_max, 50.0);
@@ -958,7 +1035,7 @@ mod tests {
         .unwrap();
         b.poll_interval_secs = 5;
 
-        let rep = representative_config(&[a, b], &[], &[]);
+        let rep = representative_config(&[a, b], &[], &[], &[]);
         assert_eq!(rep.lat_min, 48.0);
         assert_eq!(rep.lat_max, 52.0);
         assert_eq!(rep.lon_min, 6.0);
@@ -969,7 +1046,7 @@ mod tests {
     #[test]
     fn representative_of_empty_is_the_default() {
         assert_eq!(
-            representative_config(&[], &[], &[]),
+            representative_config(&[], &[], &[], &[]),
             OpenSkyConfig::default()
         );
     }
@@ -996,7 +1073,7 @@ mod tests {
         )
         .unwrap();
 
-        let rep = representative_config(&[], &[flarm], &[]);
+        let rep = representative_config(&[], &[], &[flarm], &[]);
         // Union bbox comes from the FLARM source, not the OpenSky default.
         assert_eq!(rep.lat_min, 49.0);
         assert_eq!(rep.lat_max, 52.0);
@@ -1008,6 +1085,142 @@ mod tests {
             "flarm sensor anchors the frame"
         );
         assert_eq!(rep.poll_interval_secs, FLARM_NOMINAL_SCAN_SECS as u64);
+    }
+
+    // --- adsb_aggregator (ADR 0031, contract v1.5.0) ----------------------
+
+    #[test]
+    fn aggregator_spec_deserializes_with_provider() {
+        let json = r#"[{"type":"adsb_aggregator","provider":"adsb_fi",
+            "bbox":{"min_lat":49.5,"min_lon":7.8,"max_lat":50.5,"max_lon":9.3},
+            "sensor_id":231,"poll_interval_secs":15}]"#;
+        let specs = parse_sources(json).expect("valid");
+        assert_eq!(specs[0].source_type, SourceType::AdsbAggregator);
+        assert_eq!(specs[0].provider.as_deref(), Some("adsb_fi"));
+        assert_eq!(specs[0].poll_interval_secs, Some(15));
+    }
+
+    #[test]
+    fn aggregator_config_maps_bbox_provider_and_overrides() {
+        let spec = SourceSpec {
+            source_type: SourceType::AdsbAggregator,
+            bbox: Some(BBox {
+                min_lat: 49.5,
+                min_lon: 7.8,
+                max_lat: 50.5,
+                max_lon: 9.3,
+            }),
+            provider: Some("adsb_fi".into()),
+            sensor_id: Some(231),
+            poll_interval_secs: Some(15),
+            ..SourceSpec::default()
+        };
+        let cfg = adsbagg_config_from_spec(&spec, 0).expect("valid");
+        assert!(cfg.enabled);
+        assert_eq!(cfg.provider, firefly_adsbagg::Provider::AdsbFi);
+        assert_eq!(cfg.lat_min, 49.5);
+        assert_eq!(cfg.lon_max, 9.3);
+        assert_eq!(cfg.sensor_id, SensorId(231));
+        assert_eq!(cfg.poll_interval_secs, 15);
+    }
+
+    #[test]
+    fn aggregator_defaults_provider_and_ignores_cred_env() {
+        // No provider → adsb_lol; a stale cred_env (left over from a source-type
+        // change in Wayfinder) is ignored, not an error — the source is auth-free.
+        let spec = SourceSpec {
+            source_type: SourceType::AdsbAggregator,
+            bbox: Some(BBox {
+                min_lat: 49.5,
+                min_lon: 7.8,
+                max_lat: 50.5,
+                max_lon: 9.3,
+            }),
+            cred_env: Some("STALE_SECRET_ENV".into()),
+            ..SourceSpec::default()
+        };
+        let cfg = adsbagg_config_from_spec(&spec, 0).expect("valid");
+        assert_eq!(cfg.provider, firefly_adsbagg::Provider::AdsbLol);
+        assert_eq!(
+            cfg.poll_interval_secs,
+            AdsbAggConfig::default().poll_interval_secs
+        );
+    }
+
+    #[test]
+    fn aggregator_unknown_provider_and_missing_bbox_are_errors() {
+        let bad_provider = SourceSpec {
+            source_type: SourceType::AdsbAggregator,
+            bbox: Some(BBox {
+                min_lat: 49.5,
+                min_lon: 7.8,
+                max_lat: 50.5,
+                max_lon: 9.3,
+            }),
+            provider: Some("airplanes_live".into()), // deferred, ADR 0031
+            ..SourceSpec::default()
+        };
+        assert!(matches!(
+            adsbagg_config_from_spec(&bad_provider, 2),
+            Err(SourceError::UnknownProvider { index: 2, .. })
+        ));
+
+        let no_bbox = SourceSpec {
+            source_type: SourceType::AdsbAggregator,
+            ..SourceSpec::default()
+        };
+        assert!(matches!(
+            adsbagg_config_from_spec(&no_bbox, 1),
+            Err(SourceError::MissingBBox { index: 1 })
+        ));
+    }
+
+    #[test]
+    fn resolve_routes_aggregator_sources() {
+        let json = r#"[
+            {"type":"adsb_aggregator","bbox":{"min_lat":49.5,"min_lon":7.8,"max_lat":50.5,"max_lon":9.3}},
+            {"type":"flarm_aprs","bbox":{"min_lat":49.5,"min_lon":7.8,"max_lat":50.5,"max_lon":9.3}}
+        ]"#;
+        let specs = parse_sources(json).expect("valid");
+        let resolved = resolve_sources(&specs, no_env).expect("valid");
+        assert_eq!(resolved.adsbagg.len(), 1);
+        assert_eq!(resolved.flarm.len(), 1);
+        assert!(resolved.opensky.is_empty());
+    }
+
+    #[test]
+    fn representative_covers_an_aggregator_only_feed() {
+        let agg = adsbagg_config_from_spec(
+            &SourceSpec {
+                source_type: SourceType::AdsbAggregator,
+                bbox: Some(BBox {
+                    min_lat: 49.0,
+                    min_lon: 6.0,
+                    max_lat: 52.0,
+                    max_lon: 8.0,
+                }),
+                sensor_id: Some(232),
+                poll_interval_secs: Some(15),
+                ..SourceSpec::default()
+            },
+            0,
+        )
+        .unwrap();
+
+        let rep = representative_config(&[], &[agg], &[], &[]);
+        assert_eq!(rep.lat_min, 49.0);
+        assert_eq!(rep.lat_max, 52.0);
+        assert_eq!(rep.lon_min, 6.0);
+        assert_eq!(rep.lon_max, 8.0);
+        assert_eq!(
+            rep.sensor_id,
+            SensorId(232),
+            "aggregator sensor anchors the frame"
+        );
+        assert_eq!(
+            rep.poll_interval_secs, 15,
+            "aggregator cadence drives output"
+        );
     }
 
     // --- helpers ---------------------------------------------------------

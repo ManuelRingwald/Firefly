@@ -186,6 +186,7 @@ stehen in `docs/STATUS.md`.
 | **ADR 0023** | Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, env-getrieben); Antwort auf Wayfinder #35 | ✅ erledigt (Kontrakt + adsb_opensky) |
 | **ADR 0024** | OpenSky-Auth Basic → OAuth2 Client-Credentials (Token-Cache, 401-Recovery); Cred-Wert `client_id:client_secret`, Wire-Vertrag unverändert | ✅ erledigt (Firefly); Wayfinder-UI-Label zieht nach |
 | **ADR 0030** | Ausbau Replay-/Szenen-Modus — Live/quellen-getrieben ist der einzige Betrieb; ICD 2.6.1 (dokumentarisch) | ✅ erledigt (Firefly); Wayfinder zieht nach |
+| **ADR 0031** | Community-Aggregator-ADS-B-Adapter (`adsb_aggregator`: adsb.lol/adsb.fi, auth-frei); Kontrakt v1.5.0, additiv (Firefly #53) | ✅ erledigt (Firefly); Wayfinder zieht nach (#201) |
 | **Betriebs-Härtung** | Observability-Ausbau, Lastfestigkeit, Deployment | ⏳ |
 
 Innerhalb jedes Vorhabens wird in kleinen Schritten nach Abschnitt 2 gearbeitet.

@@ -20,7 +20,18 @@
 
 ## Version
 
-**1.4.0** (2026-07-02) — `adsb_opensky` trägt ein optionales **`poll_interval_secs`**
+**1.5.0** (2026-07-05) — Neuer Quell-Typ **`adsb_aggregator`** (ADR 0031):
+auth-freier ADS-B-Bezug über einen ADSBExchange-v2-kompatiblen
+Community-Aggregator. Felder: `bbox` (Pflicht), `provider`? (`adsb_lol` Default |
+`adsb_fi`), `sensor_id`? (Default 230), `poll_interval_secs`? (Default 10 s).
+**Kein** `cred_env` (die Dienste sind offen; ein dennoch gesetztes `cred_env`
+wird ignoriert statt abgelehnt — robust gegen veraltete Referenzen nach einem
+Quell-Typwechsel). Ein unbekannter `provider` ist ein **Startfehler**.
+**Additiv** — bestehende Quellen unverändert; ein Leser älterer Version lehnt
+den neuen Typ als unbekannt ab (Orchestrator: Typ erst nach Firefly-Rollout
+anbieten). Minor-Bump.
+
+Vorgänger **1.4.0** (2026-07-02) — `adsb_opensky` trägt ein optionales **`poll_interval_secs`**
 (ADR 0029): das Poll-Intervall des OpenSky-Pollers in ganzen Sekunden, vom
 Orchestrator pro Quelle setzbar. Fehlt oder `0` → Firefly-Default (10 s). Nur für
 `adsb_opensky` sinnvoll (FLARM/APRS ist Push, Radar hat eine eigene Scan-Periode).
@@ -71,14 +82,15 @@ Ein JSON-Array. Jeder Eintrag:
 | Feld | Typ | Pflicht | Gilt für | Bedeutung |
 |------|-----|---------|----------|-----------|
 | `type` | string | ja | alle | Quell-Art (Abschnitt 3). |
-| `bbox` | object | Flächenquellen | `adsb_opensky`, `flarm_aprs` | `{min_lat, min_lon, max_lat, max_lon}` (WGS84, Grad). |
+| `bbox` | object | Flächenquellen | `adsb_opensky`, `adsb_aggregator`, `flarm_aprs` | `{min_lat, min_lon, max_lat, max_lon}` (WGS84, Grad). |
+| `provider` | string | optional | `adsb_aggregator` | Welcher Community-Aggregator abgefragt wird: `adsb_lol` (Default) oder `adsb_fi`. Unbekannter Wert → **Startfehler** (nie ein still substituierter Anbieter). |
 | `sac` / `sic` | int 0..255 | Radar | `radar_asterix` | Sensor-Identität (I048/010). |
 | `lat` / `lon` | float | Radar (Pflicht) | `radar_asterix` | **Radar-Standort** (WGS84, Grad). CAT048 ist polar relativ zum Radar und trägt den Standort nicht — Firefly braucht ihn, um Polar-Plots ins Tracking-Frame zu heben (ADR 0028). |
 | `height_m` | float | optional | `radar_asterix` | Radar-Standort-Höhe über dem WGS84-Ellipsoid, Meter. Default `0`. |
 | `listen` | string | optional | `radar_asterix` | UDP-Endpoint `group:port` für den ASTERIX-Eingang. Multicast-Gruppe → beigetreten; sonst Unicast-Bind. Default `0.0.0.0:8048`. |
-| `sensor_id` | int | optional | `adsb_opensky`, `flarm_aprs`, `radar_asterix` | Auf die Plots gestempelte `SensorId`. Fehlt → Firefly vergibt einen Default je Adapter. |
-| `poll_interval_secs` | int > 0 | optional | `adsb_opensky` | Poll-Intervall des OpenSky-Pollers in ganzen Sekunden. Fehlt oder `0` → Firefly-Default (10 s). Nur für `adsb_opensky` (FLARM/APRS ist Push, Radar hat eine eigene Scan-Periode). |
-| `cred_env` | string | optional | `adsb_opensky`, `flarm_aprs` | **Name** der Env, die den Credential-Klartext trägt (Abschnitt 4) — **nie** der Wert selbst. Fehlt → anonymer/credential-loser Zugang. (`radar_asterix` trägt keine Credentials.) |
+| `sensor_id` | int | optional | alle | Auf die Plots gestempelte `SensorId`. Fehlt → Firefly vergibt einen Default je Adapter (OpenSky 200, Aggregator 230, FLARM 210, Radar 220). |
+| `poll_interval_secs` | int > 0 | optional | `adsb_opensky`, `adsb_aggregator` | Poll-Intervall des Pollers in ganzen Sekunden. Fehlt oder `0` → Firefly-Default (10 s). Nur für gepollte Quellen (FLARM/APRS ist Push, Radar hat eine eigene Scan-Periode). |
+| `cred_env` | string | optional | `adsb_opensky`, `flarm_aprs` | **Name** der Env, die den Credential-Klartext trägt (Abschnitt 4) — **nie** der Wert selbst. Fehlt → anonymer/credential-loser Zugang. (`radar_asterix` trägt keine Credentials; `adsb_aggregator` ist auth-frei und **ignoriert** ein gesetztes `cred_env`.) |
 
 Die `bbox`-Feldnamen sind identisch zu Wayfinders `source_config`, sodass der
 Orchestrator nahezu pass-through serialisieren kann.
@@ -102,11 +114,19 @@ FIREFLY_CAT062_PORT=8600
 | `type` | Status | Adapter | Felder |
 |--------|--------|---------|--------|
 | `adsb_opensky` | **unterstützt** (ADR 0019) | OpenSky-REST-Poller | `bbox` (Pflicht), `sensor_id`?, `poll_interval_secs`?, `cred_env`? |
+| `adsb_aggregator` | **unterstützt** (ADR 0031) | Community-Aggregator-Poller (adsb.lol / adsb.fi) | `bbox` (Pflicht), `provider`?, `sensor_id`?, `poll_interval_secs`? — **kein** `cred_env` |
 | `flarm_aprs` | **unterstützt** (ADR 0026) | OGN/APRS-IS-Stream | `bbox` (Pflicht), `sensor_id`?, `cred_env`? |
 | `radar_asterix` | **unterstützt** (ADR 0028) | ASTERIX-CAT048-UDP-Listener | `sac`/`sic`, `lat`/`lon` (Pflicht), `height_m`?, `listen`?, `sensor_id`? |
 
+**Hinweis `adsb_aggregator` (ADR 0031):** Die Aggregator-APIs fragen
+Mittelpunkt+Radius (max. 250 NM) statt einer BBox. Firefly rechnet die
+konfigurierte `bbox` in ihren **Umkreis** um und **filtert** die Antwort auf die
+BBox zurück — die Quelle verhält sich also exakt wie die BBox-nativen Quellen.
+Sprengt die BBox den 250-NM-Radius, wird geclampt und beim Start **prominent
+gewarnt** (partielle Abdeckung wird nie verschwiegen).
+
 **Behandlung:**
-- Alle drei Vokabular-Typen haben jetzt einen Adapter (keine reservierten Typen mehr).
+- Alle Vokabular-Typen haben einen Adapter (keine reservierten Typen mehr).
 - Ein **fehlerhaft konfigurierter** Eintrag (fehlende `bbox`/`lat`/`lon`, ungültiges
   `listen`) → **Startfehler** (eine konfigurierte Quelle, die nicht laufen kann,
   wird nicht still verworfen).
@@ -140,6 +160,10 @@ Doppelpunkt-Form wie `adsb_opensky`.
 
 ## 5. Changelog
 
+- **1.5.0** (2026-07-05, ADR 0031) — Neuer Quell-Typ `adsb_aggregator`
+  (Community-Aggregator adsb.lol/adsb.fi, auth-frei); neues Feld `provider`?
+  (`adsb_lol` Default | `adsb_fi`), `poll_interval_secs` gilt nun auch hier.
+  `cred_env` wird für diesen Typ ignoriert. Additiv.
 - **1.4.0** (2026-07-02, ADR 0029) — `adsb_opensky` trägt optionales
   `poll_interval_secs` (ganze Sekunden, > 0; fehlt/`0` → Default 10 s). Nur für
   `adsb_opensky`. Additiv — bestehende Quellen unverändert, ältere Leser ignorieren
