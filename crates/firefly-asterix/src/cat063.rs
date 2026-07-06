@@ -98,6 +98,88 @@ mod uap {
     pub const SENSOR_IDENTIFIER: u8 = 4;
     /// I063/060 — Sensor Configuration and Status.
     pub const SENSOR_CONFIGURATION_STATUS: u8 = 5;
+    /// I063/RE — Reserved Expansion Field (explicit length). Firefly carries the
+    /// per-source failure reason here (ADR 0033).
+    pub const RESERVED_EXPANSION: u8 = 13;
+}
+
+/// The I063/RE Reserved Expansion Field layout Firefly emits for a degraded
+/// sensor (ADR 0033). The RE field is **self-delimiting** via its leading length
+/// octet, so a decoder that does not understand it can still skip it (the
+/// forward-compatibility contract, ICD §3):
+///
+/// ```text
+/// [LEN = 0x03] [SUBFIELD_SPEC = 0x80] [SRC-REASON]
+/// ```
+///
+/// - `LEN` counts the whole field including itself (3 octets).
+/// - `SUBFIELD_SPEC` is a presence octet in the RE's own sub-field space: bit 8
+///   (`0x80`) marks the `SRC-REASON` sub-field present; bit 1 is FX (clear).
+/// - `SRC-REASON` is the [`SensorReason`] code (1 octet).
+const RE_LEN: u8 = 0x03;
+const RE_SUBFIELD_SPEC: u8 = 0x80;
+/// Bit marking the `SRC-REASON` sub-field present in the RE sub-field spec octet.
+const RE_SRC_REASON_BIT: u8 = 0x80;
+
+/// Why a sensor is currently degraded — the per-source failure reason carried in
+/// the CAT063 I063/RE Reserved Expansion Field (ADR 0033).
+///
+/// It lets the operator tell **unreachable** (network/firewall — credentials, if
+/// any, are fine) from **auth** (bad or missing credentials, HTTP 401/403) from
+/// **rate-limited** (throttled, HTTP 429), instead of guessing why a source went
+/// dark and blindly re-typing credentials.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SensorReason {
+    /// No failure recorded — the sensor is, or was last, healthy. **Not** encoded
+    /// on the wire (an operational sensor carries no RE field).
+    #[default]
+    Ok,
+    /// The source could not be reached: DNS/connect/timeout, or a 5xx server
+    /// error. Credentials are not the problem.
+    Unreachable,
+    /// Authentication/authorisation failed (HTTP 401/403) — bad or missing
+    /// credentials.
+    Auth,
+    /// The source rate-limited the request (HTTP 429).
+    RateLimited,
+}
+
+impl SensorReason {
+    /// The `SRC-REASON` code carried in the I063/RE sub-field. `Ok` is `0` and is
+    /// never actually put on the wire (it means "no RE field").
+    pub fn code(self) -> u8 {
+        match self {
+            SensorReason::Ok => 0,
+            SensorReason::Unreachable => 1,
+            SensorReason::Auth => 2,
+            SensorReason::RateLimited => 3,
+        }
+    }
+
+    /// Inverse of [`code`](Self::code): decode a `SRC-REASON` octet. An unknown
+    /// non-zero code maps to `Unreachable` (a conservative "degraded for some
+    /// reason") rather than being rejected — forward tolerance for a future code.
+    pub fn from_code(code: u8) -> Self {
+        match code {
+            0 => SensorReason::Ok,
+            2 => SensorReason::Auth,
+            3 => SensorReason::RateLimited,
+            _ => SensorReason::Unreachable,
+        }
+    }
+}
+
+/// One sensor's status to encode into a CAT063 record: which sensor (`sic`),
+/// whether it is operational, and — when degraded — why ([`SensorReason`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SensorReport {
+    /// I063/050 SIC of this sensor (the SAC is the encoder's `sensor_sac`).
+    pub sic: u8,
+    /// I063/060 CON: `true` = operational, `false` = degraded.
+    pub operational: bool,
+    /// The failure reason, emitted in I063/RE **only** when degraded and not
+    /// [`SensorReason::Ok`]. An operational sensor carries no RE field.
+    pub reason: SensorReason,
 }
 
 /// Encodes Sensor Status records into a CAT063 data block.
@@ -128,25 +210,38 @@ impl Cat063Encoder {
     /// Encode a CAT063 data block carrying one status record per sensor.
     ///
     /// `time_of_day_secs` is seconds since UTC midnight (I063/030).
-    /// `sensors` is a slice of `(sensor_sic, operational)` pairs — one entry per
-    /// sensor, in the order they should appear in the block.  An empty slice
-    /// produces a valid but empty block (three-byte header only).
-    pub fn encode(&self, time_of_day_secs: f64, sensors: &[(u8, bool)]) -> Vec<u8> {
+    /// `sensors` is one [`SensorReport`] per sensor, in the order they should
+    /// appear in the block. An empty slice produces a valid but empty block
+    /// (three-byte header only).
+    ///
+    /// A **degraded** sensor with a known [`SensorReason`] (not
+    /// [`SensorReason::Ok`]) additionally carries the reason in an I063/RE
+    /// Reserved Expansion Field; an operational sensor carries no RE field
+    /// (ADR 0033, additive — the record stays 9 octets in the common case).
+    pub fn encode(&self, time_of_day_secs: f64, sensors: &[SensorReport]) -> Vec<u8> {
         let mut records_bytes: Vec<u8> = Vec::new();
-        for &(sic, operational) in sensors {
-            let record = RecordBuilder::new()
+        for report in sensors {
+            let mut builder = RecordBuilder::new()
                 .item(
                     uap::DATA_SOURCE_IDENTIFIER,
                     vec![self.data_source.sac, self.data_source.sic],
                 )
                 .item(uap::TIME_OF_MESSAGE, encode_time_of_day(time_of_day_secs))
-                .item(uap::SENSOR_IDENTIFIER, vec![self.sensor_sac, sic])
+                .item(uap::SENSOR_IDENTIFIER, vec![self.sensor_sac, report.sic])
                 .item(
                     uap::SENSOR_CONFIGURATION_STATUS,
-                    vec![encode_con(operational)],
-                )
-                .finish();
-            records_bytes.extend_from_slice(&record);
+                    vec![encode_con(report.operational)],
+                );
+            // Attach the failure reason only for a degraded sensor with a known
+            // reason: an operational (or reason-unknown) sensor stays a plain
+            // 9-octet record, so the RE field is genuinely additive.
+            if !report.operational && report.reason != SensorReason::Ok {
+                builder = builder.item(
+                    uap::RESERVED_EXPANSION,
+                    vec![RE_LEN, RE_SUBFIELD_SPEC, report.reason.code()],
+                );
+            }
+            records_bytes.extend_from_slice(&builder.finish());
         }
         data_block(&records_bytes)
     }
@@ -194,6 +289,9 @@ pub struct DecodedSensorStatus {
     pub sensor: DataSourceId,
     /// I063/060 `CON` — `true` when the sensor reports itself operational (CON=0).
     pub operational: bool,
+    /// I063/RE `SRC-REASON` — the per-source failure reason when degraded
+    /// (ADR 0033). [`SensorReason::Ok`] when no RE field is present.
+    pub reason: SensorReason,
 }
 
 /// Errors that can occur while decoding a CAT063 data block.
@@ -285,6 +383,8 @@ fn decode_record(
     let mut time_of_day_secs: Option<f64> = None;
     let mut sensor: Option<DataSourceId> = None;
     let mut operational: Option<bool> = None;
+    // Absent RE field ⇒ no recorded reason ⇒ Ok.
+    let mut reason = SensorReason::Ok;
 
     for frn in frns {
         match frn {
@@ -312,11 +412,23 @@ fn decode_record(
                     octet = take(1)?[0];
                 }
             }
-            // Forward tolerance: an item at an FRN we do not consume (a future
-            // additive item, or the RE/SP fields) must not fail the block. But a
-            // non-self-delimiting unknown item cannot be skipped without its
-            // length, so we surface it rather than mis-parse silently. RE/SP are
-            // handled by the consumer (Wayfinder) which reads their length octet.
+            uap::RESERVED_EXPANSION => {
+                // I063/RE is explicit-length: the first octet is the field length
+                // (counting itself). Read it, then the sub-field spec octet, and
+                // — if the SRC-REASON bit is set — the reason code. Any remaining
+                // octets (a future sub-field) are skipped by length, so the RE
+                // field never desynchronises the parse.
+                let re_len = take(1)?[0] as usize;
+                if re_len < 1 {
+                    return Err(Cat063DecodeError::Truncated);
+                }
+                let body = take(re_len - 1)?;
+                if !body.is_empty() && body[0] & RE_SRC_REASON_BIT != 0 && body.len() >= 2 {
+                    reason = SensorReason::from_code(body[1]);
+                }
+            }
+            // A non-self-delimiting item at an FRN we do not consume cannot be
+            // skipped without its length, so surface it rather than mis-parse.
             other => return Err(Cat063DecodeError::UnknownFrn(other)),
         }
     }
@@ -330,6 +442,7 @@ fn decode_record(
         operational: operational.ok_or(Cat063DecodeError::MissingItem(
             uap::SENSOR_CONFIGURATION_STATUS,
         ))?,
+        reason,
     };
     Ok((record, cur))
 }
@@ -342,6 +455,33 @@ mod tests {
     /// identity), sensor SAC = 0.
     fn encoder() -> Cat063Encoder {
         Cat063Encoder::new(DataSourceId::new(25, 2), 0)
+    }
+
+    /// An operational sensor report (no RE field).
+    fn ok(sic: u8) -> SensorReport {
+        SensorReport {
+            sic,
+            operational: true,
+            reason: SensorReason::Ok,
+        }
+    }
+
+    /// A degraded sensor report with no known reason (no RE field).
+    fn degraded(sic: u8) -> SensorReport {
+        SensorReport {
+            sic,
+            operational: false,
+            reason: SensorReason::Ok,
+        }
+    }
+
+    /// A degraded sensor report carrying a failure reason (RE field emitted).
+    fn degraded_reason(sic: u8, reason: SensorReason) -> SensorReport {
+        SensorReport {
+            sic,
+            operational: false,
+            reason,
+        }
     }
 
     /// A single operational sensor at time=0 encodes to the exact reference
@@ -358,7 +498,7 @@ mod tests {
     /// - [0x00]              I063/060: CON=00 (operational)
     #[test]
     fn single_operational_sensor_matches_reference_dump() {
-        let block = encoder().encode(0.0, &[(1, true)]);
+        let block = encoder().encode(0.0, &[ok(1)]);
         assert_eq!(
             block,
             vec![0x3F, 0x00, 0x0C, 0xB8, 0x19, 0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00]
@@ -370,7 +510,7 @@ mod tests {
     /// Expected last byte: 0x40 (CON=01, degraded).
     #[test]
     fn single_degraded_sensor_matches_reference_dump() {
-        let block = encoder().encode(0.0, &[(1, false)]);
+        let block = encoder().encode(0.0, &[degraded(1)]);
         assert_eq!(
             block,
             vec![0x3F, 0x00, 0x0C, 0xB8, 0x19, 0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x40]
@@ -386,7 +526,7 @@ mod tests {
     /// - record2: sensor SIC=2 degraded
     #[test]
     fn two_sensors_in_one_block_matches_reference_dump() {
-        let block = encoder().encode(0.0, &[(1, true), (2, false)]);
+        let block = encoder().encode(0.0, &[ok(1), degraded(2)]);
         assert_eq!(
             block,
             vec![
@@ -405,7 +545,7 @@ mod tests {
     #[test]
     fn time_of_day_is_encoded_in_128th_seconds() {
         // 01:00:00 = 3600 s → 3600 * 128 = 460_800 = 0x07_0800
-        let block = encoder().encode(3600.0, &[(1, true)]);
+        let block = encoder().encode(3600.0, &[ok(1)]);
         // block[3]=FSPEC, [4..6]=I063/010, [6..9]=I063/030
         assert_eq!(&block[6..9], &[0x07, 0x08, 0x00]);
     }
@@ -414,7 +554,7 @@ mod tests {
     /// separate SDPS (I063/010) and sensor (I063/050) identities.
     #[test]
     fn round_trip_recovers_all_fields() {
-        let sensors = &[(1u8, true), (2u8, false), (3u8, true)];
+        let sensors = &[ok(1), degraded(2), ok(3)];
         let block = encoder().encode(3600.0, sensors);
         let records = decode_sensor_block(&block).expect("decodes");
         assert_eq!(records.len(), 3);
@@ -433,6 +573,11 @@ mod tests {
 
         assert_eq!(records[2].sensor, DataSourceId::new(0, 3));
         assert!(records[2].operational);
+
+        // No RE field was emitted (reasons all Ok), so every reason decodes Ok.
+        for r in &records {
+            assert_eq!(r.reason, SensorReason::Ok);
+        }
     }
 
     /// An empty sensor list produces a valid three-byte header-only block.
@@ -448,7 +593,7 @@ mod tests {
     /// non-standard compacted numbering (0xE0).
     #[test]
     fn fspec_uses_standard_uap_positions() {
-        let block = encoder().encode(0.0, &[(1, true)]);
+        let block = encoder().encode(0.0, &[ok(1)]);
         assert_eq!(block[3], 0xB8, "FRN 1+3+4+5 present, FX clear");
     }
 
@@ -478,7 +623,7 @@ mod tests {
     /// A wrong leading category byte is rejected without panic.
     #[test]
     fn wrong_category_is_rejected() {
-        let mut block = encoder().encode(0.0, &[(1, true)]);
+        let mut block = encoder().encode(0.0, &[ok(1)]);
         block[0] = 0x3E; // CAT062
         assert_eq!(
             decode_sensor_block(&block),
@@ -489,9 +634,80 @@ mod tests {
     /// Truncated input at any prefix never panics; it returns an error.
     #[test]
     fn truncated_input_is_safe() {
-        let block = encoder().encode(0.0, &[(1, true), (2, false)]);
+        let block = encoder().encode(0.0, &[ok(1), degraded(2)]);
         for cut in 0..block.len() {
             let _ = decode_sensor_block(&block[..cut]);
         }
+    }
+
+    /// A degraded sensor with a known reason appends the I063/RE field, exact
+    /// bytes. FSPEC grows to two octets (FRN 1+3+4+5 + FX, then FRN 13); the RE
+    /// field is `[LEN=3][SUBFIELD=0x80][SRC-REASON]`. This is the byte-level
+    /// ground truth Wayfinder's RE decoder (H4) must match.
+    #[test]
+    fn degraded_sensor_with_reason_appends_re_field() {
+        let block = encoder().encode(0.0, &[degraded_reason(1, SensorReason::Unreachable)]);
+        assert_eq!(
+            block,
+            vec![
+                0x3F, 0x00, 0x10, // CAT=63, LEN=16 (3 + 13)
+                0xB9, 0x04, // FSPEC: FRN 1+3+4+5 (+FX) then FRN 13 (RE)
+                0x19, 0x02, // I063/010 SDPS 25/2
+                0x00, 0x00, 0x00, // I063/030 time=0
+                0x00, 0x01, // I063/050 sensor 0/1
+                0x40, // I063/060 CON=01 (degraded)
+                0x03, 0x80, 0x01, // I063/RE: LEN=3, SUBFIELD=0x80, SRC-REASON=1 (unreachable)
+            ]
+        );
+    }
+
+    /// Each reason code round-trips through encode → decode for a degraded sensor.
+    #[test]
+    fn re_reason_round_trips() {
+        for reason in [
+            SensorReason::Unreachable,
+            SensorReason::Auth,
+            SensorReason::RateLimited,
+        ] {
+            let block = encoder().encode(0.0, &[degraded_reason(1, reason)]);
+            let records = decode_sensor_block(&block).expect("decodes");
+            assert_eq!(records.len(), 1);
+            assert!(!records[0].operational);
+            assert_eq!(records[0].reason, reason, "reason {reason:?} round-trips");
+        }
+    }
+
+    /// An operational sensor never carries an RE field even if a reason is set on
+    /// the report — the RE is gated on degradation, so operational records stay
+    /// the plain 9-octet form.
+    #[test]
+    fn operational_sensor_never_emits_re() {
+        let report = SensorReport {
+            sic: 1,
+            operational: true,
+            reason: SensorReason::Auth, // should be ignored
+        };
+        let block = encoder().encode(0.0, &[report]);
+        assert_eq!(block[2], 0x0C, "LEN=12, no RE field");
+        assert_eq!(block[3], 0xB8, "single-octet FSPEC, FRN 13 not set");
+        let records = decode_sensor_block(&block).expect("decodes");
+        assert_eq!(records[0].reason, SensorReason::Ok);
+    }
+
+    /// A degraded sensor with reason Ok (reason unknown, e.g. a silent FLARM
+    /// sensor) also carries no RE field — we do not fabricate a reason.
+    #[test]
+    fn degraded_without_reason_emits_no_re() {
+        let block = encoder().encode(0.0, &[degraded(1)]);
+        assert_eq!(block[2], 0x0C, "LEN=12, no RE field");
+        assert_eq!(block[3], 0xB8);
+    }
+
+    /// An unknown non-zero SRC-REASON code decodes to `Unreachable` (forward
+    /// tolerance) rather than being rejected.
+    #[test]
+    fn unknown_reason_code_maps_to_unreachable() {
+        assert_eq!(SensorReason::from_code(9), SensorReason::Unreachable);
+        assert_eq!(SensorReason::from_code(0), SensorReason::Ok);
     }
 }

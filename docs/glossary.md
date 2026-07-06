@@ -112,6 +112,22 @@ oberstes Bit des zweiten Octets usw.
 Die zweiteilige **Quell-Kennung** in ASTERIX (Datenfeld I062/010): *wer* hat die
 Meldung erzeugt — welche geografische Stelle (SAC) und welches System dort (SIC).
 
+**RE / SP** (*Reserved Expansion Field / Special Purpose Field*)
+Zwei im ASTERIX-UAP vorgesehene **Erweiterungs-Slots** am Ende eines Records, über
+die ein Hersteller **eigene** Zusatzfelder mitschicken darf, ohne den Standard zu
+brechen. Beide sind **selbst-begrenzend**: ihr erstes Octet ist eine Länge, die
+das ganze Feld (inkl. sich selbst) zählt — so kann ein Decoder, der das Feld nicht
+kennt, es einfach **überspringen**. Firefly nutzt das RE-Feld von CAT063 (FRN 13)
+für den **`SRC-REASON`** (s. u.).
+
+**SRC-REASON** (Firefly-Vendor-Subfeld im CAT063-I063/RE, ADR 0033)
+Der **Ausfallgrund einer Quelle**, den Firefly bei einem *degradierten* Sensor
+mitschickt, damit der Lotse/Betreiber weiß **warum** eine Quelle still ist:
+`1 = unreachable` (Netz/Firewall — Zugangsdaten sind ok), `2 = auth` (falsche/
+fehlende Zugangsdaten, HTTP 401/403), `3 = rate_limited` (Drosselung, HTTP 429).
+Ein operationeller Sensor trägt keinen Grund. So spart sich der Betreiber
+sinnloses Nachtippen von Credentials, wenn in Wahrheit eine Firewall blockiert.
+
 **LSB / Skalierungsfaktor** (*Least Significant Bit*)
 Der Wert, den das **kleinste Bit** eines Festkomma-Felds darstellt — z. B. ist
 der LSB der CAT062-Position `180/2²⁵` Grad. Ein Bruchwert (etwa 12,0 Sekunden)

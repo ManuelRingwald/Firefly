@@ -76,6 +76,24 @@ impl PollError {
     pub fn is_rate_limited(&self) -> bool {
         matches!(self, PollError::RateLimited)
     }
+
+    /// True when this poll failed for an **authentication/authorisation** reason
+    /// (HTTP 401/403). The community aggregators are auth-free, so this is
+    /// normally never hit — but if a provider ever gates a request it is
+    /// classified as `auth` rather than `unreachable`, mirroring the OpenSky
+    /// poller. A transport failure with no HTTP status is not auth. Drives the
+    /// CAT063 `SRC-REASON` classification (ADR 0033).
+    pub fn is_auth(&self) -> bool {
+        match self {
+            PollError::RateLimited => false,
+            PollError::Http(e) => matches!(
+                e.status(),
+                Some(s)
+                    if s == reqwest::StatusCode::UNAUTHORIZED
+                        || s == reqwest::StatusCode::FORBIDDEN
+            ),
+        }
+    }
 }
 
 impl std::fmt::Display for PollError {

@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use firefly_asterix::Cat063Encoder;
+use firefly_asterix::{Cat063Encoder, SensorReport};
 use tokio::net::UdpSocket;
 
 use crate::sensor_health::SensorHealthMonitor;
@@ -43,10 +43,14 @@ pub async fn run_cat063_sender(
     loop {
         ticker.tick().await;
         let snapshot = monitor.snapshot(Instant::now());
-        let sensors: Vec<(u8, bool)> = snapshot
+        let sensors: Vec<SensorReport> = snapshot
             .per_sensor
             .iter()
-            .map(|(id, &active)| (id.0 as u8, active))
+            .map(|(id, health)| SensorReport {
+                sic: id.0 as u8,
+                operational: health.active,
+                reason: health.reason,
+            })
             .collect();
 
         let block = encoder.encode(now_time_of_day(), &sensors);

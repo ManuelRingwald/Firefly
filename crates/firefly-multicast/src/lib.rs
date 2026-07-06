@@ -47,7 +47,7 @@ use tokio::net::UdpSocket;
 pub use cat063_sender::run_cat063_sender;
 pub use config::MulticastConfig;
 pub use heartbeat::run_heartbeat;
-pub use sensor_health::{SensorHealthMonitor, SensorHealthSnapshot};
+pub use sensor_health::{SensorHealth, SensorHealthMonitor, SensorHealthSnapshot};
 
 /// Bind a UDP socket suitable for *sending* multicast datagrams.
 ///

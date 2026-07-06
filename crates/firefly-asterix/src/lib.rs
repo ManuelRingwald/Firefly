@@ -43,7 +43,10 @@ pub use cat062::{
     decode_data_block, unproject_cartesian_position, Cat062Encoder, DataSourceId, DecodeError,
     DecodedRecord,
 };
-pub use cat063::{decode_sensor_block, Cat063DecodeError, Cat063Encoder, DecodedSensorStatus};
+pub use cat063::{
+    decode_sensor_block, Cat063DecodeError, Cat063Encoder, DecodedSensorStatus, SensorReason,
+    SensorReport,
+};
 pub use cat065::{
     decode_status_block, Cat065DecodeError, Cat065Encoder, DecodedStatus, MESSAGE_TYPE_SDPS_STATUS,
 };

@@ -21,7 +21,9 @@
 
 ## Version
 
-**3.0.0** (2026-07-06) — **BREAKING (ADR 0032):** Die **CAT063-UAP** wird auf die **echten EUROCONTROL-FRN-Positionen** gebracht (spiegelt die CAT062-UAP-Korrektur aus 2.0.0 / ADR 0015). Drei Änderungen am CAT063-Record: (1) **I063/010** trägt jetzt die **SDPS-Identität** (SAC/SIC = `FIREFLY_CAT062_SAC`/`_SIC`, Default 25/2 — dieselbe wie I062/010 und I065/010), **nicht mehr** die Sensor-Identität. (2) Neues Item **I063/050** (Sensor Identifier, FRN 4) trägt die **Sensor-Identität** (SAC 0, SIC = `sensor_id`). (3) I063/030 wandert **FRN 2 → FRN 3**, I063/060 wandert **FRN 3 → FRN 5**. Die FSPEC wächst von `0xE0` auf **`0xB8`** (FRN 1+3+4+5), der Record von 7 auf **9 Oktette**. Zusätzlich sind die **CON-Werte** (I063/060) auf die Standard-Kodierung korrigiert: `0` = operationell, `1` = degradiert, `2` = Initialisierung, `3` = nicht verbunden (Firefly sendet weiter nur `0x00`/`0x40`). **Decoder muss nachziehen** — die Sensor-Identität kommt jetzt aus I063/050 (FRN 4), nicht aus I063/010. CAT062/CAT065 unverändert. Details: Abschnitt 9.
+**3.1.0** (2026-07-06) — **Additiv (ADR 0033):** CAT063-Records tragen bei einem **degradierten** Sensor optional einen **per-Quelle-Fehlergrund** im **I063/RE** (Reserved Expansion Field, FRN 13): Vendor-Subfeld **`SRC-REASON`** (u8: `1=unreachable`, `2=auth`, `3=rate_limited`). Damit unterscheidet der Konsument, **warum** eine Quelle ausgefallen ist — Netz/Firewall (unreachable) vs. falsche Credentials (auth) vs. Drosselung (rate_limited) — statt nur „degradiert" anzuzeigen (Antwort auf Wayfinder #197). Das RE-Feld ist **selbst-begrenzend** (Längen-Oktett) und wird **nur** bei degradiertem Sensor mit bekanntem Grund gesendet — operationelle Records bleiben die 9-Oktett-Form. **Additiv, kein Wire-Bruch:** ein Decoder, der das RE-Feld nicht auswertet, überspringt es über sein Längen-Oktett (die Vorwärtskompatibilitäts-Regel aus 3.0.0). Grund kommt heute aus den HTTP-ADS-B-Pollern (OpenSky, adsb_aggregator); FLARM/Radar liefern keinen Grund (RE entfällt). Details: Abschnitt 9.
+
+Vorgänger **3.0.0** (2026-07-06) — **BREAKING (ADR 0032):** Die **CAT063-UAP** wird auf die **echten EUROCONTROL-FRN-Positionen** gebracht (spiegelt die CAT062-UAP-Korrektur aus 2.0.0 / ADR 0015). Drei Änderungen am CAT063-Record: (1) **I063/010** trägt jetzt die **SDPS-Identität** (SAC/SIC = `FIREFLY_CAT062_SAC`/`_SIC`, Default 25/2 — dieselbe wie I062/010 und I065/010), **nicht mehr** die Sensor-Identität. (2) Neues Item **I063/050** (Sensor Identifier, FRN 4) trägt die **Sensor-Identität** (SAC 0, SIC = `sensor_id`). (3) I063/030 wandert **FRN 2 → FRN 3**, I063/060 wandert **FRN 3 → FRN 5**. Die FSPEC wächst von `0xE0` auf **`0xB8`** (FRN 1+3+4+5), der Record von 7 auf **9 Oktette**. Zusätzlich sind die **CON-Werte** (I063/060) auf die Standard-Kodierung korrigiert: `0` = operationell, `1` = degradiert, `2` = Initialisierung, `3` = nicht verbunden (Firefly sendet weiter nur `0x00`/`0x40`). **Decoder muss nachziehen** — die Sensor-Identität kommt jetzt aus I063/050 (FRN 4), nicht aus I063/010. CAT062/CAT065 unverändert. Details: Abschnitt 9.
 
 Vorgänger **2.6.1** (2026-07-04) — **Dokumentarisch (ADR 0030, kein Wire-Format-Bruch):** Der Replay-/Szenen-Modus des Senders wurde ausgebaut; Firefly läuft ausschließlich als quellen-getriebener Live-Tracker. Für den Vertrag ändert sich **nichts am Format** — alle Replay-Bezüge dieser ICD (Szenen-Ursprung als I062/100-Referenz, CAT063-Replay-Verhalten, feste Szenen-SICs) sind durch die quellen-getriebenen Formulierungen ersetzt. Eine Instanz **ohne** Quellen sendet weiterhin CAT065-Heartbeats (und CAT063), aber keine CAT062-Tracks — „leerer Himmel" bleibt vom „toten Feed" unterscheidbar (ADR 0018).
 
@@ -40,6 +42,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 3.1.0 | 2026-07-06 | **Additiv (ADR 0033).** CAT063 trägt bei einem degradierten Sensor optional den **per-Quelle-Fehlergrund** im **I063/RE** (Reserved Expansion Field, FRN 13): Vendor-Subfeld **`SRC-REASON`** (u8: `1=unreachable`, `2=auth`, `3=rate_limited`). RE-Layout: `[LEN=0x03][SUBFIELD=0x80][SRC-REASON]`, selbst-begrenzend. **Nur** bei degradiertem Sensor mit bekanntem Grund gesendet (operationelle Records unverändert 9 Oktette). FSPEC wächst dann auf 2 Oktette (`0xB9 0x04`). **Kein Wire-Bruch:** ein Decoder, der RE nicht auswertet, überspringt es über sein Längen-Oktett. Grund aus den HTTP-ADS-B-Pollern (OpenSky/adsb_aggregator); FLARM/Radar ohne Grund (kein RE). Antwort auf Wayfinder #197. Details: Abschnitt 9. |
 | 3.0.0 | 2026-07-06 | **BREAKING (ADR 0032).** **CAT063-UAP-Standardisierung** — die Sensor-Status-Records folgen jetzt den echten EUROCONTROL-FRN-Positionen (analog zur CAT062-Korrektur aus 2.0.0). (1) **I063/010** = **SDPS**-Identität (SAC/SIC = `FIREFLY_CAT062_SAC`/`_SIC`, Default 25/2), nicht mehr der Sensor. (2) Neues **I063/050** (Sensor Identifier, FRN 4) = **Sensor**-Identität (SAC 0, SIC = `sensor_id`). (3) I063/030 → FRN 3, I063/060 → FRN 5. FSPEC `0xE0` → **`0xB8`**, Record 7 → **9 Oktette**. CON-Werte (I063/060) auf Standard korrigiert: `0` op / `1` degradiert / `2` Init / `3` nicht verbunden (Firefly sendet weiter `0x00`/`0x40`). **Decoder muss nachziehen**: Sensor-Identität aus I063/050 lesen, FSPEC `0xB8` erwarten. Kein Eingriff in CAT062/CAT065. Details: Abschnitt 9. |
 | 2.6.1 | 2026-07-04 | **Dokumentarisch (ADR 0030).** Replay-/Szenen-Modus des Senders ausgebaut — Firefly ist ausschließlich quellen-getrieben (`FIREFLY_SOURCES`/Adapter-Envs). **Kein Wire-Format-Bruch:** CAT062/065/063 byte-identisch. ICD-Anpassungen rein redaktionell: I062/100-Referenz = System-Referenzpunkt (Union-Bbox-Mitte bzw. `FIREFLY_SYSTEM_REF_*`), CAT063-SICs = `sensor_id` der Quellen, CAT063-Liveness folgt immer dem echten Plot-Eingang. Instanz ohne Quellen: CAT065/CAT063 laufen, keine CAT062-Tracks (leerer Himmel). |
 | 2.6.0 | 2026-06-30 | **Additiv (ADR 0027, Firefly #30).** I062/290 (System Track Update Ages) trägt jetzt **per-Technologie-Alter**: zusätzlich zu PSR (`0x40`) und ES/ADS-B (`0x08`) optional **SSR-Age** (`0x20`), **Mode-S-Age** (`0x10`) und **FLARM-Age** (`0x04`). Die Age-Oktette folgen der Bit-Priorität MSB→LSB im Primary-Subfeld (PSR → SSR → MDS → ES → FLARM), je 1 Oktett, u8, LSB 0,25 s. Ein Age-Oktett ist nur vorhanden, wenn das zugehörige Bit gesetzt ist (Track hat einen Treffer dieser Technologie). PSR-only-Tracks: **kein** Unterschied zum bisherigen Wire-Format (2 Byte). Quelle: `SystemTrack.source_ages`. Damit kann der Konsument die **Track-Provenienz** (◆ ADS-B / ▢ SSR / ○ PSR / FLARM) aus den Age-Subfeldern ableiten, statt im Frontend zu raten. **Firefly-Bit-Map bleibt:** `0x40`/`0x08` unverändert (Wayfinder-Decoder bricht nicht); neue Subfelder auf freien Bits; **FLARM (`0x04`) ist ein dokumentiertes Firefly-Vendor-Subfeld** (kein EUROCONTROL-Standard-Subfeld, vom toleranten Decoder überspringbar). **Konsument (Wayfinder): kein Breaking Change** — I062/290 muss ohnehin variabel lang dekodiert werden (Länge/Reihenfolge aus dem Primary-Subfeld). Details: Abschnitt 4.2. |
@@ -393,10 +396,49 @@ FSPEC-Oktett `0xB8`.
 > Sensor**. Der Konsument liest die Sensor-Identität aus **I063/050** (FRN 4).
 
 > Weitere CAT063-UAP-Items (I063/015 Service Identification, I063/070–I063/092
-> Zeit-/Positions-/Bias-Statistik, RE/SP) gehören zu anderen Reports und werden
+> Zeit-/Positions-/Bias-Statistik, SP) gehören zu anderen Reports und werden
 > vom periodischen Sensor-Status **nicht** gesendet. Ein Decoder soll ihre
 > Präsenz-Bits tolerieren bzw. — wenn er sie nicht auswertet — ihre
 > Längen-Regeln beachten (Vorwärtskompatibilität, Abschnitt 3).
+
+**I063/RE — per-Quelle-Fehlergrund (`SRC-REASON`, seit 3.1.0, ADR 0033).** Bei
+einem **degradierten** Sensor mit **bekanntem** Grund trägt der Record zusätzlich
+das **Reserved Expansion Field** (FRN 13). Damit die FSPEC-Position FRN 13
+markiert ist, wächst die FSPEC auf **zwei Oktette**: `0xB9 0x04` (FRN 1+3+4+5 +
+FX, dann FRN 13). Das RE-Feld ist **selbst-begrenzend** über sein erstes Oktett
+(Länge inkl. sich selbst):
+
+```
+[LEN = 0x03] [SUBFIELD_SPEC = 0x80] [SRC-REASON]
+```
+
+- `LEN` = Gesamtlänge des RE-Felds in Oktetten (hier 3).
+- `SUBFIELD_SPEC` = Präsenz-Oktett im RE-eigenen Subfeld-Raum: Bit 8 (`0x80`)
+  markiert `SRC-REASON` vorhanden; Bit 1 = FX (0).
+- `SRC-REASON` (u8, Firefly-Vendor): `1 = unreachable` (Netz/Firewall — Credentials
+  ok), `2 = auth` (HTTP 401/403 — falsche/fehlende Credentials), `3 = rate_limited`
+  (HTTP 429). `0` (ok) wird **nie** gesendet — ein operationeller Sensor trägt
+  kein RE-Feld.
+
+**Sende-Regel.** Das RE-Feld erscheint **nur**, wenn der Sensor degradiert ist
+**und** ein Grund bekannt ist. Ein operationeller Sensor bleibt die 9-Oktett-Form
+(FSPEC `0xB8`); ein degradierter Sensor **ohne** bekannten Grund (z. B. eine still
+gewordene FLARM-/Radar-Quelle — nur die HTTP-ADS-B-Poller OpenSky/adsb_aggregator
+klassifizieren heute Gründe) trägt ebenfalls kein RE-Feld. Der Grund wird beim
+nächsten erfolgreichen Plot **zurückgesetzt** (Sensor wieder erreichbar).
+
+**Konsument.** Wer das RE-Feld nicht auswertet, **überspringt** es über sein
+`LEN`-Oktett (Vorwärtskompatibilität, Abschnitt 3) — additiv, kein Wire-Bruch.
+Wer es auswertet, liest `SUBFIELD_SPEC` und — bei gesetztem `0x80` — das
+`SRC-REASON`-Oktett; ein unbekannter Grund-Code sollte tolerant als „degradiert,
+Grund unbekannt" behandelt werden.
+
+**Byte-genauer Referenz-Dump** (degradierter Sensor SIC = 1, Grund `unreachable`):
+```
+0x3F 0x00 0x10 0xB9 0x04 0x19 0x02 0x00 0x00 0x00 0x00 0x01 0x40 0x03 0x80 0x01
+```
+(`LEN` = 16; FSPEC `0xB9 0x04`; I063/010 = `19 02`; I063/030 = `00 00 00`;
+I063/050 = `00 01`; I063/060 = `0x40` degradiert; I063/RE = `03 80 01`.)
 
 **Byte-genauer Referenz-Dump** (SDPS 25/2, ein operationeller Sensor SIC = 1,
 SAC = 0, Mitternacht):

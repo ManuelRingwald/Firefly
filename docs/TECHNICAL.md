@@ -51,8 +51,13 @@ einem **leeren Himmel** unterscheidet (ADR 0022, Firefly #32). Ein Block je Tick
 ein Record je Sensor. Seit ICD 3.0.0 (ADR 0032) folgt der Record der echten
 EUROCONTROL-CAT063-UAP (FSPEC `0xB8`): I063/010 = **SDPS**-Identität (SAC/SIC wie
 I062/010), I063/030 = ToD, I063/050 = **Sensor**-Identität (SAC 0, SIC =
-`sensor_id`), I063/060 = CON (operationell/degradiert). Läuft mit, sobald
-**Feed *und* Heartbeat** aktiv sind — kein eigener Enable-Schalter.
+`sensor_id`), I063/060 = CON (operationell/degradiert). Seit ICD 3.1.0 (ADR 0033)
+trägt ein **degradierter** Sensor mit bekanntem Grund zusätzlich das **I063/RE**
+(FSPEC dann `0xB9 0x04`) mit `SRC-REASON` (`1=unreachable`/`2=auth`/`3=rate_limited`)
+— der Grund kommt aus den HTTP-ADS-B-Pollern (`SensorHealthMonitor::record_failure`,
+Klassifikation über `PollError::is_rate_limited`/`is_auth`); FLARM/Radar liefern
+keinen Grund. Läuft mit, sobald **Feed *und* Heartbeat** aktiv sind — kein eigener
+Enable-Schalter.
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
