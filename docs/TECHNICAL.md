@@ -80,6 +80,32 @@ Liveness folgt dem echten Plot-Eingang des jeweiligen Quell-Adapters
 > gesetzt (Abschnitt 1.5.1) — dann haben die `FIREFLY_OPENSKY_*`-Variablen **keinen**
 > Effekt (Vorrang von `FIREFLY_SOURCES`).
 
+#### Community-Aggregator-ADS-B-Adapter (`FIREFLY_ADSBAGG_*`, ADR 0031)
+
+Auth-freier ADS-B-Bezug über einen ADSBExchange-v2-kompatiblen
+Community-Aggregator (adsb.lol, adsb.fi) — der zweite ADS-B-Bezugsweg **neben**
+OpenSky, für Umgebungen, in denen OpenSky nicht erreichbar ist (Datacenter-
+IP-Sperre) oder kein OAuth2-Client gewünscht ist. Im Standalone-Pfad per
+`FIREFLY_ADSBAGG_ENABLED=true` zuschaltbar, orchestriert als
+`adsb_aggregator`-Eintrag in `FIREFLY_SOURCES` (Kontrakt v1.5.0). Die
+konfigurierte BBox wird als **Umkreis** abgefragt (die APIs sind Punkt+Radius,
+max. 250 NM — größere BBoxen werden mit WARN geclampt) und die Antwort auf die
+BBox zurückgefiltert. Plots fließen in denselben Tracker (Fusion).
+
+| Variable | Typ | Default | Bedeutung |
+|----------|-----|---------|-----------|
+| `FIREFLY_ADSBAGG_ENABLED` | bool | `false` | Adapter im Standalone-Live-Modus aktivieren |
+| `FIREFLY_ADSBAGG_PROVIDER` | string | `adsb_lol` | Anbieter: `adsb_lol` \| `adsb_fi` (airplanes.live zurückgestellt, ADR 0031) |
+| `FIREFLY_ADSBAGG_BASE_URL` | string | — | Basis-URL-Override (Tests, self-hosted Aggregator); leer → öffentliche Basis des Providers |
+| `FIREFLY_ADSBAGG_LAT_MIN` / `_MAX` | f64 | `47.0` / `55.0` | Bounding Box Süd/Nord (Grad) |
+| `FIREFLY_ADSBAGG_LON_MIN` / `_MAX` | f64 | `5.0` / `16.0` | Bounding Box West/Ost (Grad) |
+| `FIREFLY_ADSBAGG_POLL_INTERVAL_SECS` | u64 | `10` | Abfrageintervall (s); öffentliche Endpoints erlauben ~1 req/s — Default bleibt höflich darunter |
+| `FIREFLY_ADSBAGG_SENSOR_ID` | u16 | `230` | Sensor-ID der Aggregator-Plots |
+
+> **Sicherheit/Qualität:** Crowdgesourcte, unauthentifizierte Community-Daten
+> ohne SLA (gleiche Vertrauensgrenze wie OpenSky, ADR 0017/0019); adsb.lol-Daten
+> stehen unter ODbL. Keine zertifizierte Surveillance-Quelle.
+
 #### FLARM/OGN-Adapter (`FIREFLY_FLARM_*`, ADR 0026)
 
 Zweiter Live-Quell-Adapter: FLARM-Positionen über das Open Glider Network via
@@ -131,13 +157,13 @@ fließen in denselben Tracker (Fusion mit ADS-B/FLARM).
 
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
-Maßgeblich: `docs/source-input-contract.md` v1.4.0. Im **Live-Modus** liest Firefly
+Maßgeblich: `docs/source-input-contract.md` v1.5.0. Im **Live-Modus** liest Firefly
 seine Quellen aus einer JSON-Liste, die ein Orchestrator (Wayfinder) je Instanz
 setzt — ein Eintrag je Quelle, mehrere Adapter speisen denselben Live-Tracker.
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
-| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`/`FIREFLY_FLARM_*`. Eintrag: `{type, bbox?, sac?, sic?, sensor_id?, cred_env?, lat?, lon?, height_m?, listen?, poll_interval_secs?}`. `type` ∈ `adsb_opensky` / `flarm_aprs` / `radar_asterix` (alle drei unterstützt). `poll_interval_secs` (nur `adsb_opensky`, `> 0`; fehlt/`0` → Default 10 s, ADR 0029) überschreibt das OpenSky-Poll-Intervall. Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
+| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`/`FIREFLY_ADSBAGG_*`/`FIREFLY_FLARM_*`. Eintrag: `{type, bbox?, provider?, sac?, sic?, sensor_id?, cred_env?, lat?, lon?, height_m?, listen?, poll_interval_secs?}`. `type` ∈ `adsb_opensky` / `adsb_aggregator` / `flarm_aprs` / `radar_asterix` (alle unterstützt). `provider` (nur `adsb_aggregator`): `adsb_lol` (Default) \| `adsb_fi`; unbekannt → **Start-Abbruch**. `poll_interval_secs` (`adsb_opensky`/`adsb_aggregator`, `> 0`; fehlt/`0` → Default 10 s, ADR 0029/0031) überschreibt das Poll-Intervall. Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
 | `FIREFLY_SOURCE_<n>_SECRET` o. ä. | string | — | Beliebig **benannte** Credential-Env, von einem Eintrag per `cred_env` referenziert. Wert quellenabhängig: `client_id:client_secret` (`adsb_opensky`) bzw. `callsign:passcode` (`flarm_aprs`), Split am ersten `:`; nie im JSON-Blob. |
 
 Beispiel: siehe `docs/source-input-contract.md` §2. Referenzpunkt = Mittelpunkt der
@@ -245,10 +271,13 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_plot_records_written_total` | counter | **Live-Modus:** In `.ffplots`-Datei geschriebene Records |
 | `firefly_opensky_poll_errors_total` | counter | **Live-Modus:** HTTP/Netz-Fehler beim OpenSky-Poll |
 | `firefly_opensky_rate_limited_total` | counter | **Live-Modus:** OpenSky-Polls mit HTTP 429 (Rate-Limit; Teilmenge der Poll-Fehler). Jeder 429 dehnt das Poll-Intervall exponentiell (Backoff), Reset bei Erfolg (#49). |
+| `firefly_adsbagg_poll_errors_total` | counter | **Live-Modus:** HTTP/Netz-Fehler beim Community-Aggregator-Poll (adsb.lol/adsb.fi, ADR 0031) |
+| `firefly_adsbagg_rate_limited_total` | counter | **Live-Modus:** Aggregator-Polls mit HTTP 429 (Teilmenge der Poll-Fehler); jeder 429 dehnt das Poll-Intervall exponentiell (Backoff wie #49) |
 | `firefly_flarm_plots_received_total` | counter | **Live-Modus:** Empfangene FLARM/OGN-Plots (APRS-IS, ADR 0026) |
 | `firefly_radar_plots_received_total` | counter | **Live-Modus:** Dekodierte Radar-ASTERIX-Plots (CAT048/UDP, ADR 0028) |
 | `firefly_live_plot_batches_dropped_total` | counter | **Live-Modus:** Plot-Batches verworfen, weil der Quell→Tracker-Kanal voll war (Back-Pressure-Verlust). Wächst nur unter Überlast — Operator-Signal zum Skalieren/Drosseln. |
 | `firefly_sources_opensky` | gauge | Anzahl konfigurierter `adsb_opensky`-Quellen (Quell-Mix, ADR 0023) |
+| `firefly_sources_adsbagg` | gauge | Anzahl konfigurierter `adsb_aggregator`-Quellen (ADR 0031) |
 | `firefly_sources_flarm` | gauge | Anzahl konfigurierter `flarm_aprs`-Quellen |
 | `firefly_sources_radar` | gauge | Anzahl konfigurierter `radar_asterix`-Quellen |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
@@ -284,7 +313,7 @@ firefly_tracks_active
 rate(firefly_live_plot_batches_dropped_total[1m])
 
 # Konfigurierter Quell-Mix dieser Instanz:
-firefly_sources_opensky + firefly_sources_flarm + firefly_sources_radar
+firefly_sources_opensky + firefly_sources_adsbagg + firefly_sources_flarm + firefly_sources_radar
 ```
 
 ---

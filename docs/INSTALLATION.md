@@ -206,6 +206,33 @@ Die Readiness-Probe (`/ready`) gibt `503` zurück, bis der erste OpenSky-Poll
 erfolgreich war — danach `200 ready`. Wayfinder zeigt Tracks sobald `/ready`
 positiv antwortet.
 
+### Schritt 4a (optional): ADS-B ohne Account — Community-Aggregator
+
+Wenn OpenSky nicht erreichbar ist (verbreitete **Datacenter-IP-Sperre**, z. B.
+aus GitHub Codespaces/Azure) oder kein OAuth2-Client gewünscht ist, liefert der
+Community-Aggregator-Adapter (ADR 0031) dieselbe crowdgesourcte ADS-B-Lage
+**ohne jede Anmeldung** — über adsb.lol (Default) oder adsb.fi:
+
+```bash
+FIREFLY_ADSBAGG_ENABLED=true \
+FIREFLY_ADSBAGG_LAT_MIN=49.0 \
+FIREFLY_ADSBAGG_LAT_MAX=51.0 \
+FIREFLY_ADSBAGG_LON_MIN=7.0 \
+FIREFLY_ADSBAGG_LON_MAX=10.0 \
+./target/release/firefly-server
+```
+
+Weitere Variablen mit Defaults: `FIREFLY_ADSBAGG_PROVIDER` (`adsb_lol` |
+`adsb_fi`), `FIREFLY_ADSBAGG_POLL_INTERVAL_SECS` (`10`),
+`FIREFLY_ADSBAGG_SENSOR_ID` (`230`), `FIREFLY_ADSBAGG_BASE_URL` (Override für
+Tests/self-hosted). Die BBox wird intern als Umkreis abgefragt (API-Limit
+250 NM; größere BBoxen werden mit Warnung geclampt) und die Antwort auf die
+BBox zurückgefiltert. OpenSky- und Aggregator-Quelle können auch **gleichzeitig**
+laufen — der Tracker fusioniert beide.
+
+> **Orchestrierter Betrieb:** als `adsb_aggregator`-Eintrag in `FIREFLY_SOURCES`
+> (Vertrag `docs/source-input-contract.md` v1.5.0), ohne `cred_env`.
+
 ### Schritt 4b (optional): FLARM/OGN als zusätzliche Quelle
 
 FLARM-getragene Luftfahrzeuge (Segelflieger, UL, tiefe GA) sind über das **Open

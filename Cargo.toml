@@ -14,6 +14,7 @@ members = [
     "crates/firefly-opensky",
     "crates/firefly-flarm",
     "crates/firefly-radar",
+    "crates/firefly-adsbagg",
 ]
 
 [workspace.package]
@@ -36,6 +37,7 @@ firefly-recorder = { path = "crates/firefly-recorder" }
 firefly-opensky = { path = "crates/firefly-opensky" }
 firefly-flarm = { path = "crates/firefly-flarm" }
 firefly-radar = { path = "crates/firefly-radar" }
+firefly-adsbagg = { path = "crates/firefly-adsbagg" }
 nalgebra = "0.33"
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: the parser recovers f64 bit-for-bit (the serializer already

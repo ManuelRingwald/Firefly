@@ -8,6 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use firefly_adsbagg::{AdsbAggConfig, AdsbAggPoller};
 use firefly_asterix::Cat062Encoder;
 use firefly_core::{Plot, SensorId};
 use firefly_flarm::FlarmConfig;
@@ -112,6 +113,7 @@ async fn build_live_state(
     // mis-sourced.
     let resolved = resolve_live_sources();
     let opensky = resolved.opensky;
+    let adsbagg = resolved.adsbagg;
     let flarm = resolved.flarm;
     let radar = resolved.radar;
 
@@ -119,7 +121,7 @@ async fn build_live_state(
     // deliberate EMPTY SKY (plus the CAT065 heartbeat). That is the complete
     // picture then, so report ready immediately — live_ready is otherwise set
     // by the first plot of an adapter, which will never come (ADR 0030).
-    if opensky.is_empty() && flarm.is_empty() && radar.is_empty() {
+    if opensky.is_empty() && adsbagg.is_empty() && flarm.is_empty() && radar.is_empty() {
         metrics
             .live_ready
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -128,16 +130,21 @@ async fn build_live_state(
     // Representative across all sources: union bbox (tracking-frame origin), output
     // cadence, and a placeholder sensor id. FLARM and radar are folded in
     // (ADR 0026/0028).
-    let representative = sources::representative_config(&opensky, &flarm, &radar);
+    let representative = sources::representative_config(&opensky, &adsbagg, &flarm, &radar);
     let sensor_id = representative.sensor_id;
     let output_period = Duration::from_secs(representative.poll_interval_secs);
 
-    // Geodetic source sensors (OpenSky, FLARM) and their scan periods: OpenSky
-    // uses its poll interval, FLARM a nominal (it is a push stream). These share
-    // the common tracking frame (geodetic path).
+    // Geodetic source sensors (OpenSky, aggregator, FLARM) and their scan
+    // periods: the polled adapters use their poll interval, FLARM a nominal (it
+    // is a push stream). These share the common tracking frame (geodetic path).
     let geodetic_sensors: Vec<(SensorId, f64)> = opensky
         .iter()
         .map(|c| (c.sensor_id, c.poll_interval_secs as f64))
+        .chain(
+            adsbagg
+                .iter()
+                .map(|c| (c.sensor_id, c.poll_interval_secs as f64)),
+        )
         .chain(
             flarm
                 .iter()
@@ -168,6 +175,7 @@ async fn build_live_state(
 
     tracing::info!(
         opensky_sources = opensky.len(),
+        adsbagg_sources = adsbagg.len(),
         flarm_sources = flarm.len(),
         radar_sources = radar.len(),
         lat_min = representative.lat_min,
@@ -185,6 +193,9 @@ async fn build_live_state(
     metrics
         .sources_opensky
         .store(opensky.len() as u64, Ordering::Relaxed);
+    metrics
+        .sources_adsbagg
+        .store(adsbagg.len() as u64, Ordering::Relaxed);
     metrics
         .sources_flarm
         .store(flarm.len() as u64, Ordering::Relaxed);
@@ -233,6 +244,14 @@ async fn build_live_state(
     // notifying the sensor monitor for their own sensor.
     for cfg in opensky {
         spawn_opensky_poller_live(
+            cfg,
+            plots_tx.clone(),
+            Arc::clone(&metrics),
+            Arc::clone(&sensor_monitor),
+        );
+    }
+    for cfg in adsbagg {
+        spawn_adsbagg_poller_live(
             cfg,
             plots_tx.clone(),
             Arc::clone(&metrics),
@@ -297,6 +316,12 @@ fn resolve_live_sources() -> sources::ResolvedSources {
             } else {
                 Vec::new()
             };
+            let adsbagg_cfg = AdsbAggConfig::from_env();
+            let adsbagg = if adsbagg_cfg.enabled {
+                vec![adsbagg_cfg]
+            } else {
+                Vec::new()
+            };
             let flarm_cfg = FlarmConfig::from_env();
             let flarm = if flarm_cfg.enabled {
                 vec![flarm_cfg]
@@ -311,6 +336,7 @@ fn resolve_live_sources() -> sources::ResolvedSources {
             };
             return sources::ResolvedSources {
                 opensky,
+                adsbagg,
                 flarm,
                 radar,
                 skipped: Vec::new(),
@@ -332,7 +358,11 @@ fn resolve_live_sources() -> sources::ResolvedSources {
             "FIREFLY_SOURCES: no adapter for this source type yet; skipping"
         );
     }
-    if resolved.opensky.is_empty() && resolved.flarm.is_empty() && resolved.radar.is_empty() {
+    if resolved.opensky.is_empty()
+        && resolved.adsbagg.is_empty()
+        && resolved.flarm.is_empty()
+        && resolved.radar.is_empty()
+    {
         tracing::warn!("FIREFLY_SOURCES: no live source adapter active (empty sky)");
     }
     resolved
@@ -391,6 +421,67 @@ fn spawn_opensky_poller_live(
                     if e.is_rate_limited() {
                         metrics_err
                             .opensky_rate_limited_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                },
+            )
+            .await;
+    });
+}
+
+/// Spawn the community-aggregator ADS-B poller in Live mode (ADR 0031): every
+/// batch of plots is sent into `plots_tx` so the tracker can consume it. If the
+/// channel is full, the batch is dropped and a warning is logged — availability
+/// over back-pressure.
+///
+/// Sets `metrics.live_ready = true` on the first successful poll; increments
+/// `adsbagg_poll_errors_total` on each failure and `adsbagg_rate_limited_total`
+/// on the 429 subset (mirrors the OpenSky poller, #49). Notifies
+/// `sensor_monitor` on each successful batch (CAT063 per-sensor liveness).
+fn spawn_adsbagg_poller_live(
+    config: AdsbAggConfig,
+    plots_tx: mpsc::Sender<Vec<Plot>>,
+    metrics: Arc<Metrics>,
+    sensor_monitor: Arc<SensorHealthMonitor>,
+) {
+    let sensor_id = config.sensor_id;
+    let poller = AdsbAggPoller::new(config.clone());
+    let (lat, lon, radius_nm) = poller.query_summary();
+    tracing::info!(
+        provider = %config.provider,
+        lat,
+        lon,
+        radius_nm,
+        poll_interval_secs = config.poll_interval_secs,
+        "community-aggregator ADS-B poller started (live mode)"
+    );
+    tokio::spawn(async move {
+        let metrics_err = Arc::clone(&metrics);
+        poller
+            .run(
+                move |plots| {
+                    tracing::info!(count = plots.len(), "aggregator plots received");
+                    // Mark the server as ready on the first successful poll.
+                    metrics
+                        .live_ready
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    // Notify the sensor health monitor: this sensor is alive.
+                    sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
+                    if let Err(e) = plots_tx.try_send(plots) {
+                        metrics
+                            .live_plot_batches_dropped_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        tracing::warn!("plot channel full; dropping batch: {e}");
+                    }
+                },
+                move |e| {
+                    tracing::warn!(%e, "aggregator poll error (counted in metrics)");
+                    metrics_err
+                        .adsbagg_poll_errors_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if e.is_rate_limited() {
+                        metrics_err
+                            .adsbagg_rate_limited_total
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 },

@@ -1,0 +1,20 @@
+[package]
+name = "firefly-adsbagg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "ADS-B adapter: polls an ADSBExchange-v2-compatible community aggregator (adsb.lol, adsb.fi) and converts aircraft records to firefly-core Plots (ADR 0031)."
+
+[dependencies]
+firefly-core = { workspace = true }
+firefly-geo = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
