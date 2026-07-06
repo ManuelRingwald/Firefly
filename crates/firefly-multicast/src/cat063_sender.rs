@@ -72,7 +72,7 @@ pub async fn run_cat063_sender(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use firefly_asterix::decode_sensor_block;
+    use firefly_asterix::{decode_sensor_block, DataSourceId};
     use firefly_core::SensorId;
     use std::net::Ipv4Addr;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -85,7 +85,7 @@ mod tests {
         let destination = receiver.local_addr().unwrap();
         let sender = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
 
-        let encoder = Cat063Encoder::new(0);
+        let encoder = Cat063Encoder::new(DataSourceId::new(25, 2), 0);
         let monitor = Arc::new(SensorHealthMonitor::new_preseeded([
             SensorId(1),
             SensorId(2),

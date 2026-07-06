@@ -10,6 +10,24 @@
 
 ---
 
+## 🎯 Stand 2026-07-06
+
+- **Zuletzt aktualisiert:** 2026-07-06
+- **ADR 0032 — CAT063-UAP-Standardisierung (ICD 3.0.0, BREAKING):** Die
+  CAT063-Sensor-Status-Records folgen jetzt den **echten EUROCONTROL-FRN-Slots**
+  (spiegelt die CAT062-Korrektur aus ADR 0015). (1) I063/010 trägt die
+  **SDPS**-Identität (SAC/SIC = `FIREFLY_CAT062_SAC`/`_SIC`, Default 25/2), nicht
+  mehr den Sensor. (2) Neues I063/050 (FRN 4) trägt die **Sensor**-Identität
+  (SAC 0, SIC = `sensor_id`). (3) I063/030 → FRN 3, I063/060 → FRN 5. FSPEC
+  `0xE0` → **`0xB8`**, Record 7 → 9 Oktette; CON-Werte auf Standard korrigiert
+  (`0` op / `1` degradiert / `2` init / `3` not-connected). Anlass: sauberes
+  Fundament für den Grund-Code je ausgefallener Quelle (#197 → ADR 0033, RE-Feld,
+  additiv). `Cat063Encoder::new(data_source, sensor_sac)`; `DecodedSensorStatus`
+  trennt `data_source` (SDPS) und `sensor` (I063/050). **Wayfinder zieht in
+  lockstep nach (H2)** — Firefly-first mergen+deployen, Wayfinder unmittelbar
+  danach; Cross-Project via Firefly #55 (`from-wayfinder`). Byte-Referenz-Dumps
+  + ICD-Abschnitt 9 auf 3.0.0-Form; FR-IO-007 erweitert.
+
 ## 🎯 Stand 2026-07-05
 
 - **Zuletzt aktualisiert:** 2026-07-05

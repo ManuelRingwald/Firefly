@@ -1,8 +1,16 @@
 # ADR 0022 — CAT063 Sensor Status Messages (Per-Sensor-Liveness)
 
-- **Status:** akzeptiert
+- **Status:** akzeptiert; UAP-Nummerierung **abgelöst durch ADR 0032**
 - **Datum:** 2026-06-25
 - **Schnittstellen-relevant:** ja (Multicast-Ausgabe-Vertrag, ICD → 2.5.0, additiv)
+
+> ⚠️ **Nachtrag (ADR 0032, 2026-07-06):** Die hier beschriebene UAP-Nummerierung
+> (FSPEC `0xE0`; I063/010 trägt die Sensor-Identität; I063/030 auf FRN 2,
+> I063/060 auf FRN 3) war **nicht standardkonform** und wurde mit **ADR 0032**
+> (ICD 3.0.0, breaking) auf die echten EUROCONTROL-FRN-Slots korrigiert:
+> I063/010 = SDPS-Identität (FRN 1), I063/030 (FRN 3), I063/050 = Sensor-Identität
+> (FRN 4), I063/060 (FRN 5), FSPEC `0xB8`. Der Zweck und die Fachlichkeit dieses
+> ADR bleiben gültig; nur die Byte-Positionen sind überholt.
 - **Auslöser:** Firefly-Issue #32 (`from-wayfinder`) — Wayfinder braucht ein
   Signal für „Sensor ausgefallen", um sein gelbes Degradierungs-Banner zu
   aktivieren.
