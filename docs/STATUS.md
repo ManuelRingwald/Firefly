@@ -10,6 +10,25 @@
 
 ---
 
+## 🎯 Stand 2026-07-06 (Nachmittag)
+
+- **Zuletzt aktualisiert:** 2026-07-06
+- **ADR 0033 — CAT063 per-Quelle-Fehlergrund (`SRC-REASON` im I063/RE, ICD 3.1.0,
+  additiv):** Aufbauend auf ADR 0032 trägt ein **degradierter** Sensor mit
+  bekanntem Grund den Ausfallgrund im **Reserved Expansion Field** (FRN 13, FSPEC
+  dann `0xB9 0x04`): Vendor-Subfeld `SRC-REASON` (`1=unreachable`/`2=auth`/
+  `3=rate_limited`), Layout `[LEN=0x03][0x80][code]`. **Nur** bei Degradierung
+  mit Grund gesendet — operationelle Records bleiben 9 Oktette (additiv, kein
+  Wire-Bruch; RE ist selbst-begrenzend). `SensorReason`/`SensorReport` in
+  `firefly-asterix`; `SensorHealthMonitor::record_failure`/`record_activity`
+  führen bzw. löschen den Grund pro Sensor; Klassifikation über die neuen
+  `PollError::is_auth()` (OpenSky/adsbagg, HTTP 401/403) + bestehendes
+  `is_rate_limited()`; sonst `unreachable`. FLARM/Radar liefern keinen Grund
+  (ehrliche Grenze). Antwort auf Wayfinder #197 (Firefly #55, H3). Byte-genaue
+  Referenz-Vektoren + Monitor-Tests; ICD Abschnitt 9 + Changelog 3.1.0; ADR 0033;
+  FR-IO-007 erweitert. **Wayfinder-Folge H4:** RE-Reason dekodieren + Feed-Health-
+  Chip → **Fixes #197** (rein additiv, kein Lockstep-Zwang).
+
 ## 🎯 Stand 2026-07-06
 
 - **Zuletzt aktualisiert:** 2026-07-06

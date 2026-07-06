@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use firefly_asterix::SensorReason;
 use firefly_core::SensorId;
 
 /// Multiplier applied to a sensor's scan period to define the staleness
@@ -42,6 +43,30 @@ struct SensorEntry {
     timeout: Duration,
 }
 
+/// The mutable per-sensor runtime state behind the monitor's lock: the last plot
+/// time (drives liveness) and the last recorded failure reason (drives the
+/// CAT063 I063/RE reason, ADR 0033).
+#[derive(Debug, Clone, Copy, Default)]
+struct SensorLive {
+    /// Wall-clock time of the most recent plot, or `None` if never seen.
+    last_seen: Option<Instant>,
+    /// The most recent failure reason. Reset to [`SensorReason::Ok`] on every
+    /// successful plot; set by [`SensorHealthMonitor::record_failure`].
+    reason: SensorReason,
+}
+
+/// One sensor's health at a single instant: whether it is active and, when
+/// degraded, why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SensorHealth {
+    /// True when the sensor delivered a plot within its staleness timeout.
+    pub active: bool,
+    /// The last recorded failure reason ([`SensorReason::Ok`] if none). Only
+    /// meaningful for a degraded sensor; the encoder emits an RE field only when
+    /// the sensor is degraded and the reason is not `Ok`.
+    pub reason: SensorReason,
+}
+
 /// The health status of all registered sensors at a single instant.
 #[derive(Debug, Clone)]
 pub struct SensorHealthSnapshot {
@@ -49,17 +74,19 @@ pub struct SensorHealthSnapshot {
     pub sensors_total: usize,
     /// Number of sensors that are currently active (received a recent plot).
     pub sensors_active: usize,
-    /// Per-sensor operational flag (true = active).
-    pub per_sensor: BTreeMap<SensorId, bool>,
+    /// Per-sensor health (active flag + failure reason).
+    pub per_sensor: BTreeMap<SensorId, SensorHealth>,
 }
 
-/// Tracks the wall-clock liveness of each registered sensor.
+/// Tracks the wall-clock liveness and last failure reason of each registered
+/// sensor.
 ///
-/// Shared between the plot-ingestion path (which calls [`record_activity`]) and
-/// the CAT063 sender (which calls [`snapshot`]).
+/// Shared between the plot-ingestion path (which calls [`record_activity`] on a
+/// plot and [`record_failure`] on a poll error) and the CAT063 sender (which
+/// calls [`snapshot`]).
 pub struct SensorHealthMonitor {
     sensors: BTreeMap<SensorId, SensorEntry>,
-    last_seen: Mutex<BTreeMap<SensorId, Instant>>,
+    live: Mutex<BTreeMap<SensorId, SensorLive>>,
 }
 
 impl SensorHealthMonitor {
@@ -82,7 +109,7 @@ impl SensorHealthMonitor {
             .collect();
         Self {
             sensors,
-            last_seen: Mutex::new(BTreeMap::new()),
+            live: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -97,20 +124,54 @@ impl SensorHealthMonitor {
             .into_iter()
             .map(|id| (id, SensorEntry { timeout }))
             .collect();
-        let last_seen = sensors.keys().map(|&id| (id, now)).collect();
+        let live = sensors
+            .keys()
+            .map(|&id| {
+                (
+                    id,
+                    SensorLive {
+                        last_seen: Some(now),
+                        reason: SensorReason::Ok,
+                    },
+                )
+            })
+            .collect();
         Self {
             sensors,
-            last_seen: Mutex::new(last_seen),
+            live: Mutex::new(live),
         }
     }
 
     /// Record that `sensor_id` delivered a plot batch at wall-clock `now`.
     ///
+    /// A successful plot also **clears** any recorded failure reason back to
+    /// [`SensorReason::Ok`] — the sensor is demonstrably reachable again.
+    ///
     /// Unregistered sensor IDs are silently ignored — an unexpected sensor
     /// should not crash the health monitor.
     pub fn record_activity(&self, sensor_id: SensorId, now: Instant) {
         if self.sensors.contains_key(&sensor_id) {
-            self.last_seen.lock().unwrap().insert(sensor_id, now);
+            let mut live = self.live.lock().unwrap();
+            let entry = live.entry(sensor_id).or_default();
+            entry.last_seen = Some(now);
+            entry.reason = SensorReason::Ok;
+        }
+    }
+
+    /// Record that a poll attempt for `sensor_id` **failed** with `reason`.
+    ///
+    /// This updates only the failure reason, not the last-seen time: a failed
+    /// poll is not activity, so it does not keep the sensor "alive". Once the
+    /// sensor goes stale (no plot within its timeout) the snapshot reports it as
+    /// degraded *with this reason*, which the CAT063 sender turns into an
+    /// I063/RE `SRC-REASON` sub-field (ADR 0033). A later successful plot resets
+    /// the reason via [`record_activity`].
+    ///
+    /// Unregistered sensor IDs are silently ignored.
+    pub fn record_failure(&self, sensor_id: SensorId, reason: SensorReason) {
+        if self.sensors.contains_key(&sensor_id) {
+            let mut live = self.live.lock().unwrap();
+            live.entry(sensor_id).or_default().reason = reason;
         }
     }
 
@@ -119,19 +180,27 @@ impl SensorHealthMonitor {
     /// A sensor is **active** if it has been seen and its last activity is
     /// within its configured timeout (`2.5 × scan_period`).
     pub fn snapshot(&self, now: Instant) -> SensorHealthSnapshot {
-        let last_seen = self.last_seen.lock().unwrap();
+        let live = self.live.lock().unwrap();
         let mut sensors_active = 0usize;
         let mut per_sensor = BTreeMap::new();
 
         for (&id, entry) in &self.sensors {
-            let active = last_seen
-                .get(&id)
-                .map(|&t| now.duration_since(t) <= entry.timeout)
+            let state = live.get(&id).copied().unwrap_or_default();
+            let active = state
+                .last_seen
+                .map(|t| now.duration_since(t) <= entry.timeout)
                 .unwrap_or(false);
             if active {
                 sensors_active += 1;
             }
-            per_sensor.insert(id, active);
+            // An active sensor has no failure reason to report; only surface a
+            // reason for a degraded one (the encoder gates the RE field on this).
+            let reason = if active {
+                SensorReason::Ok
+            } else {
+                state.reason
+            };
+            per_sensor.insert(id, SensorHealth { active, reason });
         }
 
         SensorHealthSnapshot {
@@ -172,7 +241,7 @@ mod tests {
         let snap = m.snapshot(Instant::now());
         assert_eq!(snap.sensors_total, 1);
         assert_eq!(snap.sensors_active, 0);
-        assert!(!snap.per_sensor[&sid(1)]);
+        assert!(!snap.per_sensor[&sid(1)].active);
     }
 
     /// A sensor that just sent a plot is active.
@@ -183,7 +252,7 @@ mod tests {
         m.record_activity(sid(1), now);
         let snap = m.snapshot(now);
         assert_eq!(snap.sensors_active, 1);
-        assert!(snap.per_sensor[&sid(1)]);
+        assert!(snap.per_sensor[&sid(1)].active);
     }
 
     /// A sensor whose last plot is older than 2.5 × scan_period is inactive.
@@ -196,7 +265,7 @@ mod tests {
         m.record_activity(sid(1), past);
         let snap = m.snapshot(Instant::now());
         assert_eq!(snap.sensors_active, 0, "sensor should be stale");
-        assert!(!snap.per_sensor[&sid(1)]);
+        assert!(!snap.per_sensor[&sid(1)].active);
     }
 
     /// Activity at exactly the threshold edge: 2.4 × scan_period → still active.
@@ -222,9 +291,9 @@ mod tests {
         let snap = m.snapshot(now);
         assert_eq!(snap.sensors_total, 3);
         assert_eq!(snap.sensors_active, 2);
-        assert!(snap.per_sensor[&sid(1)]);
-        assert!(snap.per_sensor[&sid(2)]);
-        assert!(!snap.per_sensor[&sid(3)]);
+        assert!(snap.per_sensor[&sid(1)].active);
+        assert!(snap.per_sensor[&sid(2)].active);
+        assert!(!snap.per_sensor[&sid(3)].active);
     }
 
     /// Sensors from different IDs are independent: activity for sid(1) does
@@ -235,8 +304,8 @@ mod tests {
         let now = Instant::now();
         m.record_activity(sid(1), now);
         let snap = m.snapshot(now);
-        assert!(snap.per_sensor[&sid(1)], "sid(1) was seen");
-        assert!(!snap.per_sensor[&sid(2)], "sid(2) was never seen");
+        assert!(snap.per_sensor[&sid(1)].active, "sid(1) was seen");
+        assert!(!snap.per_sensor[&sid(2)].active, "sid(2) was never seen");
     }
 
     /// Replay mode pre-seeds all sensors as active.
@@ -266,5 +335,53 @@ mod tests {
         assert_eq!(m.sensors_total(), 2);
         m.record_activity(sid(1), Instant::now());
         assert_eq!(m.sensors_total(), 2);
+    }
+
+    /// A recorded failure surfaces as the degraded sensor's reason once it goes
+    /// stale (the failure itself does not keep it "alive").
+    #[test]
+    fn recorded_failure_becomes_degraded_reason() {
+        let scan_period = 4.0f64;
+        let m = SensorHealthMonitor::new_live([(sid(1), scan_period)]);
+        let past = Instant::now() - Duration::from_secs_f64(3.0 * scan_period);
+        // A plot long ago, then a failure: the sensor is stale now.
+        m.record_activity(sid(1), past);
+        m.record_failure(sid(1), SensorReason::Auth);
+        let snap = m.snapshot(Instant::now());
+        assert!(!snap.per_sensor[&sid(1)].active, "sensor is stale");
+        assert_eq!(snap.per_sensor[&sid(1)].reason, SensorReason::Auth);
+    }
+
+    /// An active sensor reports no failure reason even if a failure was recorded
+    /// while it was still within its timeout window.
+    #[test]
+    fn active_sensor_reports_ok_reason() {
+        let m = SensorHealthMonitor::new_live([(sid(1), 100.0)]);
+        let now = Instant::now();
+        m.record_activity(sid(1), now);
+        m.record_failure(sid(1), SensorReason::RateLimited);
+        let snap = m.snapshot(now);
+        assert!(snap.per_sensor[&sid(1)].active);
+        assert_eq!(
+            snap.per_sensor[&sid(1)].reason,
+            SensorReason::Ok,
+            "an active sensor has no failure reason on the wire"
+        );
+    }
+
+    /// A successful plot clears a previously recorded failure reason.
+    #[test]
+    fn success_clears_failure_reason() {
+        let scan_period = 4.0f64;
+        let m = SensorHealthMonitor::new_live([(sid(1), scan_period)]);
+        let past = Instant::now() - Duration::from_secs_f64(3.0 * scan_period);
+        m.record_activity(sid(1), past);
+        m.record_failure(sid(1), SensorReason::Unreachable);
+        // Recovery: a fresh plot resets liveness and the reason.
+        let now = Instant::now();
+        m.record_activity(sid(1), now);
+        let snap = m.snapshot(now);
+        assert!(snap.per_sensor[&sid(1)].active);
+        assert_eq!(snap.per_sensor[&sid(1)].reason, SensorReason::Ok);
     }
 }

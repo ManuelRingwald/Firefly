@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use firefly_adsbagg::{AdsbAggConfig, AdsbAggPoller};
-use firefly_asterix::Cat062Encoder;
+use firefly_asterix::{Cat062Encoder, SensorReason};
 use firefly_core::{Plot, SensorId};
 use firefly_flarm::FlarmConfig;
 use firefly_geo::Wgs84;
@@ -394,6 +394,9 @@ fn spawn_opensky_poller_live(
     tokio::spawn(async move {
         let poller = OpenSkyPoller::new(config);
         let metrics_err = Arc::clone(&metrics);
+        // A second monitor handle for the error path: the success closure moves
+        // `sensor_monitor`, so the failure classifier needs its own clone.
+        let monitor_err = Arc::clone(&sensor_monitor);
         poller
             .run(
                 move |plots| {
@@ -423,6 +426,12 @@ fn spawn_opensky_poller_live(
                             .opensky_rate_limited_total
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
+                    // Record the failure reason so a degraded sensor carries it in
+                    // CAT063 I063/RE (ADR 0033): unreachable vs. auth vs. rate-limit.
+                    monitor_err.record_failure(
+                        sensor_id,
+                        classify_poll_reason(e.is_rate_limited(), e.is_auth()),
+                    );
                 },
             )
             .await;
@@ -457,6 +466,9 @@ fn spawn_adsbagg_poller_live(
     );
     tokio::spawn(async move {
         let metrics_err = Arc::clone(&metrics);
+        // Own monitor handle for the error path (the success closure moves the
+        // original `sensor_monitor`).
+        let monitor_err = Arc::clone(&sensor_monitor);
         poller
             .run(
                 move |plots| {
@@ -484,10 +496,30 @@ fn spawn_adsbagg_poller_live(
                             .adsbagg_rate_limited_total
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
+                    // Record the degradation reason for CAT063 I063/RE (ADR 0033).
+                    monitor_err.record_failure(
+                        sensor_id,
+                        classify_poll_reason(e.is_rate_limited(), e.is_auth()),
+                    );
                 },
             )
             .await;
     });
+}
+
+/// Map a poll error's `(rate_limited, auth)` flags to a [`SensorReason`] for
+/// CAT063 I063/RE (ADR 0033). Priority: a rate limit is the most specific signal,
+/// then an auth failure; anything else (transport/DNS/timeout/5xx) is
+/// `Unreachable`. Shared by the OpenSky and aggregator error paths so both
+/// classify identically.
+fn classify_poll_reason(is_rate_limited: bool, is_auth: bool) -> SensorReason {
+    if is_rate_limited {
+        SensorReason::RateLimited
+    } else if is_auth {
+        SensorReason::Auth
+    } else {
+        SensorReason::Unreachable
+    }
 }
 
 /// Spawn the FLARM/OGN APRS-IS listener in Live mode (ADR 0026): every decoded

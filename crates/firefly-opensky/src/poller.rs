@@ -88,6 +88,25 @@ impl PollError {
     pub fn is_rate_limited(&self) -> bool {
         matches!(self, PollError::RateLimited)
     }
+
+    /// True when this poll failed for an **authentication/authorisation** reason
+    /// (HTTP 401/403) — bad or missing OAuth2 credentials, whether surfaced by
+    /// the token exchange ([`Auth`](Self::Auth)) or a data request that stayed
+    /// unauthorised after the reactive token refresh ([`Http`](Self::Http)). A
+    /// transport failure with no HTTP status (DNS/connect/timeout) is **not**
+    /// auth — it is unreachable. Drives the CAT063 `SRC-REASON` classification
+    /// (ADR 0033): `auth` vs. `unreachable`.
+    pub fn is_auth(&self) -> bool {
+        let status = match self {
+            PollError::RateLimited => return false,
+            PollError::Auth(AuthError::Http(e)) | PollError::Http(e) => e.status(),
+        };
+        matches!(
+            status,
+            Some(s)
+                if s == reqwest::StatusCode::UNAUTHORIZED || s == reqwest::StatusCode::FORBIDDEN
+        )
+    }
 }
 
 impl std::fmt::Display for PollError {
