@@ -48,8 +48,11 @@
 CAT063 meldet je registriertem Sensor, ob er noch Plots liefert (operationell)
 oder ausgefallen ist (degradiert) — damit Wayfinder einen **Sensor-Ausfall** von
 einem **leeren Himmel** unterscheidet (ADR 0022, Firefly #32). Ein Block je Tick,
-ein Record je Sensor (I063/010 SAC/SIC, I063/030 ToD, I063/060 NOGO). Läuft mit,
-sobald **Feed *und* Heartbeat** aktiv sind — kein eigener Enable-Schalter.
+ein Record je Sensor. Seit ICD 3.0.0 (ADR 0032) folgt der Record der echten
+EUROCONTROL-CAT063-UAP (FSPEC `0xB8`): I063/010 = **SDPS**-Identität (SAC/SIC wie
+I062/010), I063/030 = ToD, I063/050 = **Sensor**-Identität (SAC 0, SIC =
+`sensor_id`), I063/060 = CON (operationell/degradiert). Läuft mit, sobald
+**Feed *und* Heartbeat** aktiv sind — kein eigener Enable-Schalter.
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|

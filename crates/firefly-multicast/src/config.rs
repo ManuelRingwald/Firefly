@@ -132,10 +132,12 @@ impl MulticastConfig {
         Cat065Encoder::new(self.data_source(), self.service_id)
     }
 
-    /// A CAT063 sensor status encoder. Firefly uses SAC=0 for all local sensor
-    /// identifiers — the SIC distinguishes the individual radars.
+    /// A CAT063 sensor status encoder. The **SDPS** identity (I063/010) comes
+    /// from this config's data source (the same SAC/SIC as I062/010 and
+    /// I065/010); Firefly uses SAC=0 for all local **sensor** identifiers
+    /// (I063/050) — the per-record SIC distinguishes the individual radars.
     pub fn cat063_encoder(&self) -> Cat063Encoder {
-        Cat063Encoder::new(0)
+        Cat063Encoder::new(self.data_source(), 0)
     }
 }
 

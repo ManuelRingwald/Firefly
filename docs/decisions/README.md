@@ -45,3 +45,4 @@ wird nicht nachträglich umgeschrieben; ändert sie sich, schreiben wir einen
 - [0029 — Konfigurierbares OpenSky-Poll-Intervall (`poll_interval_secs`)](0029-konfigurierbares-opensky-poll-intervall.md)
 - [0030 — Ausbau des Replay-/Szenen-Modus (Live ist der einzige Betrieb)](0030-ausbau-replay-szenen-modus.md)
 - [0031 — Community-Aggregator-ADS-B-Adapter (`adsb_aggregator`: adsb.lol / adsb.fi)](0031-adsb-aggregator-adapter.md)
+- [0032 — CAT063 UAP-Standardisierung (I063/010 SDPS, I063/050 Sensor)](0032-cat063-uap-standardisierung.md)
