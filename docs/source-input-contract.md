@@ -71,9 +71,10 @@ unterstützter Quell-Typ; `flarm_aprs`/`radar_asterix` reserviert.
 | `FIREFLY_SOURCES` | im Live-Modus | JSON-Array der Quellen (Abschnitt 2). Leer/ungesetzt = keine Quelle. |
 | `FIREFLY_CAT062_GROUP` / `_PORT` | — | Ausgabe-Endpoint (CAT062/UDP). Unverändert, siehe ICD. |
 
-**Präzedenz zu `FIREFLY_OPENSKY_*`:** Ist `FIREFLY_SOURCES` gesetzt, hat es Vorrang;
-die diskreten `FIREFLY_OPENSKY_*`-Envs (Standalone-/Dev-Pfad) werden dann **nicht**
-zusätzlich ausgewertet (kein Doppel-Adapter).
+**Präzedenz zu den Standalone-Envs:** Ist `FIREFLY_SOURCES` gesetzt, hat es Vorrang;
+die diskreten Standalone-/Dev-Envs (`FIREFLY_OPENSKY_*`, `FIREFLY_ADSBAGG_*`,
+`FIREFLY_FLARM_*`, `FIREFLY_RADAR_*`) werden dann **sämtlich nicht** zusätzlich
+ausgewertet (kein Doppel-Adapter).
 
 ## 2. `FIREFLY_SOURCES` — Schema
 

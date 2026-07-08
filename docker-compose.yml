@@ -13,7 +13,8 @@ services:
       # an idle tracker: empty sky + CAT065 heartbeat (ADR 0030). Example:
       #   FIREFLY_OPENSKY_ENABLED: "true"
       #   FIREFLY_OPENSKY_LAT_MIN: "49.0"   # …_LAT_MAX/_LON_MIN/_LON_MAX
-      #   FIREFLY_OPENSKY_CREDENTIALS: "client_id:client_secret"  # OAuth2 (ADR 0024)
+      #   FIREFLY_OPENSKY_CLIENT_ID: "client_id"          # OAuth2 (ADR 0024)
+      #   FIREFLY_OPENSKY_CLIENT_SECRET: "client_secret"
       FIREFLY_SOURCES: ${FIREFLY_SOURCES:-}
       # CAT062/065/063 multicast feed (off by default; the wire contract with
       # the ASD — docs/ICD-CAT062.md):

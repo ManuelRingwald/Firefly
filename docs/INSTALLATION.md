@@ -117,7 +117,8 @@ UDP-Verkehr). Für den Verbund mit Wayfinder:
 docker run --rm \
   --network host \                         # Multicast benötigt Host-Netz
   -e FIREFLY_OPENSKY_ENABLED=true \
-  -e FIREFLY_OPENSKY_CREDENTIALS=client_id:client_secret \
+  -e FIREFLY_OPENSKY_CLIENT_ID=client_id \
+  -e FIREFLY_OPENSKY_CLIENT_SECRET=client_secret \
   -e FIREFLY_CAT062_ENABLED=true \
   -e FIREFLY_CAT062_GROUP=239.255.0.62 \
   -e FIREFLY_CAT062_PORT=8600 \
