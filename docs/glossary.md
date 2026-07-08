@@ -84,6 +84,13 @@ austauschen. In „Kategorien" gegliedert:
 - **CAT048:** Einzelradar-Zielmeldungen (Plots/Tracks eines Radars).
 - **CAT021:** ADS-B-Meldungen.
 - **CAT062:** fertige System-Tracks (die fusionierte Luftlage).
+- **CAT063:** Sensor-Status-Meldungen — Per-Sensor-Liveness des SDPS (ADR 0022,
+  UAP-Standardisierung ADR 0032, per-Quelle-Fehlergrund ADR 0033).
+- **CAT065:** SDPS-Service-Status — periodischer „Heartbeat", der „leeren Himmel"
+  von „totem Feed" unterscheidbar macht (ADR 0018).
+
+Firefly sendet CAT062/CAT063/CAT065 auf **derselben** Multicast-Gruppe/Port; der
+Empfänger dispatcht am führenden CAT-Oktett (`0x3E`/`0x3F`/`0x41`).
 
 ASTERIX ist **bit-genau und binär**: Ein Datenblock ist `[CAT][LEN][Record…]`
 (CAT = Kategorie-Nummer, LEN = Gesamtlänge), jeder Record beginnt mit einem
@@ -111,6 +118,16 @@ oberstes Bit des zweiten Octets usw.
 **SAC/SIC** (*System Area Code / System Identification Code*)
 Die zweiteilige **Quell-Kennung** in ASTERIX (Datenfeld I062/010): *wer* hat die
 Meldung erzeugt — welche geografische Stelle (SAC) und welches System dort (SIC).
+
+**SDPS** (*Surveillance Data Processing System*, Radardatenverarbeitungssystem)
+Das System, das die Meldungen der Einzelsensoren (Radare, ADS-B) zu einem
+fusionierten Luftlagebild verarbeitet — bei uns **Firefly selbst**. In ASTERIX ist
+das SDPS der *Absender* von CAT062 (Tracks), CAT063 (Sensor-Status) und CAT065
+(SDPS-Service-Status/Heartbeat). Seit ADR 0032 trennt CAT063 sauber: **I063/010**
+trägt die **SDPS-Identität** (SAC/SIC, Default 25/2 — *wer* meldet), das separate
+**I063/050** die **Sensor-Identität** (SAC 0, SIC = `sensor_id` — *worüber*). So
+ist ein einzelner ausgefallener Sensor erkennbar, obwohl das SDPS selbst
+ungestört weiterläuft.
 
 **RE / SP** (*Reserved Expansion Field / Special Purpose Field*)
 Zwei im ASTERIX-UAP vorgesehene **Erweiterungs-Slots** am Ende eines Records, über

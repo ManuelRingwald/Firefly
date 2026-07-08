@@ -229,7 +229,7 @@ RUST_LOG=debug ./target/release/firefly-server
 
 | Nachricht | Bedeutung |
 |-----------|-----------|
-| `starting Firefly server` | Server startet; zeigt Port, Speed, Scene, Frame-Anzahl |
+| `starting Firefly server (sources-driven live tracker)` | Server startet; zeigt `port`. |
 | `listening; open http://{addr} in a browser` | Server ist bereit |
 | `CAT062 multicast feed enabled destination=...` | Multicast-Feed aktiv; zeigt Ziel-Adresse |
 | `CAT062 multicast feed disabled` | Feed aus (Normal bei `FIREFLY_CAT062_ENABLED` nicht gesetzt) |
@@ -395,13 +395,23 @@ Aufzeichnungen entstehen automatisch bei Nutzung des `firefly-recorder`-Crates
 ### 5.2 Replay einer Aufzeichnung
 
 ```bash
-# Aufzeichnung abspielen (Beispiel, nach AP9.4c-5):
-firefly-replay-plots --input session.ffrec
+# Aufzeichnung abspielen (env-getrieben, ADR 0020):
+FIREFLY_REPLAY_PLOTS_INPUT=session.ffplots \
+FIREFLY_REPLAY_PLOTS_SPEED=1.0 \
+FIREFLY_CAT062_ENABLED=true \
+./target/release/firefly-replay-plots
 ```
 
-> **Hinweis:** Das Replay-Binary (`firefly-replay-plots`) wird in AP9.4c-5
-> implementiert. Bis dahin sind Aufzeichnungen über den `firefly-player`-Crate
-> nutzbar (programmatisch).
+| Variable | Default | Bedeutung |
+|----------|---------|-----------|
+| `FIREFLY_REPLAY_PLOTS_INPUT` | *(Pflicht)* | Pfad zur `.ffplots`-Eingabedatei |
+| `FIREFLY_REPLAY_PLOTS_SPEED` | `1.0` | Abspieltempo; `0` = so schnell wie möglich |
+| `FIREFLY_REPLAY_PLOTS_OUTPUT_PERIOD_SECS` | *(Tracker-Default)* | Ausgabetakt beim Replay |
+
+> **Hinweis:** Das Replay-Binary (`firefly-replay-plots`) ist implementiert
+> (`crates/firefly-server/src/bin/replay_plots.rs`, AP9.4c-5 / ADR 0020) und wird
+> ausschließlich über die obigen `FIREFLY_REPLAY_PLOTS_*`-Envs gesteuert (keine
+> `--input`-Flags). Alternativ ist der `firefly-player`-Crate programmatisch nutzbar.
 
 ---
 
@@ -461,9 +471,14 @@ Kubernetes-Empfehlung: `terminationGracePeriodSeconds: 30` im Pod-Spec.
 Der Server betreibt **immer** den Live-Tracker: die konfigurierten Quellen
 (`FIREFLY_SOURCES`, ADR 0023 — oder standalone die Opt-in-Adapter-Envs) speisen
 Plots in den langlebigen Tracker; Snapshots gehen über einen `watch`-Kanal an
-den WebSocket- und den CAT062-Ausgang. Alle Plots werden in eine
-`.ffplots`-Datei aufgezeichnet (ADR 0020) — für deterministisches Replay
-(`firefly-replay-plots`, NFR-REPRO-001) und Debugging.
+den WebSocket- und den CAT062-Ausgang. Der Live-Server ist auf automatische
+`.ffplots`-Aufzeichnung ausgelegt (ADR 0020) — für deterministisches Replay
+(`firefly-replay-plots`, NFR-REPRO-001) und Debugging. **Stand:** Die Verdrahtung
+des Recorders im Server ist noch offen (`main.rs`: `LiveTracker::new(tracker,
+None)`, AP9.4c-4) — es wird derzeit **keine** `.ffplots`-Datei geschrieben und die
+Metrik `firefly_plot_records_written_total` bleibt `0`, bis der Recorder aktiviert
+ist. Das Replay-Tooling selbst (oben) ist einsatzbereit für bereits vorhandene
+`.ffplots`-Dateien (z. B. aus Tests/`firefly-player`).
 
 Ohne aktive Quelle läuft der Tracker leer: **leerer Himmel + CAT065-Heartbeat**
 — so unterscheidet der Konsument einen ruhigen Himmel von einem toten Feed
@@ -483,7 +498,7 @@ Zum Verifizieren des Ausgabestroms auf dem Netz:
 udp.dstport == 8600
 
 # ASTERIX Plugin: in Wireshark unter Analyze → Decode As → ASTERIX auswählen,
-# oder manuell: Payload enthält 0x3E (CAT062) oder 0x41 (CAT065)
+# oder manuell: Payload enthält 0x3E (CAT062), 0x3F (CAT063) oder 0x41 (CAT065) als erstes Byte
 # als erstes Byte, gefolgt von 2 Byte Länge (Big Endian).
 ```
 
@@ -567,7 +582,7 @@ spec:
 | Einschränkung | ADR / Issue | Geplante Lösung |
 |---------------|-------------|-----------------|
 | Multicast ohne Authentifizierung | ADR 0017 | Netz-Isolation + anwendungsseitige Absicherung |
-| OpenSky-Passwort nur via Env-Variable | ADR 0003 | Kubernetes Secret (bereits empfohlen) |
+| OpenSky-OAuth2-Credentials (`FIREFLY_OPENSKY_CLIENT_ID`/`_CLIENT_SECRET`) nur via Env-Variable | ADR 0024/0003 | Kubernetes Secret (bereits empfohlen) |
 
 ---
 

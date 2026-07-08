@@ -75,7 +75,7 @@ nackten Start):
 FIREFLY_OPENSKY_ENABLED=true \
 FIREFLY_OPENSKY_LAT_MIN=49.0 FIREFLY_OPENSKY_LAT_MAX=51.0 \
 FIREFLY_OPENSKY_LON_MIN=7.0  FIREFLY_OPENSKY_LON_MAX=10.0 \
-FIREFLY_OPENSKY_CREDENTIALS="client_id:client_secret" \
+FIREFLY_OPENSKY_CLIENT_ID="client_id" FIREFLY_OPENSKY_CLIENT_SECRET="client_secret" \
 cargo run -p firefly-server
 ```
 
@@ -153,7 +153,7 @@ Standalone (Firefly allein, mit aktiviertem CAT062-Feed und einer Quelle):
 
 ```bash
 FIREFLY_CAT062_ENABLED=true \
-FIREFLY_OPENSKY_ENABLED=true FIREFLY_OPENSKY_CREDENTIALS="id:secret" \
+FIREFLY_OPENSKY_ENABLED=true FIREFLY_OPENSKY_CLIENT_ID="id" FIREFLY_OPENSKY_CLIENT_SECRET="secret" \
 cargo run -p firefly-server
 ```
 

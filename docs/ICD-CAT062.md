@@ -79,7 +79,7 @@ ersetzt die Edition nicht als normative Quelle.
 | Default-Port | `8600` (Env: `FIREFLY_CAT062_PORT`) |
 | TTL | 1 (subnetz-lokal, Default) |
 | Framing | **Ein Datagramm = ein vollständiger ASTERIX-Datenblock einer Kategorie.** Für CAT062 ist das ein Scan (Tracks); für CAT065 ein SDPS-Status (Heartbeat). Keine zusätzliche Anwendungs-Rahmung (keine Sequenznummern, keine Extra-Header). |
-| Kategorien | **CAT062** (Tracks) **und CAT065** (Heartbeat, seit 2.3.0) auf **derselben** Gruppe/Port. Der Empfänger **dispatcht am führenden CAT-Oktett**: `0x3E` (62) → Track-Datenblock (Abschnitt 2), `0x41` (65) → SDPS-Status (Abschnitt 8). Unbekannte Kategorien werden verworfen, nicht als Fehler behandelt. |
+| Kategorien | **CAT062** (Tracks, `0x3E`), **CAT065** (Heartbeat, `0x41`, seit 2.3.0) **und CAT063** (Per-Sensor-Status, `0x3F`, seit 2.5.0) auf **derselben** Gruppe/Port. Der Empfänger **dispatcht am führenden CAT-Oktett**: `0x3E` (62) → Track-Datenblock (Abschnitt 2), `0x41` (65) → SDPS-Status (Abschnitt 8), `0x3F` (63) → Sensor-Status (Abschnitt 9). Unbekannte Kategorien werden verworfen, nicht als Fehler behandelt. |
 
 **Update-Rate.** Es gibt **keine feste, globale Update-Periode** — jeder Sensor
 hat seine eigene `scan_period` (typisch 4–12 s, konfiguriert pro Radar, siehe
@@ -336,9 +336,13 @@ wenn der Feed via `FIREFLY_CAT062_ENABLED` läuft), `FIREFLY_CAT065_PERIOD`
   (Firefly); byte-genauer Test `cat065::status_matches_reference_dump`.
 - Byte-genauer CAT062-Referenz-Dump/Test: `single_track_matches_reference_dump`
   (Firefly, `firefly-asterix`).
+- Referenz-Encoder/Decoder CAT063: `crates/firefly-asterix/src/cat063.rs`
+  (Firefly); byte-genaue Tests `cat063::single_operational_sensor_matches_reference_dump`
+  und `cat063::degraded_sensor_with_reason_appends_re_field` (I063/RE SRC-REASON).
 - Architekturentscheidungen: Fireflys ADR 0006 (Integration/CAT062), ADR 0014
   (Produktions-Pivot, Wayfinder konsumiert CAT062/UDP), **ADR 0018 (CAT065
-  Heartbeat)**, **ADR 0022 (CAT063 Sensor Status)**.
+  Heartbeat)**, **ADR 0022 (CAT063 Sensor Status)**, **ADR 0032 (CAT063
+  UAP-Standardisierung)**, **ADR 0033 (CAT063 SRC-REASON / I063/RE)**.
 - Kurzfassung für Wayfinder: Wayfinders `CLAUDE.md` Abschnitt 2.
 
 ## 9. CAT063 — Sensor Status Messages (seit 2.5.0)

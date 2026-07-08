@@ -10,7 +10,7 @@ docker-compose up
 
 # Mit OpenSky-ADS-B-Quelle (Opt-in; Konto siehe docs/INSTALLATION.md §7):
 FIREFLY_OPENSKY_ENABLED=true \
-FIREFLY_OPENSKY_CREDENTIALS=client_id:client_secret \
+FIREFLY_OPENSKY_CLIENT_ID=client_id FIREFLY_OPENSKY_CLIENT_SECRET=client_secret \
 docker-compose up
 ```
 
