@@ -32,6 +32,7 @@ use crate::kalman::{LinearKalman, ProcessNoise};
 use crate::measurement::{tracking_measurement, CartesianMeasurement, SensorErrorModel};
 use crate::pda::ClutterModel;
 use crate::track::{Track, TrackStatus};
+use crate::track_number::TrackNumberPool;
 
 /// Below this "no detection" probability `β_0`, a track is treated as having
 /// at least one plot in its gate (a hit) rather than coasting.
@@ -234,6 +235,11 @@ pub struct Tracker {
     config: TrackerConfig,
     tracks: Vec<Track>,
     next_id: u32,
+    /// Pool for the 16-bit **wire** track numbers (CAT062 I062/040,
+    /// FR-TRK-035): allocated at track birth, quarantined on deletion, reused
+    /// only after the quarantine — so the wire number space never silently
+    /// collides the way a truncated `next_id` would after 65 536 births.
+    track_numbers: TrackNumberPool,
     /// Data time of the previous scan, for the inter-scan gap (ADR 0012).
     prev_scan_time: Option<f64>,
     /// Last data time each sensor delivered plots, to estimate its scan period.
@@ -264,6 +270,7 @@ impl Tracker {
             config,
             tracks: Vec::new(),
             next_id: 1,
+            track_numbers: TrackNumberPool::new(),
             prev_scan_time: None,
             sensor_last_scan: BTreeMap::new(),
             sensor_period: BTreeMap::new(),
@@ -392,7 +399,12 @@ impl Tracker {
     /// carry `ended = true` and are appended in live-set order, so the buffer is
     /// deterministic (NFR-CLOUD-001). Shared by both deletion sites (batch
     /// `process_scan` and the time-continuous `process_plots`).
-    fn delete_and_buffer_ended(&mut self, should_delete: impl Fn(&Track) -> bool) {
+    ///
+    /// `now` is the deletion's data time: each deleted track's wire number is
+    /// released into the pool's quarantine at this instant (FR-TRK-035), so it
+    /// cannot be reborn on a new track before every consumer has processed the
+    /// TSE report.
+    fn delete_and_buffer_ended(&mut self, now: f64, should_delete: impl Fn(&Track) -> bool) {
         let frame = &self.config.tracking_frame;
         let mut newly_ended: Vec<SystemTrack> = self
             .tracks
@@ -411,6 +423,9 @@ impl Tracker {
                 final_track
             })
             .collect();
+        for ended in &newly_ended {
+            self.track_numbers.release(ended.track_number, now);
+        }
         self.tracks.retain(|track| !should_delete(track));
         self.ended_tracks.append(&mut newly_ended);
     }
@@ -568,7 +583,7 @@ impl Tracker {
         //    deletion governed by how many updates were missed, independent of
         //    the feed's absolute pace (NFR-CLOUD-004), while tolerating the
         //    interleaved misses an asynchronous multi-radar feed produces.
-        self.delete_and_buffer_ended(|track| {
+        self.delete_and_buffer_ended(t, |track| {
             should_delete(track, delete_tentative, delete_confirmed, cadence)
         });
     }
@@ -729,7 +744,7 @@ impl Tracker {
 
             // 5. Delete via the time-continuous missed-revisit budget, floored
             //    by the slowest observed sensor cadence (Häppchen 13.5c).
-            self.delete_and_buffer_ended(|track| {
+            self.delete_and_buffer_ended(t, |track| {
                 should_delete_continuous(track, delete_tentative, delete_confirmed, cadence)
             });
 
@@ -915,11 +930,22 @@ impl Tracker {
                 {
                     continue;
                 }
+                // Allocate the wire track number first (FR-TRK-035): with the
+                // whole 16-bit space in use or quarantined there is no honest
+                // number to report this track under, so initiation is declined
+                // rather than emitting a colliding I062/040.
+                let Some(number) = self.track_numbers.allocate(t) else {
+                    tracing::warn!(
+                        time = t,
+                        "track number pool exhausted: track initiation declined"
+                    );
+                    continue;
+                };
                 let filter = LinearKalman::from_first_measurement(m, initial_velocity_std);
                 let imm = imm_config.seed(filter);
                 let id = TrackId(self.next_id);
                 self.next_id += 1;
-                let mut track = Track::new(id, imm, t);
+                let mut track = Track::new(id, number, imm, t);
                 let founding = &items[orig_mi].0;
                 track.update_identity(&founding.mode_ac);
                 track.record_hit_from(sensor);
@@ -965,6 +991,7 @@ fn system_track_from(
     };
     SystemTrack {
         id: track.id(),
+        track_number: track.track_number(),
         time: Timestamp(time),
         position,
         v_east: v[0],
@@ -1188,6 +1215,55 @@ mod tests {
         assert!(
             tracker.take_ended_tracks().is_empty(),
             "an ended track is reported exactly once, then never again"
+        );
+    }
+
+    /// The wire track number (I062/040) is pool-managed (FR-TRK-035): a deleted
+    /// track's number is quarantined — a newborn cannot claim it while a
+    /// consumer might still associate it with the ended track — and only after
+    /// the quarantine may it be reused. With the whole space in use or
+    /// quarantined, initiation is declined instead of emitting a duplicate.
+    /// REQ: FR-TRK-035
+    #[test]
+    fn track_number_is_quarantined_after_deletion_then_reused() {
+        use crate::track_number::{TrackNumberPool, TRACK_NUMBER_QUARANTINE_SECS};
+
+        let mut tracker = Tracker::new(config());
+        // Shrink the number space to a single number so the test reaches the
+        // reuse/exhaustion behaviour without 65 535 track births.
+        tracker.track_numbers = TrackNumberPool::with_fresh_limit(1);
+
+        // Birth at t = 0: the track carries wire number 1, and so does its
+        // system-track projection.
+        tracker.process_scan(Timestamp(0.0), &[plot(0.0, 30_000.0, 1.0)]);
+        assert_eq!(tracker.tracks()[0].track_number(), 1);
+        assert_eq!(tracker.system_tracks()[0].track_number, 1);
+
+        // Starve the tentative track to deletion (t = 8); the final TSE report
+        // still carries the number the consumer knows it by.
+        tracker.process_scan(Timestamp(4.0), &[]);
+        tracker.process_scan(Timestamp(8.0), &[]);
+        let ended = tracker.take_ended_tracks();
+        assert_eq!(ended.len(), 1);
+        assert_eq!(ended[0].track_number, 1, "TSE report keeps the number");
+
+        // A new target inside the quarantine window: the only number is still
+        // quarantined, so initiation is declined — no track under a number the
+        // consumer may still attribute to the ended one.
+        tracker.process_scan(Timestamp(12.0), &[plot(12.0, 50_000.0, 0.0)]);
+        assert!(
+            tracker.tracks().is_empty(),
+            "initiation declined while the pool is exhausted"
+        );
+
+        // After the quarantine the number returns to circulation.
+        let t = 8.0 + TRACK_NUMBER_QUARANTINE_SECS + 2.0;
+        tracker.process_scan(Timestamp(t), &[plot(t, 50_000.0, 0.0)]);
+        assert_eq!(tracker.tracks().len(), 1);
+        assert_eq!(
+            tracker.tracks()[0].track_number(),
+            1,
+            "reused after quarantine"
         );
     }
 

@@ -10,6 +10,37 @@
 
 ---
 
+## 🎯 Stand 2026-07-10 (ARTAS-Gap-Roadmap + QW.1 Track-Nummern-Pool)
+
+- **Zuletzt aktualisiert:** 2026-07-10
+- **ARTAS-Gap-Analyse & Roadmap (`docs/design/artas-gap-roadmap.md`):** Firefly
+  wurde vollständig (Code + Doku) gegen EUROCONTROL **ARTAS** als vollwertiges
+  SDPS inventarisiert. Ergebnis: **≈ 30 % Fähigkeits-Abdeckung** (gewichtetes
+  Modell im Dokument); die fünf größten Abstände sind Sensoreingang
+  (CAT034/021/020, Mode-S-DAPs), **Sensor-Registrierung/Bias** (kritischster
+  Punkt vor echten Radaren), 2-D-Tracker (Höhe/RoCD/QNH/MoM fehlen),
+  Flugplan-Korrelation (I062/390 — bisher nirgends im Backlog!) und HA/
+  Kapazitätsnachweis. Roadmap mit 10 Arbeitspaketen (AP-QW … AP-ASSUR) und
+  kumulierten Prozent je Häppchen bis 100 %.
+- **QW.1 — Track-Nummern-Pool für I062/040 (FR-TRK-035, ICD 3.1.1):** Erster
+  Roadmap-Punkt umgesetzt. Die Draht-Track-Nummer war eine stille
+  `u32→u16`-Trunkierung der internen `TrackId` (`cat062.rs`) — nach 65 536
+  Track-Geburten drohten Draht-Kollisionen (zwei Flieger unter einer Nummer,
+  TSE löscht beim Konsumenten den falschen Track). Jetzt: verwalteter Pool
+  (`firefly-track::track_number::TrackNumberPool`) — frische Nummern ab 1
+  (`0` nie), bei Löschung **60 s Datenzeit-Quarantäne** vor FIFO-
+  Wiederverwendung, bei Erschöpfung (> 65 535 gleichzeitige Tracks) wird die
+  Initiierung mit Warn-Log abgelehnt (ehrliche Grenze, TECHNICAL §11).
+  `Track.number`/`SystemTrack.track_number` additiv; Encoder nutzt nie mehr
+  die ID. Pool ist Teil des serialisierbaren Tracker-Zustands (ADR 0007,
+  HA-Vorbau). **Kein Wire-Bruch** (u16 BE unverändert, ICD 3.1.1 rein
+  dokumentarisch, Abschnitt 4.6 mit Konsumenten-Garantie); Wayfinder muss
+  nichts nachziehen. 7 neue Tests (Pool, Tracker-Lebenszyklus, Encoder-
+  Regression); Milestone `Track-Number-Pool_I062-040.md`. Gates grün
+  (`cargo test --workspace`, clippy, fmt).
+- **Nächster Schritt:** Roadmap-Reihenfolge — **QW.2** (echtes Fuzzing für
+  CAT048/`FIREFLY_SOURCES`, S2–S3) ankündigen, nach „Go" umsetzen.
+
 ## 🎯 Stand 2026-07-06 (Nachmittag)
 
 - **Zuletzt aktualisiert:** 2026-07-06

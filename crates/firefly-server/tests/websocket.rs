@@ -19,6 +19,7 @@ use tokio::sync::watch;
 fn track(id: u32, time: f64) -> SystemTrack {
     SystemTrack {
         id: TrackId(id),
+        track_number: id as u16,
         time: Timestamp(time),
         position: Wgs84::from_degrees(48.1, 11.2, 10_000.0),
         v_east: 100.0,

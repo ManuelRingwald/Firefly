@@ -77,6 +77,14 @@ pub enum Provenance {
 pub struct SystemTrack {
     /// Stable identity of the track.
     pub id: TrackId,
+    /// The 16-bit **wire** track number (ASTERIX CAT062 I062/040). Unlike
+    /// `id` — which is process-unique and never repeats — this lives in the
+    /// managed 16-bit space of the wire contract: allocated at track birth,
+    /// quarantined on deletion, and only then reusable (FR-TRK-035). Encoders
+    /// must report *this* value, never a truncation of `id`, or the wire
+    /// identity silently collides after 65 536 track births.
+    #[serde(default)]
+    pub track_number: u16,
     /// Data time of the estimate (the last scan that touched this track).
     pub time: Timestamp,
     /// Estimated position in geodetic WGS84.
@@ -215,6 +223,7 @@ mod tests {
     fn track(v_east: f64, v_north: f64) -> SystemTrack {
         SystemTrack {
             id: TrackId(1),
+            track_number: 1,
             time: Timestamp(0.0),
             position: Wgs84::from_degrees(47.0, 8.0, 500.0),
             v_east,

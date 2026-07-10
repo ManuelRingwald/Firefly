@@ -157,6 +157,7 @@ mod tests {
     fn sample_track(id: u32) -> SystemTrack {
         SystemTrack {
             id: TrackId(id),
+            track_number: id as u16,
             time: Timestamp(12.0),
             position: Wgs84::from_degrees(47.5, 8.25, 500.0),
             v_east: 150.0,

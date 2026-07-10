@@ -77,6 +77,13 @@ impl SourceHits {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     id: TrackId,
+    /// The 16-bit **wire** track number (CAT062 I062/040), allocated from the
+    /// tracker's [`TrackNumberPool`](crate::track_number::TrackNumberPool) at
+    /// birth and returned to it (via quarantine) on deletion. Deliberately
+    /// separate from `id`: the internal id stays process-unique for
+    /// association/bookkeeping, while the number lives in the managed 16-bit
+    /// space a consumer keys its picture by (FR-TRK-035).
+    number: u16,
     status: TrackStatus,
     /// The track's **IMM** bank (constant velocity + coordinated turns,
     /// Häppchen M5.4). Its [`combined_estimate`](Imm::combined_estimate) is the
@@ -130,9 +137,10 @@ pub struct Track {
 
 impl Track {
     /// Create a fresh tentative track from an initialised IMM bank.
-    pub(crate) fn new(id: TrackId, imm: Imm, time: f64) -> Self {
+    pub(crate) fn new(id: TrackId, number: u16, imm: Imm, time: f64) -> Self {
         Self {
             id,
+            number,
             status: TrackStatus::Tentative,
             imm,
             last_time: time,
@@ -151,6 +159,12 @@ impl Track {
     /// Track identifier.
     pub fn id(&self) -> TrackId {
         self.id
+    }
+
+    /// The 16-bit wire track number (CAT062 I062/040), pool-managed
+    /// (FR-TRK-035).
+    pub fn track_number(&self) -> u16 {
+        self.number
     }
 
     /// Lifecycle status.
@@ -348,7 +362,7 @@ mod tests {
         let measurement = convert_plot(&Polar::new(50_000.0, 0.0, 0.0), &model);
         let filter = LinearKalman::from_first_measurement(&measurement, 200.0);
         let imm = ImmConfig::cv_and_turns(0.052).seed(filter);
-        Track::new(TrackId(1), imm, 0.0)
+        Track::new(TrackId(1), 1, imm, 0.0)
     }
 
     /// A fresh track has no known identity yet.
