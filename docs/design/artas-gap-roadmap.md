@@ -1,0 +1,136 @@
+# Gap-Analyse & Roadmap: Firefly → vollwertiges SDPS (Referenz: EUROCONTROL ARTAS)
+
+> **Zweck:** Verbindliche Standortbestimmung und Arbeitsplan auf dem Weg zum
+> vollwertigen SDPS. Referenzrahmen ist **ARTAS** (ATM suRveillance Tracker And
+> Server) als funktionales Vorbild: **T**racker + **S**erver, dazu FEP
+> (Sensor-Eingang), Umgebungsdaten, Betrieb/Redundanz und Assurance.
+>
+> **Erstellt:** 2026-07-10 (Code-/Doku-Inventur beider Repos + Synthese).
+> Lebendes Dokument — nach jedem abgeschlossenen Häppchen den Status-Haken und
+> die Prozent-Spalte nachziehen. Bei Widerspruch zum tagesaktuellen Stand gilt
+> `docs/STATUS.md`.
+
+---
+
+## 1. Messlatte: Was heißt „100 %"?
+
+**100 % = funktionale ARTAS-Äquivalenz als vollwertiges SDPS — innerhalb der
+eigenen Architektur.** Bewusst dokumentierte Abweichungen zählen als erfüllt,
+sobald sie per ADR festgeschrieben sind:
+
+- **CAT252-artige Subscription-/Track-Services** → erbringt arbeitsteilig
+  **Wayfinder** (mandanten-gescopte AOI/FL-Filterung am WS-Rand). Firefly
+  bleibt Fire-and-Forget-Multicast + ADR über die Arbeitsteilung (SRV.1).
+- **SNMP-/CMD-Supervision** → ersetzt durch Cloud-Observability
+  (Prometheus/Grafana, Probes) + Laufzeit-Steuerungs-API (SRV.2).
+
+Die Prozente sind **Fähigkeits-Abdeckung, nicht Aufwand** — HA.2 bringt z. B.
+nur 4,5 Punkte, ist aber eines der teuersten Häppchen.
+
+## 2. Gewichtungsmodell
+
+| Block | Gewicht | Ist (2026-07-10) |
+|---|---:|---:|
+| Tracker-Kern (IMM/JPDA/Fusion/Lebenszyklus/Geodäsie) | 15 | ~12 |
+| CAT062/065/063-Ausgabe | 7 | ~4 |
+| Sensoreingang Radar (CAT048/034/001/002) | 9 | ~3 |
+| ADS-B/WAM/DAPs-Eingang (CAT021/020/019, BDS) | 8 | ~1 |
+| Sensor-Registrierung/Bias | 8 | 0 |
+| Vertikal/3-D + Kinematik (Höhe, RoCD, MoM, Beschl.) | 11 | ~1 |
+| Meteo/QNH (SDPS-003) | 3 | 0 |
+| Flugplan-Korrelation (I062/390) | 7 | 0 |
+| Sonderfälle (Duplikate/Reflexion/Split/Clutter-Karte) | 5 | ~1 |
+| Server-Funktion/Dienste (arbeitsteilig, per ADR) | 4 | ~1,5 |
+| HA/State-Sync (SDPS-002) | 9 | ~0,5 |
+| Recording/Replay/Auswertung | 4 | ~2 |
+| Kapazität/Lastfestigkeit | 5 | ~0,5 |
+| Supervision/Betrieb/K8s | 3 | ~1 |
+| Assurance (FHA, Fuzzing, Coverage, Nachweise) | 5 | ~2 |
+| **Summe** | **100** | **≈ 30** |
+
+**Startpunkt: ≈ 30 %.** Der solide Tracker-Kern (IMM/JPDA, zentrale
+Mess-Fusion nach ADR 0010, Datenzeit-Determinismus, Zwei-Tore-Konzept ADR 0011,
+adaptiver Lebenszyklus ADR 0012/0013) und die ICD-Disziplin (standardtreue UAP,
+byte-genaue Referenz-Dumps, versionierte ICD) tragen fast den gesamten
+Ist-Stand.
+
+## 3. Die fünf größten Abstände (Kurzfassung der Analyse)
+
+1. **Kein echter Radar-Sensoreingang im ARTAS-Sinn:** nur CAT048-Zielmeldungen;
+   kein CAT034 (Nordmarke/Sektor/Servicemeldungen — ohne sie ist ein echtes
+   Radar betrieblich blind), kein CAT001/002/021/020/019, keine Mode-S-DAPs
+   (I048/250 wird übersprungen → I062/380 nur ADR-Subfeld).
+2. **Keine Sensor-Registrierung/Bias-Korrektur** (ADR 0010 „späteres Thema"):
+   ohne sie erzeugt die Fusion *echter* Radare Doppelbilder — mit dem
+   Simulator unsichtbar, im Betrieb sofort sichtbar. Passend fehlen die
+   CAT063-Bias-Items I063/070–092.
+3. **2-D-Tracker:** keine Höhenschätzung, keine Vertikalrate, keine
+   QNH-Korrektur (SDPS-003 offen), kein Mode of Movement, keine Beschleunigung
+   → I062/130/135/200/210/220 fehlen.
+4. **Kein „Server" im ARTAS-Sinn:** keine Flugplan-Korrelation (I062/390 —
+   im gesamten Backlog bislang unbeleuchtet!), keine nutzerspezifischen
+   Track-Services (bewusst → Wayfinder, per ADR festzuschreiben).
+5. **Keine HA/Redundanz** (SDPS-002: Main/Standby, State-Sync;
+   Eingangs-Recorder war im Live-Pfad nicht verdrahtet) und **kein
+   Kapazitätsnachweis** (kein Benchmark-Harness; größtes Testszenario
+   ~8 Ziele/3 Radare; JPDA-Cluster-Worst-Case ungetestet).
+
+Weitere Befunde: kein aktives Duplikat-/Split-Merge-Handling, keine
+Reflexions-Erkennung, globales statt räumliches Clutter-Modell, verspätete
+Plots werden verworfen statt gepuffert (FR-TRK-033, bewusst), kein echtes
+Fuzzing (nur deterministischer Byte-Flip-Test am CAT048-Decoder), FHA offen.
+
+## 4. Roadmap zu 100 % (kumulierte Abdeckung nach jedem Häppchen)
+
+| AP | Häppchen | Inhalt | Stufe · Modell | danach bei | Status |
+|---|---|---|---|---:|---|
+| **AP-QW · Quick Wins** | QW.1 | TrackId-u16-Trunkierung fixen: verwalteter Track-Nummern-Pool mit 60-s-Quarantäne (FR-TRK-035, ICD 3.1.1) | S3 · Fable 5 | **30,5 %** | ✅ 2026-07-10 |
+| | QW.2 | Echtes Fuzzing: cargo-fuzz für CAT048-Decoder + `FIREFLY_SOURCES`-Parser, CI-Job | S2–S3 · Sonnet | **31,5 %** | ⏳ |
+| | QW.3 | I062/295 (Data Ages) + I062/080-Bit-Ausbau | S2 · Sonnet | **32,5 %** | ⏳ |
+| | QW.4 | PlotRecorder im Live-Pfad verdrahten (`main.rs`, heute `None`) | S2 · Haiku/Sonnet | **33,5 %** | ⏳ |
+| **AP-REG · Sensor-Registrierung** | REG.1 | ADR + Bias-Modell (Range/Azimut/Zeit) + Offline-Schätzer über Track-Residuen | S5 · Fable 5 | **36,5 %** | ⏳ |
+| | REG.2 | Online-Schätzung + Korrektur vor der Fusion, Metriken, Konvergenz-Tests | S5 · Fable 5 / Opus 4.8 | **40 %** | ⏳ |
+| | REG.3 | Bias-Statistik auf den Draht: I063/070–092, Referenz-Vektoren, ICD-Bump | S3 · Sonnet | **41,5 %** | ⏳ |
+| **AP-FEP · Sensoreingang** | FEP.1 | CAT034-Decoder: Nordmarke/Sektor/Servicemeldungen → dynamische `scan_period`, Sensor-Liveness aus dem Datenstrom | S4 · Opus 4.8 / Fable 5 | **45,5 %** | ⏳ |
+| | FEP.2 | Mode-S-DAPs: I048/250 (BDS 4,0/5,0/6,0) dekodieren → I062/380-Ausbau (Selected Alt, Heading, IAS/Mach, …) | S4 · Opus 4.8 / Fable 5 | **49,5 %** | ⏳ |
+| | FEP.3 | CAT021-Eingangsadapter (ADS-B-Bodenstation statt nur Internet-REST) | S4 · Opus 4.8 | **52 %** | ⏳ |
+| | FEP.4 | CAT001/002-Legacy-Radar-Eingang | S3 · Sonnet | **53,5 %** | ⏳ |
+| | FEP.5 | CAT020/019 WAM/MLAT-Eingang | S4 · Opus 4.8 | **55,5 %** | ⏳ |
+| **AP-VERT · Vertikal & Kinematik** | VERT.1 | SDPS-003: Meteo/QNH-Dienst (Quelle, Zyklus, Regionen) | S3 · Sonnet | **58,5 %** | ⏳ |
+| | VERT.2 | Höhen-Tracking (Mode-C + geometrisch) + RoCD → I062/135/130/220, QNH-korrigiert | S5 · Fable 5 | **62,5 %** | ⏳ |
+| | VERT.3 | Mode of Movement + Beschleunigung + IMM-Bank-Ausbau (CA-Modell) → I062/200/210 | S4–S5 · Fable 5 / Opus 4.8 | **66,5 %** | ⏳ |
+| **AP-SPEC · Sonderfälle** | SPEC.1 | Duplikat-ICAO-Auflösung + Split/Merge-Behandlung (JPDA-Koaleszenz aktiv korrigieren) | S4 · Opus 4.8 | **69 %** | ⏳ |
+| | SPEC.2 | Räumliche Clutter-Karte + Reflexions-/Mehrwege-Heuristik | S4 · Opus 4.8 | **71 %** | ⏳ |
+| **AP-FPL · Flugplan-Korrelation** | FPL.0 | ADR „Korrelation im SDPS vs. CWP" — Architektur-Abstimmung mit Wayfinder (**vor** deren EFS-1!) | S3 · Opus 4.8 | **72 %** | ⏳ |
+| | FPL.1 | FPL-Eingangs-Kontrakt (minimales FDPS-Interface) + Code/Callsign-Korrelation | S5 · Fable 5 | **76 %** | ⏳ |
+| | FPL.2 | I062/390-Encoding + manuelle Korrelations-Kommandos, ICD-Bump | S3–S4 · Opus 4.8 | **78 %** | ⏳ |
+| **AP-HA · SDPS-002** | HA.1 | Snapshot/Restore produktiv (periodischer Tracker-Zustand + Wiederanlauf; Serde-Basis existiert) | S3–S4 · Opus 4.8 | **80,5 %** | ⏳ |
+| | HA.2 | Main/Standby: Leader Election, State-Sync, unterbrechungsfreier Feed-Übergang | S5 · Fable 5 | **85 %** | ⏳ |
+| | HA.3 | K8s-Manifeste/Helm, Deployment-Härtung (koppelt an Wayfinder ORCH-6) | S3 · Sonnet | **86,5 %** | ⏳ |
+| | HA.4 | Auswertungs-Harness (SASS-C-artig): PD/RMSE/Kontinuität gegen Referenz aus `.ffrec`/`.ffplots` | S4 · Opus 4.8 | **88,5 %** | ⏳ |
+| **AP-CAP · Kapazität** | CAP.1 | Benchmark-Harness (criterion) + synthetische Lastszenarien (N Sensoren × M Tracks) | S3 · Sonnet | **90,5 %** | ⏳ |
+| | CAP.2 | Hot-Path-Optimierung (JPDA-Cluster-Grenzen) + dokumentierte Auslegungsgrenzen | S4 · Opus 4.8 / Fable 5 | **94 %** | ⏳ |
+| **AP-SRV · Server-Funktion** | SRV.1 | ADR „Arbeitsteilung Firefly+Wayfinder = SDPS-Server-Funktion" (CAT252-Ersatz) + optionale adressierte Dienste je Konsument | S3 · Opus 4.8 | **96 %** | ⏳ |
+| | SRV.2 | Laufzeit-Steuerung (Sensor an/aus, Service-Kommandos via API) + Supervision-Ausbau | S3 · Sonnet | **97,5 %** | ⏳ |
+| **AP-ASSUR · Assurance** | ASSUR.1 | FHA/Hazard-Analyse (bestehender Roadmap-Punkt #7) | S4 · Opus 4.8 | **99 %** | ⏳ |
+| | ASSUR.2 | Coverage-Messung + Property-Tests + Genauigkeits-Nachweisdossier | S3 · Sonnet | **100 %** | ⏳ |
+
+## 5. Lesehinweise
+
+- **Meilenstein-Schwellen:** Bei **~41 %** (nach AP-REG) ist Firefly erstmals
+  mit *echten* Radaren fusionsfähig; bei **~66 %** (nach AP-VERT) ist der
+  Track-Inhalt ARTAS-vergleichbar; bei **~88 %** (nach AP-HA) ist es
+  betrieblich ein SDPS; der Rest ist Nachweis- und Feinschliff-Arbeit.
+- **Reihenfolge-Logik:** REG vor FEP — jedes echte Radar, das vor der
+  Bias-Korrektur angeschlossen wird, produziert Doppelbilder. Quick Wins und
+  ASSUR-Häppchen sind jederzeit parallel ziehbar (Haiku/Sonnet-Spur).
+- **Abhängigkeiten nach außen:** FPL.1 braucht die Wayfinder-Abstimmung
+  (FPL.0 daher früh terminieren, obwohl das Epic spät kommt); FEP.3/FEP.5
+  brauchen reale Datenquellen bzw. Aufzeichnungen; VERT.2 braucht VERT.1 (QNH).
+- Die Prozentwerte tragen eine Unsicherheit von grob ±3 Punkten — sie sind ein
+  Steuerungsinstrument, kein Messwert.
+- **Verhältnis zu bestehenden Backlogs:** SDPS-001…004, Roadmap-Pakete #5/#7/#8
+  (Wayfinder-`ROADMAP.md` §3) gehen in den APs auf: SDPS-001 → AP-FEP,
+  SDPS-002 → AP-HA, SDPS-003 → VERT.1, SDPS-004 (STCA) bleibt eigenständig
+  **nach** VERT (braucht saubere Kinematik) und ist hier bewusst nicht
+  eingepreist (Safety-Nets sind in ARTAS ein separates System).
