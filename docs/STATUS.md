@@ -10,6 +10,28 @@
 
 ---
 
+## 🎯 Stand 2026-07-10 (REG.1 — Sensor-Registrierung: Fundament)
+
+- **Zuletzt aktualisiert:** 2026-07-10 (spät nachts)
+- **REG.1 — Bias-Schätzung offline (ADR 0034, FR-TRK-037):** Erstes Häppchen
+  des AP-REG-Pakets (kritischster ARTAS-Gap: unkorrigierte systematische
+  Radar-Fehler ⇒ Doppelbilder in der Fusion). Neues Modul
+  `firefly-track::registration`: `SensorBias` (Range/Azimut,
+  `gemessen = wahr + Bias`), Identitäts-Pairing über die ICAO-Adresse
+  (Betreiber-Entscheid Option a; enges Zeitfenster, Zeit-Offset bewusst
+  Folge-Häppchen), linearisierte **SVD-Kleinste-Quadrate** über die
+  Lift-Residuen (`d = J_a·b_a − J_b·b_b`; Jacobi numerisch auf dem exakten
+  Sensor→WGS84→Common-Lift; ADS-B-Selbstreports als bias-freie
+  Referenzwahrheit), **Beobachtbarkeits-Diagnose** über das
+  Singulärwert-Spektrum + RMS vor/nach. 9 Ground-Truth-Tests (injizierte
+  150 m/0,3° unter Rauschen zurückgewonnen; Zwei-Radar-Fall ohne Referenz;
+  Ko-Lokation als unbeobachtbar geflaggt). **Kein Live-Eingriff, kein
+  Wire-Change** (REG.2 = Online-Korrektur, REG.3 = I063/070–092). Gates grün.
+  Roadmap-Stand: **36,5 %**.
+- **Nächster Schritt:** **REG.2** ankündigen — Online-Schätzung im Live-Pfad
+  + Korrektur vor der Fusion (Akkumulations-Fenster, Anwendungs-Politik nur
+  bei `observable` + signifikantem RMS-Gewinn, Metriken).
+
 ## 🎯 Stand 2026-07-10 (QW.4 — PlotRecorder im Live-Pfad; Quick-Win-Block komplett)
 
 - **Zuletzt aktualisiert:** 2026-07-10 (Nacht)
