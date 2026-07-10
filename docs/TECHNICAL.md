@@ -577,12 +577,13 @@ spec:
 
 ---
 
-## 11. Bekannte Einschränkungen (Stand 2026-06-18)
+## 11. Bekannte Einschränkungen (Stand 2026-07-10)
 
 | Einschränkung | ADR / Issue | Geplante Lösung |
 |---------------|-------------|-----------------|
 | Multicast ohne Authentifizierung | ADR 0017 | Netz-Isolation + anwendungsseitige Absicherung |
 | OpenSky-OAuth2-Credentials (`FIREFLY_OPENSKY_CLIENT_ID`/`_CLIENT_SECRET`) nur via Env-Variable | ADR 0024/0003 | Kubernetes Secret (bereits empfohlen) |
+| Track-Nummernraum (I062/040): max. 65 535 gleichzeitige Tracks inkl. 60-s-Quarantäne gelöschter Nummern; darüber wird die Track-Initiierung abgelehnt (Warn-Log) | FR-TRK-035, ICD 3.1.1 | Bewusste, ehrliche Grenze — weit jenseits realer Kapazität; keine Änderung geplant |
 
 ---
 

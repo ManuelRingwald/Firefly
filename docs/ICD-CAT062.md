@@ -21,7 +21,18 @@
 
 ## Version
 
-**3.1.0** (2026-07-06) — **Additiv (ADR 0033):** CAT063-Records tragen bei einem **degradierten** Sensor optional einen **per-Quelle-Fehlergrund** im **I063/RE** (Reserved Expansion Field, FRN 13): Vendor-Subfeld **`SRC-REASON`** (u8: `1=unreachable`, `2=auth`, `3=rate_limited`). Damit unterscheidet der Konsument, **warum** eine Quelle ausgefallen ist — Netz/Firewall (unreachable) vs. falsche Credentials (auth) vs. Drosselung (rate_limited) — statt nur „degradiert" anzuzeigen (Antwort auf Wayfinder #197). Das RE-Feld ist **selbst-begrenzend** (Längen-Oktett) und wird **nur** bei degradiertem Sensor mit bekanntem Grund gesendet — operationelle Records bleiben die 9-Oktett-Form. **Additiv, kein Wire-Bruch:** ein Decoder, der das RE-Feld nicht auswertet, überspringt es über sein Längen-Oktett (die Vorwärtskompatibilitäts-Regel aus 3.0.0). Grund kommt heute aus den HTTP-ADS-B-Pollern (OpenSky, adsb_aggregator); FLARM/Radar liefern keinen Grund (RE entfällt). Details: Abschnitt 9.
+**3.1.1** (2026-07-10) — **Dokumentarisch (FR-TRK-035, kein Wire-Format-Bruch):**
+Die **Vergabe-Semantik der Track-Nummer (I062/040)** ist jetzt festgeschrieben:
+Track-Nummern kommen aus einem verwalteten 16-Bit-Pool (frische Nummern
+aufsteigend ab 1; `0` wird nie vergeben). Die Nummer eines **gelöschten** Tracks
+(TSE) durchläuft eine **Karenzzeit von 60 s Datenzeit**, bevor sie an einen
+neuen Track wiedervergeben werden darf — ein Konsument kann eine wiederkehrende
+Nummer daher nie mit dem beendeten Track verwechseln. Zuvor war die Nummer eine
+stille `u32→u16`-Trunkierung der internen Track-ID, die nach 65 536
+Track-Geburten auf dem Draht kollidieren konnte. Format, Länge und Kodierung
+von I062/040 sind unverändert (u16 BE). Details: Abschnitt 4.6.
+
+Vorgänger **3.1.0** (2026-07-06) — **Additiv (ADR 0033):** CAT063-Records tragen bei einem **degradierten** Sensor optional einen **per-Quelle-Fehlergrund** im **I063/RE** (Reserved Expansion Field, FRN 13): Vendor-Subfeld **`SRC-REASON`** (u8: `1=unreachable`, `2=auth`, `3=rate_limited`). Damit unterscheidet der Konsument, **warum** eine Quelle ausgefallen ist — Netz/Firewall (unreachable) vs. falsche Credentials (auth) vs. Drosselung (rate_limited) — statt nur „degradiert" anzuzeigen (Antwort auf Wayfinder #197). Das RE-Feld ist **selbst-begrenzend** (Längen-Oktett) und wird **nur** bei degradiertem Sensor mit bekanntem Grund gesendet — operationelle Records bleiben die 9-Oktett-Form. **Additiv, kein Wire-Bruch:** ein Decoder, der das RE-Feld nicht auswertet, überspringt es über sein Längen-Oktett (die Vorwärtskompatibilitäts-Regel aus 3.0.0). Grund kommt heute aus den HTTP-ADS-B-Pollern (OpenSky, adsb_aggregator); FLARM/Radar liefern keinen Grund (RE entfällt). Details: Abschnitt 9.
 
 Vorgänger **3.0.0** (2026-07-06) — **BREAKING (ADR 0032):** Die **CAT063-UAP** wird auf die **echten EUROCONTROL-FRN-Positionen** gebracht (spiegelt die CAT062-UAP-Korrektur aus 2.0.0 / ADR 0015). Drei Änderungen am CAT063-Record: (1) **I063/010** trägt jetzt die **SDPS-Identität** (SAC/SIC = `FIREFLY_CAT062_SAC`/`_SIC`, Default 25/2 — dieselbe wie I062/010 und I065/010), **nicht mehr** die Sensor-Identität. (2) Neues Item **I063/050** (Sensor Identifier, FRN 4) trägt die **Sensor-Identität** (SAC 0, SIC = `sensor_id`). (3) I063/030 wandert **FRN 2 → FRN 3**, I063/060 wandert **FRN 3 → FRN 5**. Die FSPEC wächst von `0xE0` auf **`0xB8`** (FRN 1+3+4+5), der Record von 7 auf **9 Oktette**. Zusätzlich sind die **CON-Werte** (I063/060) auf die Standard-Kodierung korrigiert: `0` = operationell, `1` = degradiert, `2` = Initialisierung, `3` = nicht verbunden (Firefly sendet weiter nur `0x00`/`0x40`). **Decoder muss nachziehen** — die Sensor-Identität kommt jetzt aus I063/050 (FRN 4), nicht aus I063/010. CAT062/CAT065 unverändert. Details: Abschnitt 9.
 
@@ -42,6 +53,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 3.1.1 | 2026-07-10 | **Dokumentarisch (FR-TRK-035).** Vergabe-Semantik von **I062/040 (Track Number)** festgeschrieben: verwalteter 16-Bit-Pool statt `u32→u16`-Trunkierung der internen ID. Frische Nummern aufsteigend ab 1 (`0` nie vergeben); die Nummer eines gelöschten Tracks (TSE) ist für **60 s Datenzeit quarantänisiert**, bevor sie wiederverwendet werden darf; bei komplett belegtem Nummernraum (> 65 535 gleichzeitige Tracks) initiiert der Tracker keinen neuen Track statt eine Duplikat-Nummer zu senden. **Kein Wire-Format-Bruch** (u16 BE unverändert); Konsumenten-Verhalten unverändert korrekt — die Änderung *beseitigt* eine mögliche stille Nummern-Kollision nach 65 536 Track-Geburten. Details: Abschnitt 4.6. |
 | 3.1.0 | 2026-07-06 | **Additiv (ADR 0033).** CAT063 trägt bei einem degradierten Sensor optional den **per-Quelle-Fehlergrund** im **I063/RE** (Reserved Expansion Field, FRN 13): Vendor-Subfeld **`SRC-REASON`** (u8: `1=unreachable`, `2=auth`, `3=rate_limited`). RE-Layout: `[LEN=0x03][SUBFIELD=0x80][SRC-REASON]`, selbst-begrenzend. **Nur** bei degradiertem Sensor mit bekanntem Grund gesendet (operationelle Records unverändert 9 Oktette). FSPEC wächst dann auf 2 Oktette (`0xB9 0x04`). **Kein Wire-Bruch:** ein Decoder, der RE nicht auswertet, überspringt es über sein Längen-Oktett. Grund aus den HTTP-ADS-B-Pollern (OpenSky/adsb_aggregator); FLARM/Radar ohne Grund (kein RE). Antwort auf Wayfinder #197. Details: Abschnitt 9. |
 | 3.0.0 | 2026-07-06 | **BREAKING (ADR 0032).** **CAT063-UAP-Standardisierung** — die Sensor-Status-Records folgen jetzt den echten EUROCONTROL-FRN-Positionen (analog zur CAT062-Korrektur aus 2.0.0). (1) **I063/010** = **SDPS**-Identität (SAC/SIC = `FIREFLY_CAT062_SAC`/`_SIC`, Default 25/2), nicht mehr der Sensor. (2) Neues **I063/050** (Sensor Identifier, FRN 4) = **Sensor**-Identität (SAC 0, SIC = `sensor_id`). (3) I063/030 → FRN 3, I063/060 → FRN 5. FSPEC `0xE0` → **`0xB8`**, Record 7 → **9 Oktette**. CON-Werte (I063/060) auf Standard korrigiert: `0` op / `1` degradiert / `2` Init / `3` nicht verbunden (Firefly sendet weiter `0x00`/`0x40`). **Decoder muss nachziehen**: Sensor-Identität aus I063/050 lesen, FSPEC `0xB8` erwarten. Kein Eingriff in CAT062/CAT065. Details: Abschnitt 9. |
 | 2.6.1 | 2026-07-04 | **Dokumentarisch (ADR 0030).** Replay-/Szenen-Modus des Senders ausgebaut — Firefly ist ausschließlich quellen-getrieben (`FIREFLY_SOURCES`/Adapter-Envs). **Kein Wire-Format-Bruch:** CAT062/065/063 byte-identisch. ICD-Anpassungen rein redaktionell: I062/100-Referenz = System-Referenzpunkt (Union-Bbox-Mitte bzw. `FIREFLY_SYSTEM_REF_*`), CAT063-SICs = `sensor_id` der Quellen, CAT063-Liveness folgt immer dem echten Plot-Eingang. Instanz ohne Quellen: CAT065/CAT063 laufen, keine CAT062-Tracks (leerer Himmel). |
@@ -240,6 +252,30 @@ Quelle ist die **zuletzt empfangene Mode-S-Kennung**
 (`SystemTrack.callsign`) — ein reiner Durchreich-Wert, kein von Firefly
 generierter Bezeichner. Das Item erscheint nur, wenn der Track jemals eine
 Kennung getragen hat (sticky wie Mode 3/A und die Flugfläche).
+
+### 4.6 I062/040 — Track Number (Vergabe-Semantik, seit 3.1.1)
+
+Die Track-Nummer ist die **Draht-Identität** eines Tracks: der Konsument
+schlüsselt Label, History, Selektion und das TSE-Löschsignal danach. Sie kommt
+aus einem **verwalteten 16-Bit-Pool** (FR-TRK-035) — nach dem Vorbild echter
+SDPS (ARTAS), die den Nummernraum bewirtschaften statt ihn aus einer internen
+ID abzuleiten:
+
+1. **Frische Nummern zuerst**, aufsteigend ab `1`; `0` wird **nie** vergeben
+   (bleibt als Sentinel frei).
+2. **Karenzzeit bei Wiederverwendung:** Die Nummer eines gelöschten Tracks
+   (letzte Meldung mit TSE-Bit, Abschnitt 4.1) ist für **60 Sekunden
+   Datenzeit** gesperrt und kehrt erst danach in den Pool zurück (FIFO — die am
+   längsten freie Nummer zuerst). Ein Konsument kann eine neu auftauchende
+   Nummer daher nie mit einem gerade beendeten Track verwechseln.
+3. **Erschöpfung:** Sind alle Nummern belegt oder quarantänisiert (> 65 535
+   gleichzeitige Tracks — weit jenseits realer Kapazität), initiiert Firefly
+   **keinen** neuen Track, statt eine Duplikat-Nummer zu senden.
+
+**Konsumenten-Garantie:** Zu keinem Zeitpunkt tragen zwei gleichzeitig lebende
+Tracks dieselbe Nummer, und zwischen dem TSE eines Tracks und der Wiedergeburt
+seiner Nummer liegen mindestens 60 s Datenzeit. Format und Kodierung
+(u16 BE) sind unverändert gegenüber allen Vorversionen.
 
 ## 5. Koordinaten
 
