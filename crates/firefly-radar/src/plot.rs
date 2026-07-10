@@ -40,6 +40,7 @@ pub fn target_report_to_plot(report: &DecodedTargetReport, sensor: SensorId) -> 
         flight_level_ft: report.flight_level_ft,
         icao_address: report.icao_address,
         callsign: report.callsign,
+        spi: report.spi,
     };
     Some(Plot {
         sensor,
@@ -69,6 +70,7 @@ mod tests {
             icao_address: Some(0x3C_6589),
             callsign: Some(Callsign::new("DLH123")),
             track_number: Some(42),
+            spi: false,
         }
     }
 

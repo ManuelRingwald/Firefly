@@ -119,6 +119,13 @@ const STI_DOWNLINKED_TARGET_IDENTIFICATION: u8 = 0x00;
 const FX: u8 = 0x01;
 /// I062/080 octet 1, bit 2 (CNF): set means the track is still *tentative*.
 const STATUS_CNF_TENTATIVE: u8 = 0x02;
+/// I062/080 octet 1, bit 8: **MON** — the track is maintained by at most one
+/// sensor (monosensor): no second source cross-checks the estimate
+/// (FR-TRK-036, ICD 3.2.0).
+const STATUS_MON_MONOSENSOR: u8 = 0x80;
+/// I062/080 octet 1, bit 7: **SPI** — the last associated report carried the
+/// Special Position Identification ("ident") pulse (FR-TRK-036, ICD 3.2.0).
+const STATUS_SPI: u8 = 0x40;
 /// I062/080 octet 2, bit 7 (TSE, *Track Service End*): set means this is the
 /// **last** report transmitted for the track — it is being deleted (ADR 0016).
 /// Verified against SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.9 (second
@@ -399,20 +406,33 @@ fn encode_track_number(track: &SystemTrack) -> Vec<u8> {
 }
 
 /// I062/080 — Track Status, a **variable-length** item whose octets chain via the
-/// FX bit. We carry the safety-relevant flags from ADR 0008 plus the track-end
-/// signal from ADR 0016:
+/// FX bit. We carry the safety-relevant flags from ADR 0008, the track-end
+/// signal from ADR 0016 and the trust flags from FR-TRK-036 (ICD 3.2.0):
 ///
+/// - **MON** (octet 1, bit 8): monosensor — the track is supported by at most
+///   one distinct sensor within the freshness window; no second source
+///   cross-checks the estimate.
+/// - **SPI** (octet 1, bit 7): the last associated report carried the Special
+///   Position Identification ("ident") pulse.
 /// - **CNF** (octet 1, bit 2): confirmed vs. tentative.
+/// - **SIM** (octet 2, bit 8): simulated target — the standard slot is honoured
+///   but Firefly has no simulated-traffic concept yet, so it is always 0.
 /// - **TSE** (octet 2, bit 7): *Track Service End* — this is the last report
 ///   for the track (it is being deleted).
 /// - **CST** (octet 4, bit 8): coasting.
 ///
 /// The item extends only as far as the highest set flag's octet: CST → octet 4,
 /// else TSE → octet 2, else octet 1 alone. Every octet but the last carries the
-/// FX bit. A live, non-coasting track is a single octet (CST/TSE default to 0),
-/// so the common case — and the byte-exact reference dump — is unchanged.
+/// FX bit. A live, non-coasting multisensor track is a single octet, so the
+/// pre-existing byte-exact reference dumps are unchanged.
 fn encode_track_status(track: &SystemTrack) -> Vec<u8> {
     let mut octet1 = 0u8;
+    if track.monosensor {
+        octet1 |= STATUS_MON_MONOSENSOR;
+    }
+    if track.spi {
+        octet1 |= STATUS_SPI;
+    }
     if !track.confirmed {
         octet1 |= STATUS_CNF_TENTATIVE;
     }
@@ -544,6 +564,12 @@ pub struct DecodedRecord {
     /// I062/080 TSE — `true` when this is the **last** report for the track
     /// (it is being deleted, ADR 0016). A consumer removes the track on this.
     pub ended: bool,
+    /// I062/080 MON — `true` while the track is supported by at most one
+    /// distinct sensor (no cross-check; FR-TRK-036, ICD 3.2.0).
+    pub monosensor: bool,
+    /// I062/080 SPI — `true` when the last associated report carried the
+    /// Special Position Identification ("ident") pulse (FR-TRK-036, ICD 3.2.0).
+    pub spi: bool,
     /// I062/290 PSR age, seconds.
     pub update_age: f64,
     /// I062/290 ES (Extended Squitter / ADS-B) age, seconds. `Some` when the
@@ -685,7 +711,8 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         }
     }
 
-    let (confirmed, coasting, ended) = status.ok_or(DecodeError::MissingItem(uap::TRACK_STATUS))?;
+    let (confirmed, coasting, ended, monosensor, spi) =
+        status.ok_or(DecodeError::MissingItem(uap::TRACK_STATUS))?;
     let (v_east, v_north) = velocity.ok_or(DecodeError::MissingItem(uap::VELOCITY_CARTESIAN))?;
 
     Ok(DecodedRecord {
@@ -699,6 +726,8 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         confirmed,
         coasting,
         ended,
+        monosensor,
+        spi,
         update_age: update_age.ok_or(DecodeError::MissingItem(uap::UPDATE_AGES))?,
         adsb_age_s,
         source_ages,
@@ -840,15 +869,17 @@ fn decode_measured_flight_level(bytes: &[u8]) -> f64 {
     ticks as f64 * FLIGHT_LEVEL_LSB_FT
 }
 
-/// I062/080 — the inverse of [`encode_track_status`]: CNF from octet 1, TSE from
-/// octet 2, and CST from octet 4 — each read only if the item extended that far
-/// (the FX chain is tolerant of records that stop earlier). Returns
-/// `(confirmed, coasting, ended)`.
-fn decode_track_status(bytes: &[u8]) -> (bool, bool, bool) {
+/// I062/080 — the inverse of [`encode_track_status`]: MON/SPI/CNF from octet 1,
+/// TSE from octet 2, and CST from octet 4 — each read only if the item extended
+/// that far (the FX chain is tolerant of records that stop earlier). Returns
+/// `(confirmed, coasting, ended, monosensor, spi)`.
+fn decode_track_status(bytes: &[u8]) -> (bool, bool, bool, bool, bool) {
     let confirmed = bytes[0] & STATUS_CNF_TENTATIVE == 0;
+    let monosensor = bytes[0] & STATUS_MON_MONOSENSOR != 0;
+    let spi = bytes[0] & STATUS_SPI != 0;
     let ended = bytes.len() >= 2 && bytes[1] & STATUS_TSE_END != 0;
     let coasting = bytes.len() >= 4 && bytes[3] & STATUS_CST_COASTING != 0;
-    (confirmed, coasting, ended)
+    (confirmed, coasting, ended, monosensor, spi)
 }
 
 /// I062/290 — the inverse of [`encode_update_ages`]: returns the PSR age (the
@@ -977,6 +1008,8 @@ mod tests {
             v_north,
             confirmed: true,
             coasting: false,
+            monosensor: false,
+            spi: false,
             ended: false,
             update_age: 0.0,
             position_uncertainty: 0.0,
@@ -1253,6 +1286,49 @@ mod tests {
             vec![0x03, 0x40],
             "tentative and ended"
         );
+    }
+
+    /// MON (octet 1, bit 8) and SPI (octet 1, bit 7) extend the track status
+    /// with the ARTAS trust flags (FR-TRK-036, ICD 3.2.0). A multisensor,
+    /// SPI-less track stays the single `0x00` octet — the pre-existing
+    /// reference dumps are unchanged. REQ: FR-TRK-036
+    #[test]
+    fn track_status_carries_mon_and_spi_in_octet_one() {
+        let mut t = track_at(1, 0.0, 0.0, 0.0, 0.0);
+        assert_eq!(encode_track_status(&t), vec![0x00], "baseline unchanged");
+
+        t.monosensor = true;
+        assert_eq!(encode_track_status(&t), vec![0x80], "MON is bit 8");
+
+        t.spi = true;
+        assert_eq!(encode_track_status(&t), vec![0xC0], "SPI is bit 7");
+
+        t.confirmed = false;
+        t.ended = true;
+        assert_eq!(
+            encode_track_status(&t),
+            vec![0xC3, 0x40],
+            "MON+SPI+CNF chain into the TSE octet"
+        );
+    }
+
+    /// MON and SPI survive an encode → decode round trip through a full data
+    /// block. REQ: FR-TRK-036
+    #[test]
+    fn mon_and_spi_round_trip() {
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let mut t = track(1);
+        t.monosensor = true;
+        t.spi = true;
+        let block = encoder.encode(Timestamp(12.0), &[t]);
+        let records = decode_data_block(&block).expect("decodes");
+        assert!(records[0].monosensor, "MON recovered");
+        assert!(records[0].spi, "SPI recovered");
+
+        let block = encoder.encode(Timestamp(12.0), &[track(1)]);
+        let records = decode_data_block(&block).expect("decodes");
+        assert!(!records[0].monosensor && !records[0].spi, "both default 0");
     }
 
     /// Update ages: the PSR-age subfield is present (0x40) and the age is in

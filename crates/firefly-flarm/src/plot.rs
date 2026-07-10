@@ -78,6 +78,7 @@ pub fn position_to_plot(
         flight_level_ft: pos.altitude_ft,
         icao_address,
         callsign: None,
+        spi: false,
     };
 
     // Data time = full Unix-epoch seconds, on the same clock OpenSky uses, so the

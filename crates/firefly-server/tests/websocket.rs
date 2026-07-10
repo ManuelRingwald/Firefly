@@ -26,6 +26,8 @@ fn track(id: u32, time: f64) -> SystemTrack {
         v_north: -50.0,
         confirmed: true,
         coasting: false,
+        monosensor: false,
+        spi: false,
         ended: false,
         update_age: 0.0,
         position_uncertainty: 100.0,

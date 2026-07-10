@@ -33,6 +33,7 @@ fn adsb(time_secs: f64, lat: f64, lon: f64, icao: u32, callsign: &str) -> Plot {
             flight_level_ft: Some(35_000.0),
             icao_address: Some(icao),
             callsign: Some(Callsign::new(callsign)),
+            spi: false,
         },
     )
 }

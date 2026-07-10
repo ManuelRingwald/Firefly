@@ -325,6 +325,7 @@ mod tests {
                 flight_level_ft: Some(35_000.0),
                 icao_address: Some(0x3C_00_01),
                 callsign: Some(Callsign::new("DLH401")),
+                spi: false,
             },
         )
     }
