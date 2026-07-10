@@ -21,7 +21,9 @@
 
 use std::collections::BTreeMap;
 
-use firefly_core::{Plot, SensorId, SourceAges, SystemTrack, Timestamp, TrackId};
+use firefly_core::{
+    Plot, SensorId, SourceAges, SystemTrack, Timestamp, TrackId, PROVENANCE_FRESH_S,
+};
 use firefly_geo::{Enu, LocalFrame};
 use serde::{Deserialize, Serialize};
 
@@ -847,7 +849,7 @@ impl Tracker {
                 // Certain association: β_0 = 0 (no-detection), β_1 = 1.0.
                 self.tracks[ti].imm.update_pda(&[*cm], &[0.0, 1.0]);
                 self.tracks[ti].mark_hit(t);
-                self.tracks[ti].record_hit_from(sensor);
+                self.tracks[ti].record_hit_from(sensor, t);
                 self.tracks[ti].update_identity(&plot.mode_ac);
                 self.tracks[ti].record_source_hit(plot.source, t, plot.kind.has_primary());
                 handled[mi] = true;
@@ -899,7 +901,7 @@ impl Tracker {
                     .imm
                     .update_pda(&gated_measurements, &gated_betas);
                 self.tracks[ti].mark_hit(t);
-                self.tracks[ti].record_hit_from(sensor);
+                self.tracks[ti].record_hit_from(sensor, t);
                 if let Some((mi, _)) = best {
                     // Translate JPDA measurement index → original items index.
                     let orig_mi = non_icao[mi].0;
@@ -948,7 +950,7 @@ impl Tracker {
                 let mut track = Track::new(id, number, imm, t);
                 let founding = &items[orig_mi].0;
                 track.update_identity(&founding.mode_ac);
-                track.record_hit_from(sensor);
+                track.record_hit_from(sensor, t);
                 // Per-technology provenance bookkeeping (ADR 0027): the founding
                 // plot's technology (and PSR if it is a combined dwell).
                 track.record_source_hit(founding.source, t, founding.kind.has_primary());
@@ -998,6 +1000,11 @@ fn system_track_from(
         v_north: v[1],
         confirmed: track.is_confirmed(),
         coasting,
+        // Mono/multisensor over the provenance freshness window (FR-TRK-036):
+        // the per-scan contributing set would flap on an asynchronous
+        // multi-radar feed whose sensors rarely land in one opportunity.
+        monosensor: track.fresh_sensor_count(time, PROVENANCE_FRESH_S) <= 1,
+        spi: track.spi(),
         ended: false,
         update_age,
         position_uncertainty: estimate.position_uncertainty(),
@@ -1102,6 +1109,7 @@ mod tests {
                 flight_level_ft: Some(35_000.0),
                 icao_address: Some(icao),
                 callsign: None,
+                spi: false,
             },
         }
     }
@@ -1265,6 +1273,66 @@ mod tests {
             1,
             "reused after quarantine"
         );
+    }
+
+    /// The MON flag follows the track's *fresh* sensor support: one sensor →
+    /// monosensor; a second sensor joining → multisensor; that sensor falling
+    /// silent past the freshness window → monosensor again. This is windowed
+    /// on the per-sensor hit book, not the per-scan contributing set, so an
+    /// asynchronous feed whose sensors rarely share an opportunity does not
+    /// flap the flag. REQ: FR-TRK-036
+    #[test]
+    fn monosensor_flag_follows_fresh_sensor_support() {
+        let error = || SensorErrorModel::from_range_and_azimuth_deg(50.0, 0.08);
+        let config = TrackerConfig::new(frame())
+            .with_sensor(SensorId(1), frame(), error(), 4.0)
+            .with_sensor(SensorId(2), frame(), error(), 4.0);
+        let mut tracker = Tracker::new(config);
+
+        // Only sensor 1 sees the target: no cross-check → MON.
+        tracker.process_scan(Timestamp(0.0), &[plot(0.0, 50_000.0, 0.0)]);
+        assert!(tracker.system_tracks()[0].monosensor, "single sensor");
+
+        // Sensor 2 joins the same target: cross-checked → multisensor.
+        let p2 = Plot::primary(SensorId(2), Timestamp(4.0), Polar::new(50_000.0, 0.0, 0.0));
+        tracker.process_scan(Timestamp(4.0), &[plot(4.0, 50_000.0, 0.0), p2]);
+        assert!(!tracker.system_tracks()[0].monosensor, "two fresh sensors");
+
+        // Sensor 2 falls silent; sensor 1 keeps the track alive. Once sensor
+        // 2's last hit (at t = 4) ages *strictly* past the freshness window
+        // the track is MON again — scan until its age exceeds the window.
+        let mut t = 8.0;
+        while t - 4.0 <= PROVENANCE_FRESH_S + 4.0 {
+            tracker.process_scan(Timestamp(t), &[plot(t, 50_000.0, 0.0)]);
+            t += 4.0;
+        }
+        assert_eq!(tracker.tracks().len(), 1, "kept alive by sensor 1");
+        assert!(
+            tracker.system_tracks()[0].monosensor,
+            "sensor 2 aged out of the freshness window"
+        );
+    }
+
+    /// The SPI ("ident") pulse of the last associated report reaches the
+    /// system track — and clears again on the next report without it.
+    /// REQ: FR-TRK-036
+    #[test]
+    fn spi_reflects_the_last_associated_report() {
+        let mut tracker = Tracker::new(config());
+        let with_spi = |time: f64, spi: bool| {
+            let mut p = plot_with_identity(time, 50_000.0, 0.0, 0o1234, 0xABCDEF);
+            p.mode_ac.spi = spi;
+            p
+        };
+
+        tracker.process_scan(Timestamp(0.0), &[with_spi(0.0, false)]);
+        assert!(!tracker.system_tracks()[0].spi);
+
+        tracker.process_scan(Timestamp(4.0), &[with_spi(4.0, true)]);
+        assert!(tracker.system_tracks()[0].spi, "ident pressed");
+
+        tracker.process_scan(Timestamp(8.0), &[with_spi(8.0, false)]);
+        assert!(!tracker.system_tracks()[0].spi, "transient: cleared again");
     }
 
     /// Two well-separated plots create two distinct tracks.
@@ -2022,6 +2090,7 @@ mod tests {
                 flight_level_ft: Some(35_000.0),
                 icao_address: None,
                 callsign: None,
+                spi: false,
             },
         };
 

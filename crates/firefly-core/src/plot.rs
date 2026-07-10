@@ -90,6 +90,15 @@ pub struct ModeAC {
     pub icao_address: Option<u32>,
     /// Mode S "target identification" (callsign / flight ID), if available.
     pub callsign: Option<Callsign>,
+    /// **SPI** — Special Position Identification: the transponder's "ident"
+    /// pulse, pressed by the pilot on controller request. Deliberately
+    /// **transient** (unlike the sticky identity fields above): it describes
+    /// *this* reply, and the track carries it only until the next update
+    /// (CAT062 I062/080 SPI = "present in the last report"). Today only the
+    /// CAT048 radar path delivers it (I048/020); the ADS-B/FLARM adapters
+    /// leave it `false`. `serde(default)` keeps pre-SPI `.ffplots` readable.
+    #[serde(default)]
+    pub spi: bool,
 }
 
 /// Where a plot's position measurement comes from, and in which frame it lives.

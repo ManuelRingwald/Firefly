@@ -21,7 +21,18 @@
 
 ## Version
 
-**3.1.1** (2026-07-10) — **Dokumentarisch (FR-TRK-035, kein Wire-Format-Bruch):**
+**3.2.0** (2026-07-10) — **Additiv (FR-TRK-036, ARTAS-Roadmap QW.3):** I062/080
+(Track Status) trägt jetzt die **Vertrauens-Flags** nach ARTAS-Vorbild:
+**MON** (Oktett 1, `0x80` — Track nur von höchstens einem Sensor gestützt,
+keine Kreuz-Prüfung durch eine zweite Quelle) und **SPI** (Oktett 1, `0x40` —
+die letzte assoziierte Meldung trug den „Ident"-Puls; Quelle heute: CAT048
+I048/020 via `radar_asterix`). Der **SIM**-Slot (Oktett 2, `0x80`) ist
+dokumentiert und wird immer 0 gesendet (kein Simulations-Verkehr in Firefly).
+**Kein Wire-Bruch:** nur bislang stets 0 gesendete Bits werden bei Bedarf
+gesetzt; das Item bleibt FX-verkettet variabel lang, ein Multisensor-Track ohne
+SPI ist byte-identisch zu 3.1.x. Details: Abschnitt 4.1.
+
+Vorgänger **3.1.1** (2026-07-10) — **Dokumentarisch (FR-TRK-035, kein Wire-Format-Bruch):**
 Die **Vergabe-Semantik der Track-Nummer (I062/040)** ist jetzt festgeschrieben:
 Track-Nummern kommen aus einem verwalteten 16-Bit-Pool (frische Nummern
 aufsteigend ab 1; `0` wird nie vergeben). Die Nummer eines **gelöschten** Tracks
@@ -53,6 +64,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 3.2.0 | 2026-07-10 | **Additiv (FR-TRK-036, QW.3).** I062/080 um die ARTAS-Vertrauens-Flags erweitert: **MON** (Oktett 1, `0x80`, monosensor — höchstens ein Sensor im 30-s-Frische-Fenster; lange coastende Tracks ebenfalls MON) und **SPI** (Oktett 1, `0x40`, „Ident"-Puls der letzten Meldung; Quelle: CAT048 I048/020 via `radar_asterix`, transient). **SIM**-Slot (Oktett 2, `0x80`) dokumentiert, wird immer 0 gesendet. **Kein Wire-Bruch** — nur zuvor konstant 0 gesendete Bits werden bei Bedarf gesetzt; Multisensor-Track ohne SPI byte-identisch zu 3.1.x. Konsument: MON/SPI optional auswerten (z. B. Mono-Sensor-Kennzeichnung im Label), kein Lockstep nötig. Details: Abschnitt 4.1. |
 | 3.1.1 | 2026-07-10 | **Dokumentarisch (FR-TRK-035).** Vergabe-Semantik von **I062/040 (Track Number)** festgeschrieben: verwalteter 16-Bit-Pool statt `u32→u16`-Trunkierung der internen ID. Frische Nummern aufsteigend ab 1 (`0` nie vergeben); die Nummer eines gelöschten Tracks (TSE) ist für **60 s Datenzeit quarantänisiert**, bevor sie wiederverwendet werden darf; bei komplett belegtem Nummernraum (> 65 535 gleichzeitige Tracks) initiiert der Tracker keinen neuen Track statt eine Duplikat-Nummer zu senden. **Kein Wire-Format-Bruch** (u16 BE unverändert); Konsumenten-Verhalten unverändert korrekt — die Änderung *beseitigt* eine mögliche stille Nummern-Kollision nach 65 536 Track-Geburten. Details: Abschnitt 4.6. |
 | 3.1.0 | 2026-07-06 | **Additiv (ADR 0033).** CAT063 trägt bei einem degradierten Sensor optional den **per-Quelle-Fehlergrund** im **I063/RE** (Reserved Expansion Field, FRN 13): Vendor-Subfeld **`SRC-REASON`** (u8: `1=unreachable`, `2=auth`, `3=rate_limited`). RE-Layout: `[LEN=0x03][SUBFIELD=0x80][SRC-REASON]`, selbst-begrenzend. **Nur** bei degradiertem Sensor mit bekanntem Grund gesendet (operationelle Records unverändert 9 Oktette). FSPEC wächst dann auf 2 Oktette (`0xB9 0x04`). **Kein Wire-Bruch:** ein Decoder, der RE nicht auswertet, überspringt es über sein Längen-Oktett. Grund aus den HTTP-ADS-B-Pollern (OpenSky/adsb_aggregator); FLARM/Radar ohne Grund (kein RE). Antwort auf Wayfinder #197. Details: Abschnitt 9. |
 | 3.0.0 | 2026-07-06 | **BREAKING (ADR 0032).** **CAT063-UAP-Standardisierung** — die Sensor-Status-Records folgen jetzt den echten EUROCONTROL-FRN-Positionen (analog zur CAT062-Korrektur aus 2.0.0). (1) **I063/010** = **SDPS**-Identität (SAC/SIC = `FIREFLY_CAT062_SAC`/`_SIC`, Default 25/2), nicht mehr der Sensor. (2) Neues **I063/050** (Sensor Identifier, FRN 4) = **Sensor**-Identität (SAC 0, SIC = `sensor_id`). (3) I063/030 → FRN 3, I063/060 → FRN 5. FSPEC `0xE0` → **`0xB8`**, Record 7 → **9 Oktette**. CON-Werte (I063/060) auf Standard korrigiert: `0` op / `1` degradiert / `2` Init / `3` nicht verbunden (Firefly sendet weiter `0x00`/`0x40`). **Decoder muss nachziehen**: Sensor-Identität aus I063/050 lesen, FSPEC `0xB8` erwarten. Kein Eingriff in CAT062/CAT065. Details: Abschnitt 9. |
@@ -161,15 +173,19 @@ weiteres Oktett folgt).
 
 | Oktett | Bit | Bedeutung |
 |--------|-----|-----------|
+| 1 | `0x80` (MON) | gesetzt = Track ist **monosensor** — innerhalb des Frische-Fensters (30 s Datenzeit) hat höchstens **ein** Sensor beigetragen; keine zweite Quelle prüft die Schätzung gegen (seit 3.2.0, FR-TRK-036). Ein lange coastender Track (kein frischer Sensor) meldet ebenfalls MON. |
+| 1 | `0x40` (SPI) | gesetzt = die **letzte** assoziierte Meldung trug den **SPI**-Puls (Special Position Identification, „Ident"-Knopf). Transient — beschreibt nur die letzte Meldung; heute liefert nur der `radar_asterix`-Eingang (I048/020) SPI (seit 3.2.0, FR-TRK-036). |
 | 1 | `0x02` (CNF) | gesetzt = Track ist noch **tentativ** (nicht bestätigt) |
+| 2 | `0x80` (SIM) | **simulierter** Track. Standard-Slot dokumentiert; Firefly kennt heute keinen Simulations-Verkehr und sendet **immer 0** (seit 3.2.0). |
 | 2 | `0x40` (TSE) | gesetzt = **letzte** Meldung für den Track (er wird gelöscht); Konsument **entfernt** den Track (ADR 0016) |
 | 4 | `0x80` (CST) | gesetzt = Track ist **coasting** (kein aktuelles Update) |
 
 Das Item verlängert sich nur so weit wie das höchste gesetzte Flag: CST →
 Oktett 4, sonst TSE → Oktett 2, sonst nur Oktett 1. Ein lebender, nicht
-coastender Track bleibt ein einzelnes Oktett (TSE/CST default 0). Ein gelöschter
-Track ist typischerweise zugleich coasting — dann sitzt TSE in Oktett 2 und CST
-in Oktett 4 desselben Records.
+coastender **Multisensor**-Track ohne SPI bleibt ein einzelnes Oktett `0x00`
+(alle Flags default 0) — die vor 3.2.0 bestehenden Referenz-Dumps sind
+byte-identisch. Ein gelöschter Track ist typischerweise zugleich coasting —
+dann sitzt TSE in Oktett 2 und CST in Oktett 4 desselben Records.
 
 ### 4.2 I062/290 — System Track Update Ages
 

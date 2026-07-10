@@ -10,6 +10,25 @@
 
 ---
 
+## 🎯 Stand 2026-07-10 (QW.3 — I062/080 Vertrauens-Flags MON + SPI)
+
+- **Zuletzt aktualisiert:** 2026-07-10 (spät)
+- **QW.3 — Track-Status-Ausbau (FR-TRK-036, ICD 3.2.0, additiv):** I062/080
+  trägt jetzt die ARTAS-Vertrauens-Flags. **MON** (Oktett 1, `0x80`):
+  monosensor — der `Track` bucht je distinktem Sensor die letzte
+  Treffer-Datenzeit (`sensor_hits`, gefenstert über `PROVENANCE_FRESH_S` =
+  30 s statt des flatternden pro-Scan-Sets); ≤ 1 frischer Sensor ⇒ MON.
+  **SPI** (Oktett 1, `0x40`): „Ident"-Puls **end-to-end** — CAT048-Decoder
+  liest I048/020 Bit 3, `radar_asterix` reicht durch (`ModeAC.spi`), am Track
+  bewusst transient (jede Meldung überschreibt). **SIM**-Slot dokumentiert,
+  immer 0. Kein Wire-Bruch (Multisensor-Track ohne SPI byte-identisch zu
+  3.1.x); Wayfinder-Folge additiv ohne Lockstep (`from-firefly`-Issue).
+  **Zuschnitt:** I062/295 bewusst weggelassen (dupliziert I062/290,
+  Betreiber-Freigabe). 7 neue Tests; Milestone `QW3-Track-Status_MON-SPI.md`.
+  Gates grün. Roadmap-Stand: **32,5 %**.
+- **Nächster Schritt:** QW.4 (PlotRecorder im Live-Pfad verdrahten, S2)
+  ankündigen — letztes Quick-Win-Häppchen vor AP-REG (Sensor-Registrierung).
+
 ## 🎯 Stand 2026-07-10 (QW.2 Fuzzing — echter FSPEC-Bug gefunden & gefixt)
 
 - **Zuletzt aktualisiert:** 2026-07-10 (Abend)

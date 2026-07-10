@@ -101,6 +101,20 @@ pub struct SystemTrack {
     /// because it had no fresh measurement this scan. Maps to the CST bit of
     /// CAT062 I062/080. A track may be both `confirmed` and `coasting`.
     pub coasting: bool,
+    /// Whether the track is currently supported by **at most one** distinct
+    /// sensor: no second source cross-checks the estimate (weaker against
+    /// ghosts and sensor bias — the operator should see that). Derived from
+    /// the per-sensor hit times within the provenance freshness window
+    /// ([`PROVENANCE_FRESH_S`]); a long-coasting track (no fresh sensor at
+    /// all) also reports `true`. Maps to the MON bit of CAT062 I062/080.
+    #[serde(default)]
+    pub monosensor: bool,
+    /// Whether the most recent associated report carried the **SPI** pulse
+    /// (the pilot's "ident", [`crate::ModeAC::spi`]). Transient, not sticky —
+    /// it reflects the *last* report only. Maps to the SPI bit of CAT062
+    /// I062/080.
+    #[serde(default)]
+    pub spi: bool,
     /// Whether this is the **final** report for the track — it has just been
     /// deleted from the tracker's live set, and this record carries its last
     /// known state once so a consumer can remove it deterministically instead
@@ -230,6 +244,8 @@ mod tests {
             v_north,
             confirmed: true,
             coasting: false,
+            monosensor: false,
+            spi: false,
             ended: false,
             update_age: 0.0,
             position_uncertainty: 0.0,

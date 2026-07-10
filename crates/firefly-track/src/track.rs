@@ -10,7 +10,7 @@
 //! The track records its recent association outcomes (hit/miss) so the
 //! [`crate::Tracker`] can apply M-of-N confirmation and miss-based deletion.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use firefly_core::{Callsign, ModeAC, SensorId, SourceKind, TrackId};
 use nalgebra::Vector2;
@@ -133,6 +133,19 @@ pub struct Track {
     /// 0027). Generalises the former single `adsb_last_hit_time`.
     #[serde(default)]
     pub(crate) source_hits: SourceHits,
+    /// Last-hit data time per **distinct sensor** (not technology). Unlike the
+    /// per-scan `contributing_sensors` — which is empty between opportunities
+    /// and would make the mono/multisensor status flap on an asynchronous
+    /// multi-radar feed — this persists, so "supported by how many sensors?"
+    /// is answered over a freshness window (CAT062 I062/080 MON, FR-TRK-036).
+    #[serde(default)]
+    sensor_hits: BTreeMap<SensorId, f64>,
+    /// Whether the most recent associated report carried the SPI ("ident")
+    /// pulse. Deliberately **not** sticky (unlike the identity fields): SPI
+    /// describes the last reply only, and every associated plot overwrites it
+    /// (CAT062 I062/080 SPI, FR-TRK-036).
+    #[serde(default)]
+    spi: bool,
 }
 
 impl Track {
@@ -153,6 +166,8 @@ impl Track {
             callsign: None,
             contributing_sensors: BTreeSet::new(),
             source_hits: SourceHits::default(),
+            sensor_hits: BTreeMap::new(),
+            spi: false,
         }
     }
 
@@ -313,9 +328,31 @@ impl Track {
     }
 
     /// Record that `sensor` contributed a hit (founded or updated this track)
-    /// in the current scan.
-    pub(crate) fn record_hit_from(&mut self, sensor: SensorId) {
+    /// in the current scan, at data time `time`. Besides the per-scan
+    /// contributing set this books the sensor's last-hit time (monotonic per
+    /// sensor), which drives the mono/multisensor status (FR-TRK-036).
+    pub(crate) fn record_hit_from(&mut self, sensor: SensorId, time: f64) {
         self.contributing_sensors.insert(sensor);
+        let last = self.sensor_hits.entry(sensor).or_insert(time);
+        if time > *last {
+            *last = time;
+        }
+    }
+
+    /// How many **distinct sensors** have hit this track within the last
+    /// `window` seconds before `now` (data time). `<= 1` means the track is
+    /// currently *monosensor*: no second source cross-checks the estimate
+    /// (CAT062 I062/080 MON, FR-TRK-036). A long-coasting track counts `0`.
+    pub(crate) fn fresh_sensor_count(&self, now: f64, window: f64) -> usize {
+        self.sensor_hits
+            .values()
+            .filter(|&&hit| now - hit <= window)
+            .count()
+    }
+
+    /// Whether the most recent associated report carried the SPI pulse.
+    pub fn spi(&self) -> bool {
+        self.spi
     }
 
     /// Record a per-technology contribution (ADR 0027): a hit of `source` at data
@@ -334,6 +371,10 @@ impl Track {
     /// level is "sticky" in the same sense; it still tracks climbs/descents
     /// because every Mode C reply overwrites it.)
     pub(crate) fn update_identity(&mut self, mode_ac: &ModeAC) {
+        // SPI is the one deliberately NON-sticky attribute: it describes the
+        // last reply only, so every associated plot overwrites it — set and
+        // cleared alike (FR-TRK-036).
+        self.spi = mode_ac.spi;
         if mode_ac.mode_3a.is_some() {
             self.mode_3a = mode_ac.mode_3a;
         }
@@ -384,6 +425,7 @@ mod tests {
             flight_level_ft: Some(35_000.0),
             icao_address: Some(0x0040_0123),
             callsign: Some(Callsign::new("DLH123")),
+            spi: false,
         });
         assert_eq!(track.mode_3a(), Some(0o2613));
         assert_eq!(track.icao_address(), Some(0x0040_0123));
@@ -401,6 +443,7 @@ mod tests {
             flight_level_ft: None,
             icao_address: Some(0x0040_0123),
             callsign: Some(Callsign::new("DLH123")),
+            spi: false,
         });
 
         track.update_identity(&ModeAC::default());
@@ -429,15 +472,54 @@ mod tests {
             flight_level_ft: None,
             icao_address: Some(0x0040_0123),
             callsign: None,
+            spi: false,
         });
         track.update_identity(&ModeAC {
             mode_3a: Some(0o7000),
             flight_level_ft: None,
             icao_address: Some(0x0040_0123),
             callsign: None,
+            spi: false,
         });
 
         assert_eq!(track.mode_3a(), Some(0o7000));
+    }
+
+    /// SPI is transient, not sticky: every associated reply overwrites it, so
+    /// it describes the *last* report only — while the identity fields stay
+    /// sticky through the same update. REQ: FR-TRK-036
+    #[test]
+    fn spi_is_transient_not_sticky() {
+        let mut track = fresh_track();
+        track.update_identity(&ModeAC {
+            mode_3a: Some(0o2613),
+            flight_level_ft: None,
+            icao_address: None,
+            callsign: None,
+            spi: true,
+        });
+        assert!(track.spi(), "SPI set by the reply that carried it");
+
+        track.update_identity(&ModeAC::default());
+        assert!(!track.spi(), "next reply without SPI clears it");
+        assert_eq!(track.mode_3a(), Some(0o2613), "identity stays sticky");
+    }
+
+    /// The per-sensor hit book answers "how many distinct sensors support this
+    /// track right now?" over a freshness window — the basis of the I062/080
+    /// MON bit. REQ: FR-TRK-036
+    #[test]
+    fn fresh_sensor_count_windows_per_sensor_hits() {
+        let mut track = fresh_track();
+        track.record_hit_from(SensorId(1), 0.0);
+        track.record_hit_from(SensorId(2), 5.0);
+        assert_eq!(track.fresh_sensor_count(10.0, 30.0), 2, "both fresh");
+        assert_eq!(
+            track.fresh_sensor_count(32.0, 30.0),
+            1,
+            "sensor 1 aged out (hit at 0 → age 32 > 30); sensor 2 still fresh"
+        );
+        assert_eq!(track.fresh_sensor_count(100.0, 30.0), 0, "all stale");
     }
 
     /// The time-continuous lifecycle interval (Häppchen 13.2) falls back to the

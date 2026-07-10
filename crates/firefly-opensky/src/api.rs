@@ -102,6 +102,7 @@ pub(crate) fn parse_state(
         flight_level_ft,
         icao_address: Some(icao),
         callsign,
+        spi: false,
     };
 
     // OpenSky timestamp is Unix epoch; the tracker works with seconds since

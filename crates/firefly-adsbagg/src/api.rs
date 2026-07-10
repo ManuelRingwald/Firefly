@@ -154,6 +154,7 @@ pub(crate) fn parse_aircraft(
         flight_level_ft: baro_alt_ft,
         icao_address: icao,
         callsign,
+        spi: false,
     };
 
     // Data-time: the server timestamp minus this aircraft's position age, so

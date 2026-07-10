@@ -59,6 +59,10 @@ const FLIGHT_LEVEL_SIGN: i32 = 0x2000;
 const FLIGHT_LEVEL_MODULUS: i32 = 0x4000;
 /// FX bit (lowest bit of an octet): "another octet follows".
 const FX: u8 = 0x01;
+/// I048/020 octet 1, bit 3: **SPI** — Special Position Identification, the
+/// transponder "ident" pulse (octet layout: TYP bits 8–6, SIM 5, RDP 4,
+/// SPI 3, RAB 2, FX 1).
+const TRD_SPI: u8 = 0x04;
 
 /// The CAT048 UAP field reference numbers (FRN → data item), per
 /// SUR.ET1.ST05.2000-STD-04-01. Named in one place so the format model and the
@@ -277,6 +281,9 @@ pub struct DecodedTargetReport {
     pub callsign: Option<Callsign>,
     /// I048/161 — radar track number, if present.
     pub track_number: Option<u16>,
+    /// I048/020 SPI — Special Position Identification ("ident" pulse) present
+    /// in this report. `false` when I048/020 is absent.
+    pub spi: bool,
 }
 
 /// Errors that can occur while decoding a CAT048 data block. Mirrors
@@ -373,6 +380,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedTargetReport, Cat048Decod
     let mut icao_address = None;
     let mut callsign = None;
     let mut track_number = None;
+    let mut spi = false;
 
     for frn in frns {
         let format = item_format(frn).ok_or(Cat048DecodeError::UnknownItem(frn))?;
@@ -387,7 +395,10 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedTargetReport, Cat048Decod
         match frn {
             uap::DATA_SOURCE_IDENTIFIER => sac_sic = Some((bytes[0], bytes[1])),
             uap::TIME_OF_DAY => time = Some(decode_time_of_day(bytes)),
-            uap::TARGET_REPORT_DESCRIPTOR => detection = Some(Detection::from_typ(bytes[0] >> 5)),
+            uap::TARGET_REPORT_DESCRIPTOR => {
+                detection = Some(Detection::from_typ(bytes[0] >> 5));
+                spi = bytes[0] & TRD_SPI != 0;
+            }
             uap::MEASURED_POSITION_POLAR => position = Some(decode_polar(bytes)),
             uap::MODE_3A_CODE => mode_3a = Some(decode_mode_3a(bytes)),
             uap::FLIGHT_LEVEL => flight_level_ft = Some(decode_flight_level(bytes)),
@@ -415,6 +426,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedTargetReport, Cat048Decod
         icao_address,
         callsign,
         track_number,
+        spi,
     })
 }
 
@@ -760,6 +772,19 @@ mod tests {
                 let _ = decode_target_reports(&m);
             }
         }
+    }
+
+    /// The SPI ("ident") bit of I048/020 octet 1 is decoded; the reference
+    /// block (0x60, no SPI) reports `false`, setting bit 3 (0x64) reports
+    /// `true`. REQ: FR-TRK-036
+    #[test]
+    fn spi_bit_of_target_report_descriptor_is_decoded() {
+        let block = reference_block();
+        assert!(!decode_target_reports(&block).unwrap()[0].spi);
+
+        let mut with_spi = block;
+        with_spi[10] |= TRD_SPI; // I048/020 sits after CAT+LEN+FSPEC+010+140
+        assert!(decode_target_reports(&with_spi).unwrap()[0].spi);
     }
 
     /// A hostile record whose FSPEC chains FX octets past the supported FRN
