@@ -429,14 +429,22 @@ Format: JSON-Lines. Jede Zeile:
 {"ts_unix_ns":1750243381000000000,"plot":{...}}
 ```
 
-### 6.2 PlotRecorder-Pfad konfigurieren
+### 6.2 PlotRecorder-Pfad konfigurieren (`FIREFLY_PLOT_RECORD_PATH`)
 
-Im Live-Modus (AP9.4c-3, geplant) wird der Recorder über eine
-Umgebungsvariable aktiviert. Bis dahin ist er programmatisch konfigurierbar:
+Die Aufzeichnung ist im Live-Server **opt-in** über eine Umgebungsvariable
+(QW.4). Ist sie gesetzt, schreibt der Live-Tracker jeden eingehenden Plot vor
+der Verarbeitung in die `.ffplots`-Datei; unset bedeutet **kein** Recording.
 
-```rust
-let recorder = PlotRecorder::create("/var/log/firefly/session.ffplots")?;
+| Variable | Standard | Bedeutung |
+|----------|----------|-----------|
+| `FIREFLY_PLOT_RECORD_PATH` | *(leer = aus)* | Pfad zur `.ffplots`-Aufzeichnungsdatei. Gesetzt ⇒ jeder Eingangs-Plot wird aufgezeichnet (Wiederanlauf-/Replay-Grundlage, ADR 0020). Ein **nicht öffenbarer** Pfad (fehlendes Verzeichnis o. Ä.) ist **nicht-fatal**: Warn-Log, der Server läuft ohne Aufzeichnung weiter (Verfügbarkeit vor Aufzeichnung). |
+
+```bash
+FIREFLY_PLOT_RECORD_PATH=/var/log/firefly/session.ffplots ./firefly-server
 ```
+
+Wiedergabe der so entstandenen Datei über `firefly-replay-plots`
+(`FIREFLY_REPLAY_PLOTS_INPUT`, siehe §5.2).
 
 ### 6.3 Wichtig: Float-Genauigkeit
 
