@@ -32,8 +32,9 @@ pub use app::{router, AppState, FrameSource};
 pub use config::ServerConfig;
 pub use firefly_io::Frame;
 pub use live::{
-    build_live_tracker, build_live_tracker_multi, live_system_reference_point, run_live_cat062,
-    run_live_tracker, LiveSnapshot, LiveTracker, PlotRecorder, RadarSensor, SnapshotRx,
+    build_live_tracker, build_live_tracker_multi, live_system_reference_point,
+    resolve_plot_recorder, run_live_cat062, run_live_tracker, LiveSnapshot, LiveTracker,
+    PlotRecorder, RadarSensor, SnapshotRx,
 };
 pub use metrics::Metrics;
 

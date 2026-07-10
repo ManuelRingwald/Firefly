@@ -124,6 +124,36 @@ impl PlotRecorder {
     }
 }
 
+/// Resolve the optional input recorder from the `FIREFLY_PLOT_RECORD_PATH`
+/// value (`path`): unset, empty or whitespace → **no** recording (the default);
+/// otherwise a `.ffplots` recorder truncating/creating a file at that path (ADR
+/// 0020). Recording the tracker's *input* plot stream is the recovery path a
+/// live instance replays after a restart — the groundwork the ARTAS-gap
+/// roadmap (QW.4 → SDPS-002/HA) needs wired in the live path, not just
+/// unit-tested.
+///
+/// A creation failure (unwritable path, missing directory) is **non-fatal**: it
+/// logs a warning and returns `None`, because opening a recording file must
+/// never stop the live air picture from starting (availability over recording,
+/// the same policy [`LiveTracker::ingest`] applies to write failures).
+pub fn resolve_plot_recorder(path: Option<&str>) -> Option<PlotRecorder> {
+    let path = path.map(str::trim).filter(|s| !s.is_empty())?;
+    match PlotRecorder::create(path) {
+        Ok(recorder) => {
+            info!(path, "recording ingested plots to .ffplots (ADR 0020)");
+            Some(recorder)
+        }
+        Err(error) => {
+            warn!(
+                %error,
+                path,
+                "could not open plot recording file; continuing without recording"
+            );
+            None
+        }
+    }
+}
+
 /// Resolve the **system reference point** for live/plot-replay mode (ADR 0021):
 /// the single geodetic origin shared by the tracking frame *and* the CAT062
 /// I062/100 projection, so both are coherent.
@@ -491,6 +521,48 @@ mod tests {
         let bad = resolve_system_reference_point(Some("nonsense"), Some("inf"), 51.0, 10.5);
         assert!((bad.lat_deg() - 51.0).abs() < 1e-12);
         assert!((bad.lon_deg() - 10.5).abs() < 1e-12);
+    }
+
+    /// The plot recorder is opt-in: unset, empty and whitespace-only paths all
+    /// mean "no recording"; a real path opens a `.ffplots` writer whose header
+    /// is on disk immediately. QW.4. REQ: FR-OPS-006
+    #[test]
+    fn plot_recorder_resolves_opt_in_path() {
+        assert!(
+            resolve_plot_recorder(None).is_none(),
+            "unset → no recording"
+        );
+        assert!(resolve_plot_recorder(Some("")).is_none(), "empty → none");
+        assert!(
+            resolve_plot_recorder(Some("   ")).is_none(),
+            "whitespace → none"
+        );
+
+        let dir = std::env::temp_dir().join(format!("firefly-qw4-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("live.ffplots");
+        let mut recorder =
+            resolve_plot_recorder(path.to_str()).expect("a real path opens a recorder");
+        recorder.flush().unwrap();
+        // The file exists and carries the .ffplots header (8-byte magic).
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.starts_with(b"FFPLOTS\0"), "header written on create");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A path that cannot be opened (a file inside a non-existent directory) is
+    /// non-fatal: the resolver logs and returns `None` rather than aborting the
+    /// live picture. QW.4. REQ: FR-OPS-006
+    #[test]
+    fn plot_recorder_unwritable_path_is_non_fatal() {
+        let bogus = std::env::temp_dir()
+            .join("firefly-qw4-does-not-exist")
+            .join("nested")
+            .join("live.ffplots");
+        assert!(
+            resolve_plot_recorder(bogus.to_str()).is_none(),
+            "unopenable path → None, not a panic/abort"
+        );
     }
 
     /// An ADS-B plot for one aircraft at a geodetic position and data-time.

@@ -18,9 +18,9 @@ use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
 use firefly_radar::RadarConfig;
 use firefly_server::sources;
 use firefly_server::{
-    build_live_tracker_multi, live_system_reference_point, router, run_live_cat062,
-    run_live_tracker, AppState, FrameSource, LiveSnapshot, LiveTracker, Metrics, RadarSensor,
-    ServerConfig, SnapshotRx,
+    build_live_tracker_multi, live_system_reference_point, resolve_plot_recorder, router,
+    run_live_cat062, run_live_tracker, AppState, FrameSource, LiveSnapshot, LiveTracker, Metrics,
+    RadarSensor, ServerConfig, SnapshotRx,
 };
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
@@ -220,7 +220,13 @@ async fn build_live_state(
     // geodetic adapters on the shared frame, radar sensors on their own site frame.
     let tracker =
         build_live_tracker_multi(reference, geodetic_sensors.iter().copied(), radar_sensors);
-    let live = LiveTracker::new(tracker, None); // recorder wired in AP9.4c-4
+    // Opt-in input recording (ADR 0020): FIREFLY_PLOT_RECORD_PATH names a
+    // .ffplots file the ingested plot stream is written to, the restart-replay
+    // recovery path (QW.4 → SDPS-002/HA). Unset → no recording; an unwritable
+    // path is non-fatal (logged, tracking continues).
+    let record_path = std::env::var("FIREFLY_PLOT_RECORD_PATH").ok();
+    let recorder = resolve_plot_recorder(record_path.as_deref());
+    let live = LiveTracker::new(tracker, recorder);
     {
         let m = Arc::clone(&metrics);
         tokio::spawn(run_live_tracker(
