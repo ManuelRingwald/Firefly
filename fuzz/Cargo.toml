@@ -1,0 +1,58 @@
+# Coverage-guided fuzzing of Firefly's trust-boundary parsers (FR-SAFE/QW.2).
+#
+# This crate is deliberately OUTSIDE the main workspace (see the root
+# Cargo.toml `exclude`): fuzz targets need the nightly toolchain and libFuzzer
+# instrumentation, and must never make the stable quality gates depend on
+# either. Run via `cargo +nightly fuzz run <target>` from the repo root —
+# see fuzz/README.md.
+[package]
+name = "firefly-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+firefly-asterix = { path = "../crates/firefly-asterix" }
+firefly-server = { path = "../crates/firefly-server" }
+
+[[bin]]
+name = "cat048_decode"
+path = "fuzz_targets/cat048_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cat062_decode"
+path = "fuzz_targets/cat062_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cat063_decode"
+path = "fuzz_targets/cat063_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cat065_decode"
+path = "fuzz_targets/cat065_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sources_parse"
+path = "fuzz_targets/sources_parse.rs"
+test = false
+doc = false
+bench = false
+
+# Standalone workspace marker — keeps this crate out of the parent workspace.
+[workspace]

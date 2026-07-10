@@ -581,6 +581,9 @@ pub enum DecodeError {
     UnknownItem(u8),
     /// A record's FSPEC was missing an item this decoder requires.
     MissingItem(u8),
+    /// The FSPEC's FX chain ran past [`fspec::MAX_FSPEC_OCTETS`] — malformed
+    /// (no CAT062 item lives that far into the UAP). Fuzzing regression, QW.2.
+    FspecTooLong,
 }
 
 impl std::fmt::Display for DecodeError {
@@ -594,6 +597,9 @@ impl std::fmt::Display for DecodeError {
             ),
             DecodeError::UnknownItem(frn) => write!(f, "FSPEC marks unknown FRN {frn} present"),
             DecodeError::MissingItem(frn) => write!(f, "record is missing required FRN {frn}"),
+            DecodeError::FspecTooLong => {
+                write!(f, "FSPEC FX chain exceeds the supported FRN space")
+            }
         }
     }
 }
@@ -920,7 +926,8 @@ impl<'a> Cursor<'a> {
     /// Parse the FSPEC at the cursor, returning the present FRNs and
     /// advancing past its octets.
     fn take_fspec(&mut self) -> Result<BTreeSet<u8>, DecodeError> {
-        let (frns, consumed) = fspec::parse(&self.bytes[self.pos..]);
+        let (frns, consumed) =
+            fspec::parse(&self.bytes[self.pos..]).map_err(|_| DecodeError::FspecTooLong)?;
         if consumed == 0 {
             return Err(DecodeError::Truncated);
         }
@@ -1741,5 +1748,15 @@ mod tests {
         block.truncate(block.len() - 1);
         block[1..3].copy_from_slice(&truncated_len.to_be_bytes());
         assert_eq!(decode_data_block(&block), Err(DecodeError::Truncated));
+    }
+
+    /// A hostile record whose FSPEC chains FX octets past the supported FRN
+    /// space is rejected, not panicked on — frozen fuzzing find (QW.2): the
+    /// unbounded FRN arithmetic used to overflow `u8`. REQ: NFR-SAFE-002
+    #[test]
+    fn overlong_fspec_chain_is_rejected_not_panicked() {
+        let mut block = vec![CATEGORY, 0x00, 63];
+        block.extend_from_slice(&[0xFF; 60]);
+        assert_eq!(decode_data_block(&block), Err(DecodeError::FspecTooLong));
     }
 }

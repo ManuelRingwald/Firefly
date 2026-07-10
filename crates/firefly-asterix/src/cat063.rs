@@ -307,6 +307,10 @@ pub enum Cat063DecodeError {
     UnknownFrn(u8),
     /// A mandatory field was absent from a record.
     MissingItem(u8),
+    /// The FSPEC's FX chain ran past [`crate::fspec::MAX_FSPEC_OCTETS`] —
+    /// malformed (no CAT063 item lives that far into the UAP). Fuzzing
+    /// regression, QW.2.
+    FspecTooLong,
 }
 
 impl std::fmt::Display for Cat063DecodeError {
@@ -319,6 +323,9 @@ impl std::fmt::Display for Cat063DecodeError {
             }
             Cat063DecodeError::UnknownFrn(frn) => write!(f, "unknown FRN {frn}"),
             Cat063DecodeError::MissingItem(frn) => write!(f, "missing required FRN {frn}"),
+            Cat063DecodeError::FspecTooLong => {
+                write!(f, "FSPEC FX chain exceeds the supported FRN space")
+            }
         }
     }
 }
@@ -364,7 +371,8 @@ fn decode_record(
 ) -> Result<(DecodedSensorStatus, usize), Cat063DecodeError> {
     use crate::fspec;
 
-    let (frns, consumed) = fspec::parse(&bytes[pos..end]);
+    let (frns, consumed) =
+        fspec::parse(&bytes[pos..end]).map_err(|_| Cat063DecodeError::FspecTooLong)?;
     if consumed == 0 {
         return Err(Cat063DecodeError::Truncated);
     }
@@ -709,5 +717,18 @@ mod tests {
     fn unknown_reason_code_maps_to_unreachable() {
         assert_eq!(SensorReason::from_code(9), SensorReason::Unreachable);
         assert_eq!(SensorReason::from_code(0), SensorReason::Ok);
+    }
+
+    /// A hostile record whose FSPEC chains FX octets past the supported FRN
+    /// space is rejected, not panicked on — frozen fuzzing find (QW.2): the
+    /// unbounded FRN arithmetic used to overflow `u8`. REQ: NFR-SAFE-002
+    #[test]
+    fn overlong_fspec_chain_is_rejected_not_panicked() {
+        let mut block = vec![CATEGORY, 0x00, 63];
+        block.extend_from_slice(&[0xFF; 60]);
+        assert_eq!(
+            decode_sensor_block(&block),
+            Err(Cat063DecodeError::FspecTooLong)
+        );
     }
 }

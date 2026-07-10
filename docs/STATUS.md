@@ -10,6 +10,28 @@
 
 ---
 
+## 🎯 Stand 2026-07-10 (QW.2 Fuzzing — echter FSPEC-Bug gefunden & gefixt)
+
+- **Zuletzt aktualisiert:** 2026-07-10 (Abend)
+- **QW.2 — Coverage-geführtes Fuzzing der Vertrauensgrenzen (NFR-SAFE-002):**
+  Neues `fuzz/`-Workspace (cargo-fuzz/libFuzzer, bewusst außerhalb des
+  stabilen Workspace) mit fünf Targets: CAT048/062/063/065-Decoder +
+  `FIREFLY_SOURCES`-Parser; Seed-Korpus aus den Referenz-Dumps; zeitgeboxter
+  CI-Job „Fuzz" (60 s je Target, Crash-Artefakt-Upload). Bedienung:
+  `fuzz/README.md`.
+- **Erster Ertrag — echter Bug in Sekunden gefunden:** u8-Überlauf in der
+  gemeinsamen FSPEC-FRN-Arithmetik (`fspec::parse`) — eine feindliche
+  FX-Kette > 36 Oktette panickte (Debug) bzw. las stillschweigend falsche
+  FRNs (Release), in **allen vier** ASTERIX-Decodern. Fix: Kette hart auf
+  `MAX_FSPEC_OCTETS` = 36 begrenzt (FRN ≤ 252, jenseits jeder realen UAP),
+  Überlänge ⇒ neue Fehler-Variante `FspecTooLong` je Decoder. 6 eingefrorene
+  Regressionstests; Original-Crash-Eingaben verifiziert sauber; frischer
+  Fuzz-Lauf ohne Funde; `sources_parse` > 5 Mio. Läufe ohne Befund. **Kein
+  Wire-Bruch** (nur ohnehin undekodierbare Eingaben werden abgelehnt), ICD
+  unverändert. **Wayfinder-Folge:** gleiche FSPEC-Härtung + Fuzzing für den
+  Go-Decoder empfohlen (`from-firefly`-Issue). Roadmap-Stand: **31,5 %**.
+- **Nächster Schritt:** QW.3 (I062/295 + I062/080-Bit-Ausbau, S2) ankündigen.
+
 ## 🎯 Stand 2026-07-10 (ARTAS-Gap-Roadmap + QW.1 Track-Nummern-Pool)
 
 - **Zuletzt aktualisiert:** 2026-07-10
