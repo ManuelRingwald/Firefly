@@ -49,3 +49,46 @@ jobs:
 
       - name: Tests (cargo test --workspace)
         run: cargo test --workspace --locked
+
+  # Coverage-guided fuzzing of the trust-boundary parsers (QW.2, fuzz/README.md):
+  # CAT048/062/063/065 decoders + the FIREFLY_SOURCES parser. Time-boxed to 60 s
+  # per target — a regression net against panics on hostile input, not a
+  # replacement for long local runs. Needs nightly (libFuzzer instrumentation),
+  # which is why the fuzz crate lives outside the stable workspace.
+  fuzz:
+    name: Fuzz (time-boxed, nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo build (fuzz workspace)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Fuzz each target (60 s, seeded corpus)
+        run: |
+          for target in $(cargo fuzz list); do
+            echo "::group::fuzz $target"
+            mkdir -p "fuzz/corpus/$target"
+            cargo fuzz run "$target" "fuzz/corpus/$target" "fuzz/seeds/$target" \
+              -- -max_total_time=60 -rss_limit_mb=4096
+            echo "::endgroup::"
+          done
+
+      # A found panic input is the most valuable output of this job — keep it.
+      - name: Upload crash artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

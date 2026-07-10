@@ -9,3 +9,10 @@
 # Node / web frontend (added in M3)
 node_modules/
 dist/
+
+# Fuzzing (QW.2): build dir, crash artifacts and the locally *grown* corpus are
+# ephemeral — only the curated seeds under fuzz/seeds/ are committed.
+/fuzz/target
+/fuzz/artifacts
+/fuzz/corpus
+/fuzz/Cargo.lock

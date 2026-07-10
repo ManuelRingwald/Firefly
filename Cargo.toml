@@ -16,6 +16,10 @@ members = [
     "crates/firefly-radar",
     "crates/firefly-adsbagg",
 ]
+# The fuzz harness is its own workspace: it needs the nightly toolchain
+# (libFuzzer sanitizer flags), and excluding it keeps every stable-toolchain
+# gate (`cargo test/clippy/fmt --workspace`) independent of it.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"
