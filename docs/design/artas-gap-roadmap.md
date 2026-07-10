@@ -85,7 +85,7 @@ Fuzzing (nur deterministischer Byte-Flip-Test am CAT048-Decoder), FHA offen.
 | AP | Häppchen | Inhalt | Stufe · Modell | danach bei | Status |
 |---|---|---|---|---:|---|
 | **AP-QW · Quick Wins** | QW.1 | TrackId-u16-Trunkierung fixen: verwalteter Track-Nummern-Pool mit 60-s-Quarantäne (FR-TRK-035, ICD 3.1.1) | S3 · Fable 5 | **30,5 %** | ✅ 2026-07-10 |
-| | QW.2 | Echtes Fuzzing: cargo-fuzz für CAT048-Decoder + `FIREFLY_SOURCES`-Parser, CI-Job | S2–S3 · Sonnet | **31,5 %** | ⏳ |
+| | QW.2 | Echtes Fuzzing: cargo-fuzz für CAT048/062/063/065-Decoder + `FIREFLY_SOURCES`-Parser, CI-Job. Erster Ertrag: u8-Überlauf in der FSPEC-FRN-Arithmetik gefunden & gefixt (`FspecTooLong`, NFR-SAFE-002) | S2–S3 · Fable 5 | **31,5 %** | ✅ 2026-07-10 |
 | | QW.3 | I062/295 (Data Ages) + I062/080-Bit-Ausbau | S2 · Sonnet | **32,5 %** | ⏳ |
 | | QW.4 | PlotRecorder im Live-Pfad verdrahten (`main.rs`, heute `None`) | S2 · Haiku/Sonnet | **33,5 %** | ⏳ |
 | **AP-REG · Sensor-Registrierung** | REG.1 | ADR + Bias-Modell (Range/Azimut/Zeit) + Offline-Schätzer über Track-Residuen | S5 · Fable 5 | **36,5 %** | ⏳ |
