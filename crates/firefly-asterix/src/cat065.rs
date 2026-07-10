@@ -171,6 +171,9 @@ pub enum Cat065DecodeError {
     UnknownItem(u8),
     /// A record's FSPEC was missing an item a status report requires.
     MissingItem(u8),
+    /// The FSPEC's FX chain ran past [`fspec::MAX_FSPEC_OCTETS`] — malformed
+    /// (no CAT065 item lives that far into the UAP). Fuzzing regression, QW.2.
+    FspecTooLong,
 }
 
 impl std::fmt::Display for Cat065DecodeError {
@@ -187,6 +190,9 @@ impl std::fmt::Display for Cat065DecodeError {
             }
             Cat065DecodeError::MissingItem(frn) => {
                 write!(f, "record is missing required FRN {frn}")
+            }
+            Cat065DecodeError::FspecTooLong => {
+                write!(f, "FSPEC FX chain exceeds the supported FRN space")
             }
         }
     }
@@ -230,7 +236,8 @@ fn decode_record(
     pos: usize,
     end: usize,
 ) -> Result<(DecodedStatus, usize), Cat065DecodeError> {
-    let (frns, consumed) = fspec::parse(&bytes[pos..end]);
+    let (frns, consumed) =
+        fspec::parse(&bytes[pos..end]).map_err(|_| Cat065DecodeError::FspecTooLong)?;
     if consumed == 0 {
         return Err(Cat065DecodeError::Truncated);
     }
@@ -361,5 +368,18 @@ mod tests {
             // Must not panic; either Truncated or LengthMismatch is acceptable.
             let _ = decode_status_block(&block[..cut]);
         }
+    }
+
+    /// A hostile record whose FSPEC chains FX octets past the supported FRN
+    /// space is rejected, not panicked on — frozen fuzzing find (QW.2): the
+    /// unbounded FRN arithmetic used to overflow `u8`. REQ: NFR-SAFE-002
+    #[test]
+    fn overlong_fspec_chain_is_rejected_not_panicked() {
+        let mut block = vec![CATEGORY, 0x00, 63];
+        block.extend_from_slice(&[0xFF; 60]);
+        assert_eq!(
+            decode_status_block(&block),
+            Err(Cat065DecodeError::FspecTooLong)
+        );
     }
 }

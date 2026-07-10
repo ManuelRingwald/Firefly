@@ -49,22 +49,41 @@ impl RecordBuilder {
     }
 }
 
+/// Longest FX chain [`parse`] accepts. 36 octets cover FRNs 1..=252 — already
+/// several times the largest real UAP handled here (CAT062 ends at FRN 35) —
+/// and keep every FRN inside `u8`. The bound exists because the FX mechanism
+/// itself is unbounded: a hostile datagram can chain FX octets indefinitely,
+/// and the unbounded FRN arithmetic then overflows `u8` (panic with debug
+/// assertions, silently wrapped — i.e. misread — FRNs in release). Found by
+/// fuzzing (QW.2). REQ: NFR-SAFE-002
+pub const MAX_FSPEC_OCTETS: usize = 36;
+
+/// Error: the FSPEC's FX chain ran past [`MAX_FSPEC_OCTETS`] — no category
+/// decoded here has items that far into the UAP, so the record is malformed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FspecTooLong;
+
 /// Parse the FSPEC at the start of `bytes`: the set of FRNs it marks present,
 /// and the number of FSPEC octets consumed (the inverse of [`fspec`]).
 ///
 /// Reads octets while their FX bit (the lowest bit, `0x01`) is set, stopping
 /// after the first octet whose FX bit is clear. An empty `bytes` yields an
 /// empty FRN set and zero octets consumed — the caller decides whether that is
-/// an error (e.g. truncated input).
-pub fn parse(bytes: &[u8]) -> (BTreeSet<u8>, usize) {
+/// an error (e.g. truncated input). A chain longer than [`MAX_FSPEC_OCTETS`]
+/// is rejected as [`FspecTooLong`] rather than overflowing the FRN space.
+pub fn parse(bytes: &[u8]) -> Result<(BTreeSet<u8>, usize), FspecTooLong> {
     let mut frns = BTreeSet::new();
-    let mut consumed = 0;
+    let mut consumed = 0usize;
 
     for &octet in bytes {
+        if consumed == MAX_FSPEC_OCTETS {
+            return Err(FspecTooLong);
+        }
         consumed += 1;
-        for position in 0..7u8 {
+        for position in 0..7usize {
             if octet & (1 << (7 - position)) != 0 {
-                frns.insert((consumed - 1) as u8 * 7 + position + 1);
+                // consumed ≤ MAX_FSPEC_OCTETS keeps this ≤ 252, so it fits u8.
+                frns.insert(((consumed - 1) * 7 + position + 1) as u8);
             }
         }
         if octet & 0x01 == 0 {
@@ -72,7 +91,7 @@ pub fn parse(bytes: &[u8]) -> (BTreeSet<u8>, usize) {
         }
     }
 
-    (frns, consumed)
+    Ok((frns, consumed))
 }
 
 /// Compute the FSPEC octets for a set of present FRNs.
@@ -170,7 +189,7 @@ mod tests {
         ] {
             let set: BTreeSet<u8> = frns.iter().copied().collect();
             let octets = fspec(&set);
-            let (parsed, consumed) = parse(&octets);
+            let (parsed, consumed) = parse(&octets).expect("well-formed FSPEC");
             assert_eq!(parsed, set, "frns = {frns:?}");
             assert_eq!(consumed, octets.len(), "frns = {frns:?}");
         }
@@ -180,8 +199,32 @@ mod tests {
     /// must treat that as truncated input, not as "no items present".
     #[test]
     fn parse_of_empty_input_consumes_nothing() {
-        let (frns, consumed) = parse(&[]);
+        let (frns, consumed) = parse(&[]).expect("empty input is not too long");
         assert!(frns.is_empty());
         assert_eq!(consumed, 0);
+    }
+
+    /// The longest accepted chain parses with correct FRN arithmetic at the
+    /// very edge: octet 36, data bit 7 → FRN 252 (fits u8, no overflow).
+    /// Fuzzing regression (QW.2). REQ: NFR-SAFE-002
+    #[test]
+    fn parse_accepts_maximum_chain_with_exact_frn() {
+        // 35 pure-FX octets, then a final octet with its last data bit set.
+        let mut chain = vec![0x01u8; MAX_FSPEC_OCTETS - 1];
+        chain.push(0x02); // bit 2 = position 6 → FRN (36-1)*7 + 6 + 1 = 252
+        let (frns, consumed) = parse(&chain).expect("36 octets are allowed");
+        assert_eq!(consumed, MAX_FSPEC_OCTETS);
+        assert_eq!(frns.into_iter().collect::<Vec<_>>(), vec![252]);
+    }
+
+    /// A hostile FX chain running past the cap is rejected instead of
+    /// overflowing the u8 FRN space (panic under debug assertions, silently
+    /// wrapped FRNs in release). Fuzzing regression (QW.2). REQ: NFR-SAFE-002
+    #[test]
+    fn parse_rejects_overlong_fx_chain() {
+        let chain = vec![0xFFu8; MAX_FSPEC_OCTETS + 1];
+        assert_eq!(parse(&chain), Err(FspecTooLong));
+        // Far longer chains (the fuzzer's original find) are equally rejected.
+        assert_eq!(parse(&[0xFF; 4096]), Err(FspecTooLong));
     }
 }

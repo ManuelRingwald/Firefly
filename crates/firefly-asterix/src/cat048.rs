@@ -300,6 +300,9 @@ pub enum Cat048DecodeError {
     UnknownItem(u8),
     /// A record's FSPEC was missing an item this decoder requires (I048/010).
     MissingItem(u8),
+    /// The FSPEC's FX chain ran past [`fspec::MAX_FSPEC_OCTETS`] — malformed
+    /// (no CAT048 item lives that far into the UAP). Fuzzing regression, QW.2.
+    FspecTooLong,
 }
 
 impl std::fmt::Display for Cat048DecodeError {
@@ -316,6 +319,9 @@ impl std::fmt::Display for Cat048DecodeError {
             }
             Cat048DecodeError::MissingItem(frn) => {
                 write!(f, "record is missing required FRN {frn}")
+            }
+            Cat048DecodeError::FspecTooLong => {
+                write!(f, "FSPEC FX chain exceeds the supported FRN space")
             }
         }
     }
@@ -502,7 +508,7 @@ impl<'a> Cursor<'a> {
     /// bit with no following octet means the FSPEC was cut short (truncated).
     fn take_fspec(&mut self) -> Result<BTreeSet<u8>, Cat048DecodeError> {
         let slice = &self.bytes[self.pos..];
-        let (frns, consumed) = fspec::parse(slice);
+        let (frns, consumed) = fspec::parse(slice).map_err(|_| Cat048DecodeError::FspecTooLong)?;
         if consumed == 0 || slice[consumed - 1] & FX != 0 {
             return Err(Cat048DecodeError::Truncated);
         }
@@ -754,5 +760,18 @@ mod tests {
                 let _ = decode_target_reports(&m);
             }
         }
+    }
+
+    /// A hostile record whose FSPEC chains FX octets past the supported FRN
+    /// space is rejected, not panicked on — frozen fuzzing find (QW.2): the
+    /// unbounded FRN arithmetic used to overflow `u8`. REQ: NFR-SAFE-002
+    #[test]
+    fn overlong_fspec_chain_is_rejected_not_panicked() {
+        let mut block = vec![CATEGORY, 0x00, 63];
+        block.extend_from_slice(&[0xFF; 60]);
+        assert_eq!(
+            decode_target_reports(&block),
+            Err(Cat048DecodeError::FspecTooLong)
+        );
     }
 }
