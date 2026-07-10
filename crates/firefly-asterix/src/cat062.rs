@@ -389,11 +389,13 @@ fn encode_measured_flight_level(flight_level_ft: f64) -> Vec<u8> {
     ticks.to_be_bytes().to_vec()
 }
 
-/// I062/040 — the 16-bit track number, big-endian. CAT062 track numbers are
-/// 16-bit, so we carry the low 16 bits of the (wider) internal track id.
+/// I062/040 — the 16-bit track number, big-endian. This is the pool-managed
+/// wire number ([`SystemTrack::track_number`], FR-TRK-035), **not** a
+/// truncation of the internal track id: the id is a process-unique `u32`, and
+/// carrying its low 16 bits would silently collide after 65 536 track births
+/// (two live tracks under one number; a TSE deleting the wrong one downstream).
 fn encode_track_number(track: &SystemTrack) -> Vec<u8> {
-    let number = track.id.0 as u16;
-    number.to_be_bytes().to_vec()
+    track.track_number.to_be_bytes().to_vec()
 }
 
 /// I062/080 — Track Status, a **variable-length** item whose octets chain via the
@@ -961,6 +963,7 @@ mod tests {
     fn track_at(id: u32, lat_deg: f64, lon_deg: f64, v_east: f64, v_north: f64) -> SystemTrack {
         SystemTrack {
             id: TrackId(id),
+            track_number: id as u16,
             time: Timestamp(0.0),
             position: Wgs84::from_degrees(lat_deg, lon_deg, 500.0),
             v_east,
@@ -1020,12 +1023,27 @@ mod tests {
         assert_eq!(just_past_midnight, vec![0x00, 0x06, 0x00]);
     }
 
-    /// Track number is the 16-bit big-endian id.
+    /// Track number is the 16-bit big-endian wire number.
     #[test]
     fn track_number_is_big_endian_u16() {
         assert_eq!(
             encode_track_number(&track_at(0x1234, 0.0, 0.0, 0.0, 0.0)),
             vec![0x12, 0x34]
+        );
+    }
+
+    /// I062/040 carries the pool-managed wire number, **never** a truncation of
+    /// the internal (wider) track id — truncating would silently collide after
+    /// 65 536 track births (FR-TRK-035).
+    #[test]
+    fn track_number_is_pool_number_not_truncated_id() {
+        let mut t = track_at(1, 0.0, 0.0, 0.0, 0.0);
+        t.id = TrackId(70_000); // 70 000 % 65 536 = 4464 — the wrong answer
+        t.track_number = 7;
+        assert_eq!(
+            encode_track_number(&t),
+            vec![0x00, 0x07],
+            "the wire number is the pool's, not id mod 2^16"
         );
     }
 
