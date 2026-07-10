@@ -10,6 +10,27 @@
 
 ---
 
+## 🎯 Stand 2026-07-10 (QW.4 — PlotRecorder im Live-Pfad; Quick-Win-Block komplett)
+
+- **Zuletzt aktualisiert:** 2026-07-10 (Nacht)
+- **QW.4 — PlotRecorder-Verdrahtung (FR-OPS-006, Betriebs-Härtung):** Der
+  `.ffplots`-Eingangs-Recorder (ADR 0020) war unit-getestet, aber der
+  Live-Server übergab `LiveTracker::new(tracker, None)` — zeichnete im echten
+  Betrieb **nichts** auf (stale Kommentar „recorder wired in AP9.4c-4"). Jetzt:
+  opt-in-Env **`FIREFLY_PLOT_RECORD_PATH`** → `resolve_plot_recorder` (reiner,
+  testbarer Resolver in `live.rs`): unset/leer → kein Recording; gesetzter Pfad
+  → Recorder an `LiveTracker`; **unöffenbarer Pfad → nicht-fatal** (Warn-Log,
+  Server läuft weiter — Verfügbarkeit vor Aufzeichnung). Kein CAT062-/Wire-Bezug.
+  **End-to-end am echten Server verifiziert** (Start mit gesetzter Env → Datei
+  mit `FFPLOTS\0`-Header angelegt). 2 neue Tests + bestehender
+  `recorder_captures_every_ingested_plot`; TECHNICAL §6.2 + INSTALLATION §7 +
+  Register (FR-OPS-006 „verifiziert", FR-OPS-007 präzisiert). Milestone
+  `QW4-PlotRecorder-Live-Wiring.md`.
+- **✅ Quick-Win-Block (AP-QW) komplett** — QW.1…QW.4. Roadmap-Stand **33,5 %**.
+- **Nächstes Paket: AP-REG (Sensor-Registrierung/Bias-Schätzung, S5)** — der
+  anspruchsvollste offene Punkt, Voraussetzung für Fusion echter Radare ohne
+  Doppelbilder. REG.1 (ADR + Bias-Modell + Offline-Schätzer) ankündigen.
+
 ## 🎯 Stand 2026-07-10 (QW.3 — I062/080 Vertrauens-Flags MON + SPI)
 
 - **Zuletzt aktualisiert:** 2026-07-10 (spät)

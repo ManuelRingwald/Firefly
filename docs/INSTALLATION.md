@@ -137,8 +137,10 @@ Mit aktivierter OpenSky-Quelle (`FIREFLY_OPENSKY_ENABLED=true`, ADR 0030:
 alle Adapter sind Opt-in) bezieht Firefly Echtzeit-ADS-B-Positionen vom
 OpenSky Network REST API, speist sie direkt in den Tracker und sendet
 kontinuierlich CAT062- und WebSocket-Daten an Wayfinder bzw. den Browser.
-Alle eingehenden Plots werden parallel in einer `.ffplots`-Datei
-aufgezeichnet (ADR 0020).
+Ist `FIREFLY_PLOT_RECORD_PATH` gesetzt (opt-in, QW.4), werden alle eingehenden
+Plots parallel in die dort benannte `.ffplots`-Datei aufgezeichnet — die
+Grundlage für deterministisches Replay/Wiederanlauf (ADR 0020; Details und
+Nicht-Fatal-Verhalten in `docs/TECHNICAL.md` §6.2).
 
 > **Orchestrierter Betrieb (ADR 0023).** Dieser Abschnitt beschreibt die
 > **Standalone**-Konfiguration über `FIREFLY_OPENSKY_*` (eine Quelle, von Hand
