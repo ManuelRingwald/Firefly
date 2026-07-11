@@ -20,7 +20,19 @@
 
 ## Version
 
-**1.6.0** (2026-07-11) — Neuer Quell-Typ **`adsb_asterix`** (FEP.3): ADS-B von
+**1.7.0** (2026-07-11) — Neuer Quell-Typ **`mlat_asterix`** (FEP.5):
+**WAM/Multilateration** als **ASTERIX CAT020/CAT019 über UDP** — unabhängige
+kooperative Überwachung neben Radar und ADS-B (Positionsberechnung durch das
+Bodensystem via TDOA; das Flugzeug kann seine Position nicht selbst fälschen).
+Felder wie `adsb_asterix`: `listen`? (`group:port`, Default `0.0.0.0:8020`),
+`sac`/`sic`? (erwartete System-Identität, I020/010), `sensor_id`? (Default
+240). **Keine** `bbox`, **kein** `lat`/`lon` (CAT020-Positionen sind
+geodätisch), **kein** `cred_env` (roher UDP-Strom; ADR 0017). CAT019-Status
+auf demselben Endpoint liefert die System-Liveness. **Additiv** — bestehende
+Quellen unverändert; ein Leser älterer Version lehnt den neuen Typ als
+unbekannt ab. Minor-Bump.
+
+Vorgänger **1.6.0** (2026-07-11) — Neuer Quell-Typ **`adsb_asterix`** (FEP.3): ADS-B von
 einer **eigenen Bodenstation** als **ASTERIX CAT021 über UDP** — der
 Produktions-Bezugsweg (Push statt Poll, lokal statt Internet, NACp-basierte
 Messunsicherheit statt pauschaler Annahme). Felder: `listen`? (`group:port`,
@@ -98,13 +110,13 @@ Ein JSON-Array. Jeder Eintrag:
 | `type` | string | ja | alle | Quell-Art (Abschnitt 3). |
 | `bbox` | object | Flächenquellen | `adsb_opensky`, `adsb_aggregator`, `flarm_aprs` | `{min_lat, min_lon, max_lat, max_lon}` (WGS84, Grad). |
 | `provider` | string | optional | `adsb_aggregator` | Welcher Community-Aggregator abgefragt wird: `adsb_lol` (Default) oder `adsb_fi`. Unbekannter Wert → **Startfehler** (nie ein still substituierter Anbieter). |
-| `sac` / `sic` | int 0..255 | Radar/ADS-B-Station | `radar_asterix`, `adsb_asterix` | Sensor-Identität (I048/010 bzw. I021/010). |
+| `sac` / `sic` | int 0..255 | ASTERIX-Quellen | `radar_asterix`, `adsb_asterix`, `mlat_asterix` | Sensor-Identität (I048/010, I021/010 bzw. I020/010). |
 | `lat` / `lon` | float | Radar (Pflicht) | `radar_asterix` | **Radar-Standort** (WGS84, Grad). CAT048 ist polar relativ zum Radar und trägt den Standort nicht — Firefly braucht ihn, um Polar-Plots ins Tracking-Frame zu heben (ADR 0028). |
 | `height_m` | float | optional | `radar_asterix` | Radar-Standort-Höhe über dem WGS84-Ellipsoid, Meter. Default `0`. |
-| `listen` | string | optional | `radar_asterix`, `adsb_asterix` | UDP-Endpoint `group:port` für den ASTERIX-Eingang. Multicast-Gruppe → beigetreten; sonst Unicast-Bind. Default `0.0.0.0:8048` (Radar) bzw. `0.0.0.0:8021` (ADS-B-Station). |
-| `sensor_id` | int | optional | alle | Auf die Plots gestempelte `SensorId`. Fehlt → Firefly vergibt einen Default je Adapter (OpenSky 200, Aggregator 230, FLARM 210, Radar 220, ADS-B-Station 230). |
+| `listen` | string | optional | `radar_asterix`, `adsb_asterix`, `mlat_asterix` | UDP-Endpoint `group:port` für den ASTERIX-Eingang. Multicast-Gruppe → beigetreten; sonst Unicast-Bind. Default `0.0.0.0:8048` (Radar), `0.0.0.0:8021` (ADS-B-Station) bzw. `0.0.0.0:8020` (WAM/MLAT). |
+| `sensor_id` | int | optional | alle | Auf die Plots gestempelte `SensorId`. Fehlt → Firefly vergibt einen Default je Adapter (OpenSky 200, Aggregator 230, FLARM 210, Radar 220, ADS-B-Station 230, WAM/MLAT 240). |
 | `poll_interval_secs` | int > 0 | optional | `adsb_opensky`, `adsb_aggregator` | Poll-Intervall des Pollers in ganzen Sekunden. Fehlt oder `0` → Firefly-Default (10 s). Nur für gepollte Quellen (FLARM/APRS ist Push, Radar hat eine eigene Scan-Periode). |
-| `cred_env` | string | optional | `adsb_opensky`, `flarm_aprs` | **Name** der Env, die den Credential-Klartext trägt (Abschnitt 4) — **nie** der Wert selbst. Fehlt → anonymer/credential-loser Zugang. (`radar_asterix`/`adsb_asterix` tragen keine Credentials; `adsb_aggregator` ist auth-frei und **ignoriert** ein gesetztes `cred_env`.) |
+| `cred_env` | string | optional | `adsb_opensky`, `flarm_aprs` | **Name** der Env, die den Credential-Klartext trägt (Abschnitt 4) — **nie** der Wert selbst. Fehlt → anonymer/credential-loser Zugang. (`radar_asterix`/`adsb_asterix`/`mlat_asterix` tragen keine Credentials; `adsb_aggregator` ist auth-frei und **ignoriert** ein gesetztes `cred_env`.) |
 
 Die `bbox`-Feldnamen sind identisch zu Wayfinders `source_config`, sodass der
 Orchestrator nahezu pass-through serialisieren kann.
@@ -132,6 +144,7 @@ FIREFLY_CAT062_PORT=8600
 | `flarm_aprs` | **unterstützt** (ADR 0026) | OGN/APRS-IS-Stream | `bbox` (Pflicht), `sensor_id`?, `cred_env`? |
 | `radar_asterix` | **unterstützt** (ADR 0028) | ASTERIX-CAT048-UDP-Listener | `sac`/`sic`, `lat`/`lon` (Pflicht), `height_m`?, `listen`?, `sensor_id`? |
 | `adsb_asterix` | **unterstützt** (FEP.3) | ASTERIX-CAT021-UDP-Listener (ADS-B-Bodenstation) | `listen`?, `sac`/`sic`?, `sensor_id`? — **keine** `bbox`, **kein** `lat`/`lon`, **kein** `cred_env` |
+| `mlat_asterix` | **unterstützt** (FEP.5) | ASTERIX-CAT020/019-UDP-Listener (WAM/MLAT) | `listen`?, `sac`/`sic`?, `sensor_id`? — **keine** `bbox`, **kein** `lat`/`lon`, **kein** `cred_env` |
 
 **Hinweis `adsb_aggregator` (ADR 0031):** Die Aggregator-APIs fragen
 Mittelpunkt+Radius (max. 250 NM) statt einer BBox. Firefly rechnet die
@@ -183,8 +196,20 @@ Internet-Quellen). Ist `adsb_asterix` die **einzige** Quelle, sollte der
 Orchestrator `FIREFLY_SYSTEM_REF_*` setzen (die Quelle trägt keine bbox zum
 Referenzpunkt bei, ADR 0021).
 
+**Hinweis `mlat_asterix` (FEP.5):** Verhält sich wie `adsb_asterix` (kein
+Standort, keine bbox — CAT020-Positionen sind geodätisch, vom Bodensystem
+berechnet), liefert aber **unabhängige** Überwachung: die Messunsicherheit
+kommt **je Meldung** aus I020/500 (Standardabweichung der Positionslösung).
+Auf demselben Endpoint trägt **CAT019** den Systemstatus (Liveness ohne
+Verkehr). Ist `mlat_asterix` die **einzige** Quelle, sollte der Orchestrator
+`FIREFLY_SYSTEM_REF_*` setzen (analog `adsb_asterix`).
+
 ## 5. Changelog
 
+- **1.7.0** (2026-07-11, FEP.5) — Neuer Quell-Typ `mlat_asterix`
+  (ASTERIX-CAT020/019-UDP-Listener, WAM/MLAT); Felder `listen`?
+  (Default `0.0.0.0:8020`), `sac`/`sic`?, `sensor_id`? (Default 240); keine
+  bbox, kein Standort, kein `cred_env`. Additiv.
 - **1.6.0** (2026-07-11, FEP.3) — Neuer Quell-Typ `adsb_asterix`
   (ASTERIX-CAT021-UDP-Listener, ADS-B-Bodenstation); Felder `listen`?
   (Default `0.0.0.0:8021`), `sac`/`sic`?, `sensor_id`? (Default 230); keine

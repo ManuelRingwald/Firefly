@@ -77,6 +77,15 @@ forschungsorientierten Aggregator mit OAuth2-Zugang, ADR 0019/0024) — Communit
 wie Forschungs-Aggregatoren liefern Hobby-/Forschungsqualität, keine
 zertifizierte Surveillance.
 
+**WAM / MLAT** (*Wide Area Multilateration*)
+Überwachung durch **Laufzeitdifferenz-Messung** (TDOA): mehrere
+Bodenstationen empfangen dasselbe Transponder-Signal; aus den
+Ankunftszeit-Differenzen berechnet das System die Position. **Unabhängige**
+kooperative Überwachung — anders als bei ADS-B kann das Flugzeug seine
+Position nicht selbst fälschen — und einsetzbar, wo Radar teuer oder
+unmöglich ist (Täler, Terminal-Bereich). Liefert ASTERIX CAT020
+(Zielmeldungen) + CAT019 (Systemstatus); Firefly konsumiert beide (FEP.5).
+
 **NACp** (*Navigation Accuracy Category — Position*)
 Der Qualitätsindikator, den ein ADS-B-Ziel mit jeder Positionsmeldung
 mitsendet (DO-260B/ED-102A): eine Stufe 0–11, die die **95-%-Positions-
@@ -102,6 +111,12 @@ austauschen. In „Kategorien" gegliedert:
   desselben Radar-Feeds wie CAT048; Firefly misst daraus die echte
   Antennen-Umlaufzeit und Sensor-Liveness ohne Verkehr (FEP.1).
 - **CAT048:** Einzelradar-Zielmeldungen (Plots/Tracks eines Radars).
+- **CAT019:** **Systemstatus** eines WAM/MLAT-Systems — Start-of-Update-
+  Cycle/Periodic/Event + NOGO-Zustand; Liveness ohne Verkehr für die
+  CAT063-Überwachung (FEP.5).
+- **CAT020:** **Multilaterations-Zielmeldungen** (WAM) — vom Bodensystem
+  berechnete WGS84-Positionen samt Identität und per-Meldungs-Genauigkeit
+  (I020/500); unabhängige kooperative Überwachung (FEP.5).
 - **CAT021:** ADS-B-Zielmeldungen einer **Bodenstation** — je Meldung die
   WGS84-Selbstmeldung eines Luftfahrzeugs samt Identität und
   Qualitätsindikatoren (NACp); Fireflys Produktions-Eingang für ADS-B (FEP.3).

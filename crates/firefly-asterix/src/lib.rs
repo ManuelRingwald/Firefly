@@ -35,6 +35,8 @@
 mod bds;
 mod cat001;
 mod cat002;
+mod cat019;
+mod cat020;
 mod cat021;
 mod cat034;
 mod cat048;
@@ -47,6 +49,8 @@ pub use cat001::{
     decode_legacy_reports, Cat001DecodeError, DecodedLegacyReport, TRUNCATED_TOD_CYCLE_SECS,
 };
 pub use cat002::{decode_legacy_service_messages, Cat002DecodeError};
+pub use cat019::{decode_mlat_status, Cat019DecodeError, DecodedMlatStatus, MlatStatusType};
+pub use cat020::{decode_mlat_reports, Cat020DecodeError, DecodedMlatReport};
 pub use cat021::{decode_adsb_reports, Cat021DecodeError, DecodedAdsbReport};
 pub use cat034::{
     decode_service_messages, Cat034DecodeError, DecodedServiceMessage, ServiceMessageType,

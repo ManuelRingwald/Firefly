@@ -16,6 +16,7 @@ members = [
     "crates/firefly-radar",
     "crates/firefly-adsbagg",
     "crates/firefly-adsb021",
+    "crates/firefly-mlat",
 ]
 # The fuzz harness is its own workspace: it needs the nightly toolchain
 # (libFuzzer sanitizer flags), and excluding it keeps every stable-toolchain
@@ -43,6 +44,7 @@ firefly-opensky = { path = "crates/firefly-opensky" }
 firefly-flarm = { path = "crates/firefly-flarm" }
 firefly-radar = { path = "crates/firefly-radar" }
 firefly-adsb021 = { path = "crates/firefly-adsb021" }
+firefly-mlat = { path = "crates/firefly-mlat" }
 firefly-adsbagg = { path = "crates/firefly-adsbagg" }
 nalgebra = "0.33"
 serde = { version = "1", features = ["derive"] }

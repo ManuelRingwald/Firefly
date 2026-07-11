@@ -70,6 +70,10 @@ pub struct Metrics {
     /// feed that became plots (counter, FEP.3). Stays 0 without an
     /// `adsb_asterix` source.
     pub adsb021_reports_received_total: AtomicU64,
+    /// Total number of WAM/MLAT CAT020 reports decoded from the UDP feed that
+    /// became plots (counter, FEP.5). Stays 0 without a `mlat_asterix`
+    /// source.
+    pub mlat_reports_received_total: AtomicU64,
 
     // --- Sensor health metrics (Firefly #32, CAT063) ---
     /// Total number of CAT063 sensor status blocks sent over multicast (counter).
@@ -100,6 +104,9 @@ pub struct Metrics {
     /// Number of configured `adsb_asterix` (CAT021 ground station) sources
     /// (gauge, static per process; FEP.3).
     pub sources_adsb021: AtomicU64,
+    /// Number of configured `mlat_asterix` (WAM/MLAT) sources (gauge, static
+    /// per process; FEP.5).
+    pub sources_mlat: AtomicU64,
 
     // --- Registration shadow monitor (REG.2a, ADR 0034) ---
     /// Total number of registration bias estimates produced by the shadow
@@ -276,6 +283,13 @@ pub fn render(metrics: &Metrics) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_mlat_reports_received_total",
+        "counter",
+        "Total number of WAM/MLAT CAT020 reports decoded from the UDP feed (Live mode only).",
+        metrics.mlat_reports_received_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
         "firefly_live_plot_batches_dropped_total",
         "counter",
         "Plot batches dropped because the source->tracker channel was full (back-pressure loss).",
@@ -317,6 +331,13 @@ pub fn render(metrics: &Metrics) -> String {
         "gauge",
         "Number of configured adsb_asterix (CAT021 ground station) sources for this instance.",
         metrics.sources_adsb021.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_sources_mlat",
+        "gauge",
+        "Number of configured mlat_asterix (WAM/MLAT) sources for this instance.",
+        metrics.sources_mlat.load(Ordering::Relaxed) as f64,
     );
     write_metric(
         &mut out,
@@ -494,6 +515,9 @@ mod tests {
             .adsb021_reports_received_total
             .store(23, Ordering::Relaxed);
         metrics
+            .mlat_reports_received_total
+            .store(29, Ordering::Relaxed);
+        metrics
             .live_plot_batches_dropped_total
             .store(4, Ordering::Relaxed);
         metrics.sources_opensky.store(1, Ordering::Relaxed);
@@ -501,6 +525,7 @@ mod tests {
         metrics.sources_flarm.store(1, Ordering::Relaxed);
         metrics.sources_radar.store(2, Ordering::Relaxed);
         metrics.sources_adsb021.store(1, Ordering::Relaxed);
+        metrics.sources_mlat.store(1, Ordering::Relaxed);
         metrics.cat063_status_sent_total.store(7, Ordering::Relaxed);
         metrics.sensors_total.store(3, Ordering::Relaxed);
         metrics.sensors_active.store(2, Ordering::Relaxed);
@@ -548,6 +573,7 @@ mod tests {
         assert!(text.contains("firefly_flarm_plots_received_total 11"));
         assert!(text.contains("firefly_radar_plots_received_total 17"));
         assert!(text.contains("firefly_adsb021_reports_received_total 23"));
+        assert!(text.contains("firefly_mlat_reports_received_total 29"));
         assert!(text.contains("firefly_live_plot_batches_dropped_total 4"));
         assert!(text.contains("firefly_sources_opensky 1"));
         assert!(text.contains("firefly_sources_adsbagg 1"));
@@ -555,6 +581,7 @@ mod tests {
         assert!(text.contains("firefly_sources_radar 2"));
         assert!(text.contains("# TYPE firefly_sources_radar gauge"));
         assert!(text.contains("firefly_sources_adsb021 1"));
+        assert!(text.contains("firefly_sources_mlat 1"));
         assert!(text.contains("firefly_cat063_status_sent_total 7"));
         assert!(text.contains("firefly_sensors_total 3"));
         assert!(text.contains("firefly_sensors_active 2"));

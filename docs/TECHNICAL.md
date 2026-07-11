@@ -227,15 +227,46 @@ nie ins Luftlagebild.
 > erwartet die **Edition-2.x-UAP**; eine 0.26-Station scheitert laut (Decode-
 > Fehler im Log) statt still falsch zu dekodieren.
 
+#### WAM/MLAT-Adapter (`FIREFLY_MLAT_*`, FEP.5)
+
+Fünfter Live-Quell-Adapter: ein **WAM/Multilaterations-System** über
+**ASTERIX CAT020 (Zielmeldungen) + CAT019 (Systemstatus) über UDP** —
+unabhängige kooperative Überwachung neben Radar und ADS-B (das Bodensystem
+berechnet die Position aus Laufzeitdifferenzen; das Flugzeug kann sie nicht
+selbst fälschen). Standalone per `FIREFLY_MLAT_ENABLED=true` oder als
+`mlat_asterix`-Eintrag in `FIREFLY_SOURCES` (Kontrakt v1.7.0). Liefert
+**geodätische Plots**; die Messunsicherheit kommt **je Meldung** aus
+**I020/500 SDP** (Standardabweichung der Positionslösung; fehlend →
+konservative 150 m). Feldmonitor- (RAB), Simulations-/Test- (SIM/TST) und
+Bodenziele (GBS) werden **verworfen**. CAT019-Statusmeldungen zählen als
+Sensor-Aktivität (Liveness ohne Verkehr); meldet sich das System selbst
+degradiert/NOGO, wird gewarnt.
+
+| Variable | Typ | Default | Bedeutung |
+|----------|-----|---------|-----------|
+| `FIREFLY_MLAT_ENABLED` | bool | `false` | Adapter im Standalone-Live-Modus aktivieren |
+| `FIREFLY_MLAT_SAC` / `_SIC` | u8 | `0` / `0` | Erwartete System-Identität (I020/010) |
+| `FIREFLY_MLAT_GROUP` | IPv4 | `0.0.0.0` | Listen-Adresse: Multicast-Gruppe → beigetreten, sonst Unicast-Bind |
+| `FIREFLY_MLAT_PORT` | u16 | `8020` | UDP-Port des CAT020/019-Eingangs |
+| `FIREFLY_MLAT_SENSOR_ID` | u16 | `240` | Sensor-ID der WAM/MLAT-Plots |
+
+> **Hinweise:** wie `adsb_asterix` — kein Standort/bbox nötig (geodätische
+> Positionen); als **einzige** Quelle `FIREFLY_SYSTEM_REF_*` setzen
+> (ADR 0021). ASTERIX-UDP unauthentifiziert → Netz-Isolation (ADR 0017);
+> beide Decoder gefuzzt (`cat020_decode`/`cat019_decode`). **Provenienz:**
+> MLAT-Plots erscheinen in I062/290 als **Mode S** (die zugrundeliegende
+> Technologie); ein eigenes MLT-Age-Subfeld wäre ein ICD-Bump und ist
+> bewusst ein Folge-Häppchen.
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
-Maßgeblich: `docs/source-input-contract.md` v1.6.0. Im **Live-Modus** liest Firefly
+Maßgeblich: `docs/source-input-contract.md` v1.7.0. Im **Live-Modus** liest Firefly
 seine Quellen aus einer JSON-Liste, die ein Orchestrator (Wayfinder) je Instanz
 setzt — ein Eintrag je Quelle, mehrere Adapter speisen denselben Live-Tracker.
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
-| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`/`FIREFLY_ADSBAGG_*`/`FIREFLY_FLARM_*`/`FIREFLY_RADAR_*`/`FIREFLY_ADSB021_*`. Eintrag: `{type, bbox?, provider?, sac?, sic?, sensor_id?, cred_env?, lat?, lon?, height_m?, listen?, poll_interval_secs?}`. `type` ∈ `adsb_opensky` / `adsb_aggregator` / `flarm_aprs` / `radar_asterix` / `adsb_asterix` (alle unterstützt). `provider` (nur `adsb_aggregator`): `adsb_lol` (Default) \| `adsb_fi`; unbekannt → **Start-Abbruch**. `poll_interval_secs` (`adsb_opensky`/`adsb_aggregator`, `> 0`; fehlt/`0` → Default 10 s, ADR 0029/0031) überschreibt das Poll-Intervall. Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
+| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`/`FIREFLY_ADSBAGG_*`/`FIREFLY_FLARM_*`/`FIREFLY_RADAR_*`/`FIREFLY_ADSB021_*`/`FIREFLY_MLAT_*`. Eintrag: `{type, bbox?, provider?, sac?, sic?, sensor_id?, cred_env?, lat?, lon?, height_m?, listen?, poll_interval_secs?}`. `type` ∈ `adsb_opensky` / `adsb_aggregator` / `flarm_aprs` / `radar_asterix` / `adsb_asterix` / `mlat_asterix` (alle unterstützt). `provider` (nur `adsb_aggregator`): `adsb_lol` (Default) \| `adsb_fi`; unbekannt → **Start-Abbruch**. `poll_interval_secs` (`adsb_opensky`/`adsb_aggregator`, `> 0`; fehlt/`0` → Default 10 s, ADR 0029/0031) überschreibt das Poll-Intervall. Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
 | `FIREFLY_SOURCE_<n>_SECRET` o. ä. | string | — | Beliebig **benannte** Credential-Env, von einem Eintrag per `cred_env` referenziert. Wert quellenabhängig: `client_id:client_secret` (`adsb_opensky`) bzw. `callsign:passcode` (`flarm_aprs`), Split am ersten `:`; nie im JSON-Blob. |
 
 Beispiel: siehe `docs/source-input-contract.md` §2. Referenzpunkt = Mittelpunkt der
@@ -388,12 +419,14 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_flarm_plots_received_total` | counter | **Live-Modus:** Empfangene FLARM/OGN-Plots (APRS-IS, ADR 0026) |
 | `firefly_radar_plots_received_total` | counter | **Live-Modus:** Dekodierte Radar-ASTERIX-Plots (CAT048/UDP, ADR 0028) |
 | `firefly_adsb021_reports_received_total` | counter | **Live-Modus:** Dekodierte ADS-B-Bodenstations-Meldungen, die Plots wurden (CAT021/UDP, FEP.3) |
+| `firefly_mlat_reports_received_total` | counter | **Live-Modus:** Dekodierte WAM/MLAT-Meldungen, die Plots wurden (CAT020/UDP, FEP.5) |
 | `firefly_live_plot_batches_dropped_total` | counter | **Live-Modus:** Plot-Batches verworfen, weil der Quell→Tracker-Kanal voll war (Back-Pressure-Verlust). Wächst nur unter Überlast — Operator-Signal zum Skalieren/Drosseln. |
 | `firefly_sources_opensky` | gauge | Anzahl konfigurierter `adsb_opensky`-Quellen (Quell-Mix, ADR 0023) |
 | `firefly_sources_adsbagg` | gauge | Anzahl konfigurierter `adsb_aggregator`-Quellen (ADR 0031) |
 | `firefly_sources_flarm` | gauge | Anzahl konfigurierter `flarm_aprs`-Quellen |
 | `firefly_sources_radar` | gauge | Anzahl konfigurierter `radar_asterix`-Quellen |
 | `firefly_sources_adsb021` | gauge | Anzahl konfigurierter `adsb_asterix`-Quellen (CAT021-Bodenstation, FEP.3) |
+| `firefly_sources_mlat` | gauge | Anzahl konfigurierter `mlat_asterix`-Quellen (WAM/MLAT, FEP.5) |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |
@@ -437,7 +470,7 @@ firefly_tracks_active
 rate(firefly_live_plot_batches_dropped_total[1m])
 
 # Konfigurierter Quell-Mix dieser Instanz:
-firefly_sources_opensky + firefly_sources_adsbagg + firefly_sources_flarm + firefly_sources_radar + firefly_sources_adsb021
+firefly_sources_opensky + firefly_sources_adsbagg + firefly_sources_flarm + firefly_sources_radar + firefly_sources_adsb021 + firefly_sources_mlat
 ```
 
 ---
