@@ -10,6 +10,31 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (FEP.3 — CAT021-Eingang: ADS-B von der Bodenstation)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **FEP.3 — CAT021-Eingangsadapter (FR-IO-010 + FR-NET-015, Quell-Kontrakt
+  v1.6.0 additiv):** Firefly empfängt ADS-B jetzt auch von einer **eigenen
+  Bodenstation** als **ASTERIX CAT021 über UDP** — der Produktions-Bezugsweg
+  (Push statt Poll, lokal statt Internet-REST), wie ARTAS ihn konsumiert.
+  Neuer Decoder `firefly-asterix::cat021` (Edition-2.x-UAP, 49 FRNs;
+  track-relevante Items gelesen, alle übrigen längen-korrekt übersprungen;
+  **Spare-FRN = lauter Editions-Fehler** statt stillem Fehl-Parse; Fuzz-Target
+  `cat021_decode`, Smoke 5,3 M Läufe ohne Befund). Neue Crate
+  **`firefly-adsb021`** (spiegelt `firefly-radar`): σ **je Meldung aus NACp**
+  (DO-260B, σ ≈ EPU/2; fehlend/0 → konservative 250 m — schlechter als die
+  75-m-Internet-Annahme), **Drop-Regeln** GBS/SIM/TST bzw. positions-/zeitlos;
+  **kein Stations-Standort nötig** (geodätische Selbstmeldungen).
+  Verdrahtung: `adsb_asterix` im Quell-Kontrakt (keine bbox, kein `cred_env`)
+  oder `FIREFLY_ADSB021_*` standalone; Sensor-Default 230, Nominal 5 s,
+  CAT063-Liveness, Metriken `firefly_adsb021_reports_received_total` /
+  `firefly_sources_adsb021`. **Ausgabe-ICD unverändert** (reiner Eingang).
+  Ehrliche Grenzen: nur ed 2.x (ältere Station scheitert laut);
+  I021/160-Geschwindigkeit noch ungenutzt; als Einzelquelle
+  `FIREFLY_SYSTEM_REF_*` setzen. Gates grün. Roadmap-Stand: **52 %**.
+- **Nächster Schritt:** **FEP.4** ankündigen — CAT001/002-Legacy-Radar-Eingang
+  (S3) — und Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-11 (FEP.2 — Mode-S-DAPs: BDS 4,0/5,0/6,0 → I062/380)
 
 - **Zuletzt aktualisiert:** 2026-07-11
