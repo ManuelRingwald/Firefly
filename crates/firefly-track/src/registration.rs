@@ -401,6 +401,138 @@ pub fn correspondences_by_identity(
     out
 }
 
+/// Tuning of the online [`RegistrationMonitor`] (REG.2a, ADR 0034). The
+/// defaults are conservative: a couple of minutes of correspondences smooth
+/// measurement noise, the tight pairing window keeps the time-alignment
+/// assumption honest, and the minimum pair count refuses estimates from too
+/// little evidence.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegistrationConfig {
+    /// Sliding data-time window of retained plots, seconds.
+    pub window_secs: f64,
+    /// Pairing window handed to [`correspondences_by_identity`], seconds.
+    pub pairing_max_dt_secs: f64,
+    /// Minimum data time between two estimation runs, seconds.
+    pub estimate_period_secs: f64,
+    /// Minimum number of correspondences before an estimate is attempted.
+    pub min_correspondences: usize,
+}
+
+impl Default for RegistrationConfig {
+    fn default() -> Self {
+        Self {
+            window_secs: 120.0,
+            pairing_max_dt_secs: 1.0,
+            estimate_period_secs: 10.0,
+            min_correspondences: 20,
+        }
+    }
+}
+
+/// **Online** registration monitor (REG.2a, ADR 0034): watches the live plot
+/// stream, keeps a sliding data-time window of identity-carrying sightings,
+/// and periodically re-runs the REG.1 estimator over them.
+///
+/// **Shadow mode by design:** the monitor only *observes* — it never touches
+/// the plots on their way into the tracker. Its output feeds metrics and logs
+/// so the operator can judge stability and plausibility of the estimates on
+/// real data *before* REG.2b is allowed to feed them back into the fusion.
+/// Like the tracker itself it is driven by **data time** (deterministic,
+/// replayable, ADR 0003) — no wall clock.
+///
+/// REQ: FR-TRK-038
+pub struct RegistrationMonitor {
+    common: LocalFrame,
+    sites: BTreeMap<SensorId, LocalFrame>,
+    radar_sensors: BTreeSet<SensorId>,
+    config: RegistrationConfig,
+    /// Identity-carrying, registration-usable plots inside the window, in
+    /// arrival order (data time is monotonic through the tracker's watermark).
+    window: Vec<Plot>,
+    last_estimate_at: Option<f64>,
+    latest: Option<RegistrationSolution>,
+    last_pair_count: usize,
+    estimates_total: u64,
+}
+
+impl RegistrationMonitor {
+    /// A monitor over the given radar geometry. `sites` maps each unknown-bias
+    /// radar to its site frame; `common` is the tracker's frame.
+    pub fn new(
+        common: LocalFrame,
+        sites: BTreeMap<SensorId, LocalFrame>,
+        config: RegistrationConfig,
+    ) -> Self {
+        let radar_sensors = sites.keys().copied().collect();
+        Self {
+            common,
+            sites,
+            radar_sensors,
+            config,
+            window: Vec::new(),
+            last_estimate_at: None,
+            latest: None,
+            last_pair_count: 0,
+            estimates_total: 0,
+        }
+    }
+
+    /// Feed a batch of ingested plots at data time `now` (the batch's newest
+    /// plot time). Returns `Some` **only when this call produced a fresh
+    /// estimate** — the caller logs/exports exactly once per run.
+    pub fn observe(&mut self, plots: &[Plot], now: f64) -> Option<&RegistrationSolution> {
+        // Retain only what registration can use: identity-carrying plots that
+        // are either a listed radar's polar measurement or geodetic truth.
+        self.window.extend(plots.iter().filter(|p| {
+            p.mode_ac.icao_address.is_some()
+                && match p.measurement {
+                    Measurement::Polar(_) => self.radar_sensors.contains(&p.sensor),
+                    Measurement::Geodetic { .. } => true,
+                }
+        }));
+        let horizon = now - self.config.window_secs;
+        self.window.retain(|p| p.time.as_secs() >= horizon);
+
+        let due = self
+            .last_estimate_at
+            .is_none_or(|last| now - last >= self.config.estimate_period_secs);
+        if !due {
+            return None;
+        }
+        self.last_estimate_at = Some(now);
+
+        let pairs = correspondences_by_identity(
+            &self.window,
+            &self.radar_sensors,
+            self.config.pairing_max_dt_secs,
+        );
+        self.last_pair_count = pairs.len();
+        if pairs.len() < self.config.min_correspondences {
+            return None;
+        }
+        let solution = estimate_biases(&self.common, &self.sites, &pairs)?;
+        self.estimates_total += 1;
+        self.latest = Some(solution);
+        self.latest.as_ref()
+    }
+
+    /// The most recent estimate, if any run has succeeded yet.
+    pub fn latest(&self) -> Option<&RegistrationSolution> {
+        self.latest.as_ref()
+    }
+
+    /// Correspondences found by the most recent estimation attempt (also set
+    /// when the attempt was refused for too little evidence).
+    pub fn last_pair_count(&self) -> usize {
+        self.last_pair_count
+    }
+
+    /// How many estimates have been produced so far.
+    pub fn estimates_total(&self) -> u64 {
+        self.estimates_total
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -752,5 +884,160 @@ mod tests {
             matches!(pairs[0].a, Sighting::Radar { sensor, .. } if sensor == SensorId(1)),
             "emitted from the lower-numbered sensor"
         );
+    }
+
+    // --- online monitor (REG.2a) ------------------------------------------
+
+    /// One time step of the synthetic live stream: a biased radar plot and a
+    /// truth-carrying ADS-B plot of the same aircraft at the same instant.
+    fn stream_step(
+        common: &LocalFrame,
+        site: &LocalFrame,
+        sensor: SensorId,
+        t: f64,
+        truth: Vector2<f64>,
+        bias: SensorBias,
+    ) -> Vec<Plot> {
+        let icao = 0x3C_6589;
+        let position = common.enu_to_geodetic(&Enu::new(truth.x, truth.y, 0.0));
+        let identity = ModeAC {
+            icao_address: Some(icao),
+            ..ModeAC::default()
+        };
+        vec![
+            Plot {
+                sensor,
+                time: Timestamp(t),
+                measurement: Measurement::Polar(biased_measurement(
+                    site, common, truth, bias, 0.0, 0.0,
+                )),
+                kind: firefly_core::DetectionKind::Secondary,
+                source: firefly_core::SourceKind::ModeS,
+                mode_ac: identity,
+            },
+            Plot {
+                sensor: SensorId(200),
+                time: Timestamp(t),
+                measurement: Measurement::Geodetic {
+                    position,
+                    sigma_pos_m: 75.0,
+                },
+                kind: firefly_core::DetectionKind::Secondary,
+                source: firefly_core::SourceKind::AdsB,
+                mode_ac: identity,
+            },
+        ]
+    }
+
+    fn monitor_under_test(common: &LocalFrame, site: LocalFrame) -> RegistrationMonitor {
+        RegistrationMonitor::new(
+            *common,
+            BTreeMap::from([(SensorId(7), site)]),
+            RegistrationConfig::default(),
+        )
+    }
+
+    /// Fed a synthetic live stream with an injected bias, the monitor produces
+    /// an estimate once enough correspondences have accumulated — and recovers
+    /// the bias. Shadow mode end-to-end. REQ: FR-TRK-038
+    #[test]
+    fn monitor_estimates_injected_bias_from_the_stream() {
+        let common = common();
+        let site = site_at(&common, 30_000.0, 0.0);
+        let bias = SensorBias {
+            range_m: 150.0,
+            azimuth_rad: 0.3_f64.to_radians(),
+        };
+        let mut monitor = monitor_under_test(&common, site);
+
+        // One aircraft flying around the ring: one pair per second — azimuth
+        // diversity accumulates until the pair minimum and cadence allow a run.
+        let ring = target_ring(48, 60_000.0);
+        let mut produced = None;
+        for (i, truth) in ring.iter().enumerate().take(30) {
+            let t = i as f64;
+            let batch = stream_step(&common, &site, SensorId(7), t, *truth, bias);
+            if let Some(solution) = monitor.observe(&batch, t) {
+                produced = Some(solution.clone());
+            }
+        }
+
+        let solution = produced.expect("an estimate after enough evidence");
+        assert!(solution.observable);
+        let est = solution.biases[&SensorId(7)];
+        assert!(
+            (est.range_m - bias.range_m).abs() < 5.0,
+            "range: {} m",
+            est.range_m
+        );
+        assert!(
+            (est.azimuth_deg() - bias.azimuth_deg()).abs() < 0.01,
+            "azimuth: {}°",
+            est.azimuth_deg()
+        );
+        assert_eq!(monitor.estimates_total(), 1, "cadence allows one run here");
+    }
+
+    /// Between two due instants the monitor does not re-estimate, no matter
+    /// how much data arrives — the cadence is data-time driven.
+    /// REQ: FR-TRK-038
+    #[test]
+    fn monitor_respects_the_estimation_cadence() {
+        let common = common();
+        let site = site_at(&common, 30_000.0, 0.0);
+        let bias = SensorBias::default();
+        let mut monitor = monitor_under_test(&common, site);
+
+        let ring = target_ring(48, 60_000.0);
+        for (i, truth) in ring.iter().enumerate().take(25) {
+            let t = i as f64;
+            monitor.observe(
+                &stream_step(&common, &site, SensorId(7), t, *truth, bias),
+                t,
+            );
+        }
+        let runs = monitor.estimates_total();
+        assert!(runs >= 1, "warm-up produced an estimate");
+
+        // 5 s later (< estimate_period_secs = 10): plenty of data, no new run.
+        let again = monitor.observe(
+            &stream_step(&common, &site, SensorId(7), 29.0, ring[29], bias),
+            29.0,
+        );
+        assert!(again.is_none(), "not due yet");
+        assert_eq!(monitor.estimates_total(), runs);
+    }
+
+    /// Plots older than the sliding window are evicted: after a long silence
+    /// the accumulated evidence is gone and an estimate is refused.
+    /// REQ: FR-TRK-038
+    #[test]
+    fn monitor_evicts_stale_plots_and_refuses_thin_evidence() {
+        let common = common();
+        let site = site_at(&common, 30_000.0, 0.0);
+        let bias = SensorBias::default();
+        let mut monitor = monitor_under_test(&common, site);
+
+        let ring = target_ring(48, 60_000.0);
+        for (i, truth) in ring.iter().enumerate().take(25) {
+            let t = i as f64;
+            monitor.observe(
+                &stream_step(&common, &site, SensorId(7), t, *truth, bias),
+                t,
+            );
+        }
+        assert!(monitor.estimates_total() >= 1);
+
+        // Long gap: the window (120 s) has emptied; a lone new pair is far too
+        // little evidence, so the due estimation run is refused.
+        let runs = monitor.estimates_total();
+        let t = 500.0;
+        let none = monitor.observe(
+            &stream_step(&common, &site, SensorId(7), t, ring[0], bias),
+            t,
+        );
+        assert!(none.is_none());
+        assert_eq!(monitor.estimates_total(), runs, "refused, not run");
+        assert_eq!(monitor.last_pair_count(), 1, "only the fresh pair remains");
     }
 }

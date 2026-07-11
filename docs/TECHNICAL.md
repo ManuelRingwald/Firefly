@@ -179,6 +179,25 @@ Beispiel: siehe `docs/source-input-contract.md` §2. Referenzpunkt = Mittelpunkt
 **min** Poll-Intervall der Quellen. Jede Quelle stempelt ihre `sensor_id` auf ihre
 Plots; die Sensor-Liveness (CAT063) verfolgt alle Quellen.
 
+### 1.5.2 Sensor-Registrierung — Schatten-Monitor (REG.2a, ADR 0034)
+
+Der Registrierungs-Monitor beobachtet den Live-Plot-Strom, paart
+Radar-Messungen mit geodätischer Referenz (ADS-B/FLARM) bzw. anderen Radaren
+über die ICAO-Adresse und schätzt periodisch die systematischen Messfehler
+(Range-/Azimut-Bias) jedes Radars. **Schattenmodus:** Die Schätzungen werden
+**nur** geloggt und als Metriken exportiert — sie fließen *nicht* in die Fusion
+zurück (Anwendungs-Politik folgt in REG.2b). Sinnvoll nur mit mindestens einer
+`radar_asterix`-Quelle; ohne Radar ist der Monitor ein No-op (Warn-Log).
+
+| Variable | Typ | Standard | Bedeutung |
+|----------|-----|----------|-----------|
+| `FIREFLY_REGISTRATION_ENABLED` | bool | *(aus)* | `1`/`true`/`yes` (case-insensitiv) aktiviert den Schatten-Monitor. Feste Parameter (REG.2a): 120 s Gleitfenster (Datenzeit), 1 s Pairing-Fenster, Schätz-Kadenz 10 s, min. 20 Korrespondenzen je Lauf. |
+
+Jede frische Schätzung erscheint als `info`-Log
+(`registration shadow estimate (REG.2a, not applied)`) mit Paar-Anzahl,
+RMS vor/nach Korrektur, Beobachtbarkeits-Flag und den Bias-Werten je Sensor;
+die Metriken stehen in §3.2 (`firefly_registration_*`).
+
 ### 1.6 WebSocket-Zugangskontrolle (NFR-SEC-001, ADR 0017)
 
 Beide Variablen sind **opt-in** — ohne Konfiguration ist kein Schutz aktiv
@@ -291,6 +310,11 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |
+| `firefly_registration_estimates_total` | counter | **Registrierung (REG.2a):** Bias-Schätzläufe des Schatten-Monitors. Bleibt 0 ohne `FIREFLY_REGISTRATION_ENABLED` bzw. ohne ausreichende Radar↔Referenz-Korrespondenzen. |
+| `firefly_registration_correspondences` | gauge | **Registrierung:** Korrespondenzen des letzten Schätzversuchs (auch bei Ablehnung wegen zu dünner Evidenz gesetzt — zeigt dem Operator, *warum* keine Schätzung erscheint) |
+| `firefly_registration_observable` | gauge | **Registrierung:** 1 = letzte Schätzung voll beobachtbar, 0 = (noch) keine Schätzung oder rangdefiziente Geometrie |
+| `firefly_registration_bias_range_m{sensor="…"}` | gauge | **Registrierung:** geschätzter Range-Bias je Radar, Meter (Schatten — wird **nicht** angewandt). Erscheint erst nach der ersten Schätzung. |
+| `firefly_registration_bias_azimuth_deg{sensor="…"}` | gauge | **Registrierung:** geschätzter Azimut-Bias je Radar, Grad (Schatten — wird **nicht** angewandt). Erscheint erst nach der ersten Schätzung. |
 
 ### 3.3 Prometheus scrape-Konfiguration
 

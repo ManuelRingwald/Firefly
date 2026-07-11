@@ -12,16 +12,17 @@ use firefly_adsbagg::{AdsbAggConfig, AdsbAggPoller};
 use firefly_asterix::{Cat062Encoder, SensorReason};
 use firefly_core::{Plot, SensorId};
 use firefly_flarm::FlarmConfig;
-use firefly_geo::Wgs84;
+use firefly_geo::{LocalFrame, Wgs84};
 use firefly_multicast::{MulticastConfig, SensorHealthMonitor};
 use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
 use firefly_radar::RadarConfig;
 use firefly_server::sources;
 use firefly_server::{
-    build_live_tracker_multi, live_system_reference_point, resolve_plot_recorder, router,
-    run_live_cat062, run_live_tracker, AppState, FrameSource, LiveSnapshot, LiveTracker, Metrics,
-    RadarSensor, ServerConfig, SnapshotRx,
+    build_live_tracker_multi, live_system_reference_point, registration_enabled,
+    resolve_plot_recorder, router, run_live_cat062, run_live_tracker, AppState, FrameSource,
+    LiveSnapshot, LiveTracker, Metrics, RadarSensor, ServerConfig, SnapshotRx,
 };
+use firefly_track::{RegistrationConfig, RegistrationMonitor};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
 
@@ -216,6 +217,45 @@ async fn build_live_state(
     // otherwise it is the union bounding-box midpoint.
     let reference = live_system_reference_point(&representative);
 
+    // Opt-in registration shadow monitor (REG.2a, ADR 0034): observes the same
+    // plot stream as the tracker and estimates per-radar biases from
+    // radar↔truth correspondences — logs/metrics only, no fusion feedback
+    // (that application policy is REG.2b). Needs at least one radar source;
+    // without one the flag is honoured but a no-op, and we say so.
+    let registration = if registration_enabled(
+        std::env::var("FIREFLY_REGISTRATION_ENABLED")
+            .ok()
+            .as_deref(),
+    ) {
+        if radar.is_empty() {
+            tracing::warn!(
+                "FIREFLY_REGISTRATION_ENABLED is set but no radar_asterix source is configured; the registration monitor has nothing to estimate"
+            );
+            None
+        } else {
+            let sites: std::collections::BTreeMap<SensorId, LocalFrame> = radar
+                .iter()
+                .map(|c| {
+                    (
+                        c.sensor_id,
+                        LocalFrame::new(Wgs84::from_degrees(c.lat_deg, c.lon_deg, c.height_m)),
+                    )
+                })
+                .collect();
+            tracing::info!(
+                radars = sites.len(),
+                "registration shadow monitor enabled (REG.2a): estimating radar biases, not applying them"
+            );
+            Some(RegistrationMonitor::new(
+                LocalFrame::new(reference),
+                sites,
+                RegistrationConfig::default(),
+            ))
+        }
+    } else {
+        None
+    };
+
     // Build and spawn the live tracker task, registering every source sensor —
     // geodetic adapters on the shared frame, radar sensors on their own site frame.
     let tracker =
@@ -226,7 +266,10 @@ async fn build_live_state(
     // path is non-fatal (logged, tracking continues).
     let record_path = std::env::var("FIREFLY_PLOT_RECORD_PATH").ok();
     let recorder = resolve_plot_recorder(record_path.as_deref());
-    let live = LiveTracker::new(tracker, recorder);
+    let mut live = LiveTracker::new(tracker, recorder);
+    if let Some(monitor) = registration {
+        live = live.with_registration(monitor);
+    }
     {
         let m = Arc::clone(&metrics);
         tokio::spawn(run_live_tracker(
@@ -234,11 +277,31 @@ async fn build_live_state(
             plots_rx,
             snapshot_tx,
             output_period,
-            move |plots, records| {
+            move |plots, records, registration| {
                 m.live_plots_ingested_total
                     .store(plots, std::sync::atomic::Ordering::Relaxed);
                 m.plot_records_written_total
                     .store(records, std::sync::atomic::Ordering::Relaxed);
+                if let Some(tick) = registration {
+                    m.registration_estimates_total
+                        .store(tick.estimates_total, std::sync::atomic::Ordering::Relaxed);
+                    m.registration_correspondences.store(
+                        tick.last_pair_count as u64,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    m.registration_observable
+                        .store(tick.observable, std::sync::atomic::Ordering::Relaxed);
+                    let mut biases = m
+                        .registration_biases
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    biases.clear();
+                    biases.extend(
+                        tick.biases
+                            .iter()
+                            .map(|(id, range_m, azimuth_deg)| (id.0, (*range_m, *azimuth_deg))),
+                    );
+                }
             },
         ));
     }

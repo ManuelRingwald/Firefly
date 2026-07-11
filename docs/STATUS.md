@@ -10,6 +10,28 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (REG.2a — Registrierungs-Schatten-Monitor im Live-Server)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **REG.2a — Online-Schatten-Monitor (ADR 0034, FR-TRK-038):** Der
+  REG.1-Schätzer läuft jetzt **live im Server mit — ohne die Fusion zu
+  verändern**. `firefly-track::RegistrationMonitor` (rein,
+  datenzeit-getrieben): gleitendes 120-s-Fenster registrierungs-nutzbarer
+  Plots, Pairing/Schätzung in 10-s-Kadenz, Läufe mit < 20 Korrespondenzen
+  werden abgelehnt. Server: `LiveTracker::with_registration`, `observe`
+  bewusst **nach** der Tracker-Verarbeitung (Schatten belegt im Test:
+  identische Snapshots mit/ohne Monitor); opt-in
+  **`FIREFLY_REGISTRATION_ENABLED`** (ohne Radar-Quelle: Warn-Log, No-op).
+  Observability: `info`-Log je frischer Schätzung + Metriken
+  `firefly_registration_estimates_total`/`_correspondences`/`_observable`
+  und gelabelte Bias-Gauges je Sensor (erst nach erster Schätzung). 3 neue
+  Monitor-Tests (injizierte 150 m/0,3° aus dem Strom zurückgewonnen) + 4
+  Server-/Metrik-Tests. **Kein Wire-/ICD-Bezug.** Gates grün.
+  Roadmap-Stand: **38 %** (REG.2 in 2a ✅ / 2b ⏳ gesplittet).
+- **Nächster Schritt:** **REG.2b** ankündigen — Korrektur **vor der Fusion**
+  mit Anwendungs-Politik (nur bei `observable` + Mindest-Evidenz +
+  signifikantem RMS-Gewinn; geglättete Übergänge) + Konvergenz-Tests.
+
 ## 🎯 Stand 2026-07-10 (REG.1 — Sensor-Registrierung: Fundament)
 
 - **Zuletzt aktualisiert:** 2026-07-10 (spät nachts)
