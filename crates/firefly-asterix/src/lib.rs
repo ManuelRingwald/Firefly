@@ -33,6 +33,8 @@
 //! REQ: FR-IO-003, FR-TRK-008
 
 mod bds;
+mod cat001;
+mod cat002;
 mod cat021;
 mod cat034;
 mod cat048;
@@ -41,6 +43,10 @@ mod cat063;
 mod cat065;
 mod fspec;
 
+pub use cat001::{
+    decode_legacy_reports, Cat001DecodeError, DecodedLegacyReport, TRUNCATED_TOD_CYCLE_SECS,
+};
+pub use cat002::{decode_legacy_service_messages, Cat002DecodeError};
 pub use cat021::{decode_adsb_reports, Cat021DecodeError, DecodedAdsbReport};
 pub use cat034::{
     decode_service_messages, Cat034DecodeError, DecodedServiceMessage, ServiceMessageType,

@@ -10,6 +10,30 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (FEP.4 — CAT001/002-Legacy-Radar-Eingang)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **FEP.4 — Legacy-Radar CAT001/CAT002 (FR-IO-011 + FR-NET-016):** Der
+  `radar_asterix`-Eingang versteht jetzt auch die **Vorgänger-Generation**
+  von CAT048/CAT034 — Bestandsradare werden ohne neue Quelle/Variablen
+  angeschlossen (Dispatch am CAT-Oktett `0x01`/`0x02`). Neue Decoder
+  `firefly-asterix::cat001`/`cat002`: CAT001 mit **zweigeteilter UAP**
+  (Plot-/Track-Profil, Selektor TYP-Bit in I001/020; Record mit FRN ≥ 3
+  ohne Selektor **abgelehnt statt geraten**), RHO-LSB 1/128 NM, Spare/RFS =
+  harte Fehler; CAT002 liefert dasselbe `DecodedServiceMessage` wie CAT034
+  (Typ 3 = Südmarker → `Other`, explizit gemappt). **Zeit-Anker:**
+  CAT001-Zeit ist trunkiert (mod 512 s); der Listener ankert am letzten
+  vollen ToD des Service-Stroms (`expand_truncated_tod`: nächst-kongruent,
+  ±256 s tolerant, Mitternachts-Wrap); **ohne Anker verworfen statt
+  erfunden**. Simulierte Meldungen (SIM) gedroppt (FR-TRK-036);
+  CAT002-Nordmarken speisen den ScanPeriodEstimator (FEP.1) unverändert.
+  UAPs gegen asterix-specs/libasterix-Referenz verifiziert; Fuzz-Targets
+  `cat001_decode`/`cat002_decode` (5,5 M/7,0 M Läufe ohne Befund).
+  **Kontrakt + Ausgabe-ICD unverändert** — kein Wayfinder-Nachzug. 25 neue
+  Tests, Gates grün. Roadmap-Stand: **53,5 %**.
+- **Nächster Schritt:** **FEP.5** ankündigen — CAT020/019 WAM/MLAT-Eingang
+  (S4) — und Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-11 (FEP.3 — CAT021-Eingang: ADS-B von der Bodenstation)
 
 - **Zuletzt aktualisiert:** 2026-07-11

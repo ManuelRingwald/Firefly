@@ -20,6 +20,20 @@ firefly-asterix = { path = "../crates/firefly-asterix" }
 firefly-server = { path = "../crates/firefly-server" }
 
 [[bin]]
+name = "cat001_decode"
+path = "fuzz_targets/cat001_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cat002_decode"
+path = "fuzz_targets/cat002_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "cat021_decode"
 path = "fuzz_targets/cat021_decode.rs"
 test = false

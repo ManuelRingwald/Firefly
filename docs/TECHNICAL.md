@@ -183,6 +183,18 @@ gesetztem Status-Bit) und reicht MHG/SAL/IAR/MAC — solange frisch (≤ 30 s) �
 im CAT062 **I062/380** weiter (ICD 3.4.0, additiv). Kein Schalter nötig; ohne
 EHS-Daten ändert sich nichts am Draht.
 
+**Legacy-Radare CAT001/CAT002 (FEP.4):** Derselbe UDP-Eingang versteht auch
+die **Vorgänger-Generation** von CAT048/CAT034 — ein Legacy-Radarkopf wird
+unverändert als `radar_asterix`-Quelle konfiguriert (keine neuen Variablen),
+der Listener verzweigt am führenden CAT-Oktett (`0x01`/`0x02`). CAT001-Records
+tragen nur eine **trunkierte** Tageszeit (mod 512 s); der Listener ankert sie
+am letzten vollen ToD des Service-Stroms (CAT002/CAT034). **Bis zur ersten
+Servicemeldung mit Zeit werden Legacy-Plots verworfen** statt mit erfundener
+Zeit versehen — ein Legacy-Radar sollte also CAT002 mitsenden (das tun reale
+Köpfe; die Nordmarken speisen zugleich die gemessene Scan-Periode, FEP.1).
+Simulierte Meldungen (SIM-Bit) gelangen nie ins Luftlagebild. Beide Decoder
+sind gefuzzt (`cat001_decode`/`cat002_decode`).
+
 #### ADS-B-Bodenstations-Adapter (`FIREFLY_ADSB021_*`, FEP.3)
 
 Vierter Live-Quell-Adapter: eine **eigene ADS-B-Bodenstation** über **ASTERIX

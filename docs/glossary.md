@@ -91,6 +91,13 @@ weniger Vertrauen.
 Exchange*)
 Das europäische Standard-Datenformat, in dem Radare und Systeme ihre Meldungen
 austauschen. In „Kategorien" gegliedert:
+- **CAT001:** Einzelradar-Zielmeldungen der **Legacy-Generation** (Vorgänger
+  von CAT048); Besonderheit: **zwei** UAPs (Plot/Track, Selektor TYP-Bit)
+  und nur eine **trunkierte** Tageszeit (mod 512 s), die am CAT002-Strom
+  verankert wird (FEP.4).
+- **CAT002:** Einzelradar-**Servicemeldungen** der Legacy-Generation
+  (Vorgänger von CAT034) — Nordmarke/Sektor plus die **volle Tageszeit**,
+  der Zeit-Anker für CAT001 (FEP.4).
 - **CAT034:** Einzelradar-**Servicemeldungen** — Nordmarke und Sektor-Meldungen
   desselben Radar-Feeds wie CAT048; Firefly misst daraus die echte
   Antennen-Umlaufzeit und Sensor-Liveness ohne Verkehr (FEP.1).
