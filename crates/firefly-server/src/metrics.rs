@@ -136,6 +136,15 @@ pub struct Metrics {
     /// subtracted from measurements. Rendered as labelled gauges.
     pub registration_applied_biases: Mutex<BTreeMap<u16, (f64, f64)>>,
 
+    // --- Meteo/QNH service (VERT.1, SDPS-003 analogue) ---
+    /// Number of configured QNH regions (gauge, static per process). 0 means
+    /// the vertical chain works on the standard atmosphere everywhere.
+    pub meteo_qnh_regions: AtomicU64,
+    /// The configured QNH per region: region name → hPa. Rendered as
+    /// labelled gauges; absent when no region is configured (an absent
+    /// series is clearer than a misleading standard-atmosphere line).
+    pub meteo_qnh: Mutex<BTreeMap<String, f64>>,
+
     // --- Radar service messages (FEP.1, CAT034) ---
     /// Total CAT034 north markers received across all radar sources (counter).
     /// Stays 0 without a `radar_asterix` source or when the radar sends no
@@ -408,6 +417,31 @@ pub fn render(metrics: &Metrics) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_meteo_qnh_regions",
+        "gauge",
+        "Number of configured QNH regions (VERT.1); 0 = standard atmosphere everywhere.",
+        metrics.meteo_qnh_regions.load(Ordering::Relaxed) as f64,
+    );
+    // Labelled per-region QNH gauges, rendered by hand like the bias
+    // gauges — absent when no region is configured.
+    {
+        let qnh = metrics
+            .meteo_qnh
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !qnh.is_empty() {
+            out.push_str(
+                "# HELP firefly_meteo_qnh_hpa Configured QNH per region, hectopascal (VERT.1).\n# TYPE firefly_meteo_qnh_hpa gauge\n",
+            );
+            for (region, hpa) in qnh.iter() {
+                out.push_str(&format!(
+                    "firefly_meteo_qnh_hpa{{region=\"{region}\"}} {hpa}\n"
+                ));
+            }
+        }
+    }
+    write_metric(
+        &mut out,
         "firefly_radar_north_markers_total",
         "counter",
         "Total CAT034 north markers received across all radar sources (FEP.1).",
@@ -555,6 +589,12 @@ mod tests {
             .radar_north_markers_total
             .store(120, Ordering::Relaxed);
         metrics.radar_scan_periods.lock().unwrap().insert(301, 4.7);
+        metrics.meteo_qnh_regions.store(2, Ordering::Relaxed);
+        metrics
+            .meteo_qnh
+            .lock()
+            .unwrap()
+            .insert("EDDF".into(), 1008.0);
 
         let text = render(&metrics);
 
@@ -607,6 +647,9 @@ mod tests {
         assert!(text.contains("firefly_radar_north_markers_total 120"));
         assert!(text.contains("firefly_radar_scan_period_seconds{sensor=\"301\"} 4.7"));
         assert!(text.contains("# TYPE firefly_radar_scan_period_seconds gauge"));
+        assert!(text.contains("firefly_meteo_qnh_regions 2"));
+        assert!(text.contains("firefly_meteo_qnh_hpa{region=\"EDDF\"} 1008"));
+        assert!(text.contains("# TYPE firefly_meteo_qnh_hpa gauge"));
     }
 
     /// Without any registration estimate the labelled bias gauges are absent —
@@ -620,6 +663,7 @@ mod tests {
         assert!(!text.contains("firefly_registration_bias_azimuth_deg{"));
         assert!(!text.contains("firefly_registration_applied_bias_range_m{"));
         assert!(!text.contains("firefly_radar_scan_period_seconds{"));
+        assert!(!text.contains("firefly_meteo_qnh_hpa{"));
     }
 
     /// The connected-client guard increments on creation and decrements again

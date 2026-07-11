@@ -1,0 +1,12 @@
+[package]
+name = "firefly-meteo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Meteo/QNH service (SDPS-003 analogue): regional QNH lookup and barometric altitude correction for the vertical chain (VERT.1)."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

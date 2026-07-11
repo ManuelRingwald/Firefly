@@ -279,6 +279,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-meteo"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "firefly-mlat"
 version = "0.1.0"
 dependencies = [
@@ -359,6 +367,7 @@ dependencies = [
  "firefly-flarm",
  "firefly-geo",
  "firefly-io",
+ "firefly-meteo",
  "firefly-mlat",
  "firefly-multicast",
  "firefly-opensky",
