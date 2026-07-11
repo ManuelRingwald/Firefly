@@ -10,6 +10,29 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (FEP.2 — Mode-S-DAPs: BDS 4,0/5,0/6,0 → I062/380)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **FEP.2 — Mode-S-DAPs end-to-end (FR-TRK-040, ICD 3.4.0 additiv):** Die
+  Downlink Aircraft Parameters eines EHS-Radars fließen jetzt vom
+  CAT048-Eingang bis auf den CAT062-Draht. Neuer **BDS-Decoder**
+  (`firefly-asterix::bds`, bit-genau nach ICAO Doc 9871, **Status-Bit-
+  Disziplin**: kein Feld wird aus Nullen geraten): BDS 4,0 (Selected
+  Altitude — Level-Bust-Basis), BDS 5,0 (Roll/Track/GS/TAS), BDS 6,0
+  (Heading/IAS/Mach/Vertikalrate). CAT048 dekodiert I048/250 (Merge über
+  Register); `Daps` auf `ModeAC` → Track (per-Feld-Merge + `daps_time`) →
+  `SystemTrack.daps` **nur solange frisch** (30 s — Absenz statt
+  Stale-Behauptung). **I062/380 jetzt echt compound:** MHG (#3), SAL (#6,
+  SAS/MCP + 13-Bit-Zweierkomplement × 25 ft), IAR (#26), MAC (#27);
+  DAP-loser Track byte-identisch alt, erst IAR/MAC verlängern die Spec auf
+  4 Oktette; Decoder liest subfeld-getrieben zurück. 9 neue Tests inkl.
+  byte-genauem Referenz-Dump; Fuzz-Smoke 9,7 M Läufe ohne Befund. Ehrliche
+  Grenzen: BDS-5,0-Roll/GS geführt, IMM-Nutzung folgt; kein
+  DAP-Konsistenz-Check. **Wayfinder-Nachzug: Issue #238** (`from-firefly`).
+  Gates grün. Roadmap-Stand: **49,5 %**.
+- **Nächster Schritt:** **FEP.3** ankündigen — CAT021-Eingangsadapter
+  (ADS-B von der Bodenstation statt nur Internet-REST; S4).
+
 ## 🎯 Stand 2026-07-11 (FEP.1 — CAT034: Nordmarke/Sektor, gemessene Scan-Periode)
 
 - **Zuletzt aktualisiert:** 2026-07-11

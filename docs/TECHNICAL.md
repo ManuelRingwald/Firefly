@@ -176,6 +176,13 @@ keine Servicemeldungen, bleibt alles beim konfigurierten Verhalten
 (`FIREFLY_RADAR_SCAN_SECS`). Die Tracker-Löschkadenz bleibt in FEP.1 bewusst
 beim Konfigurationswert. Der CAT034-Decoder ist gefuzzt (`cat034_decode`).
 
+**Mode-S-DAPs (FEP.2):** Liefert das Radar in CAT048 **I048/250** die
+EHS-Register BDS 4,0/5,0/6,0 mit, dekodiert Firefly die **Downlink Aircraft
+Parameters** (Selected Altitude, Heading, IAS/Mach, Roll, …; nur Felder mit
+gesetztem Status-Bit) und reicht MHG/SAL/IAR/MAC — solange frisch (≤ 30 s) —
+im CAT062 **I062/380** weiter (ICD 3.4.0, additiv). Kein Schalter nötig; ohne
+EHS-Daten ändert sich nichts am Draht.
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.5.0. Im **Live-Modus** liest Firefly

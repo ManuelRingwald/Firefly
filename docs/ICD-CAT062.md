@@ -21,7 +21,19 @@
 
 ## Version
 
-**3.3.0** (2026-07-11) — **Additiv (FR-IO-008, ARTAS-Roadmap REG.3/ADR 0034):**
+**3.4.0** (2026-07-11) — **Additiv (FR-TRK-040, ARTAS-Roadmap FEP.2):**
+**I062/380** trägt zusätzlich zur Target Address die **Mode-S-EHS-DAPs**
+(Downlink Aircraft Parameters, aus CAT048 I048/250 BDS 4,0/6,0): **MHG**
+(Magnetic Heading, Subfeld #3, LSB 360/2¹⁶ °), **SAL** (Selected Altitude —
+die im Autopiloten eingedrehte Höhe, Basis der Level-Bust-Erkennung; Subfeld
+#6, 13-Bit-Zweierkomplement, LSB 25 ft, Source=MCP/FCU), **IAR** (IAS,
+Subfeld #26, LSB 1 kt) und **MAC** (Mach, Subfeld #27, LSB 0,008). Jedes
+Subfeld nur bei vorhandenem, **frischem** Wert (≤ 30 s; Absenz statt
+Stale-Behauptung). **Kein Wire-Bruch:** ein DAP-loser Track ist
+byte-identisch zur Vor-3.4.0-Form; erst IAR/MAC verlängern die Subfeld-Spec
+via FX auf vier Oktette. Details + Referenz-Dump: Abschnitt 4.7.
+
+Vorgänger **3.3.0** (2026-07-11) — **Additiv (FR-IO-008, ARTAS-Roadmap REG.3/ADR 0034):**
 CAT063-Records tragen bei **aktiver Registrierungs-Korrektur** (REG.2b,
 `FIREFLY_REGISTRATION_APPLY`) je Radar-Sensor die **angewandte
 Bias-Korrektur** in den EUROCONTROL-Standard-Items **I063/080** (SSR/Mode-S
@@ -78,6 +90,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 3.4.0 | 2026-07-11 | **Additiv (FR-TRK-040, FEP.2).** I062/380 um die Mode-S-EHS-DAPs erweitert: **MHG** (#3, LSB 360/2¹⁶ °), **SAL** (#6, SAS/Source=MCP + 13-Bit-Zweierkomplement, LSB 25 ft — die eingedrehte Autopilot-Höhe, Level-Bust-Basis), **IAR** (#26, LSB 1 kt), **MAC** (#27, LSB 0,008). Nur bei vorhandenem, frischem Wert (≤ 30 s) gesendet; DAP-loser Track byte-identisch zur alten Form; IAR/MAC verlängern die Subfeld-Spec via FX auf 4 Oktette. Byte-genauer Referenz-Dump in 4.7. Konsument: subfeld-getrieben lesen, kein Lockstep. |
 | 3.3.0 | 2026-07-11 | **Additiv (FR-IO-008, REG.3/ADR 0034).** CAT063 trägt bei aktiver Registrierungs-Korrektur (REG.2b) die **angewandte per-Sensor-Bias-Korrektur**: **I063/080** (FRN 7; SRG=0 + SRB, LSB 1/128 NM) und **I063/081** (FRN 8; SAB, LSB 360/2¹⁶ °). Nur bei in Kraft befindlicher Korrektur gesendet — Absenz = „keine Korrektur". FSPEC dann `0xBB 0x80`, Record 16 Oktette; byte-genauer Referenz-Dump in Abschnitt 9. **Kein Wire-Bruch** (FSPEC-getrieben, feste Längen, Standard-UAP). Konsument: optional auswerten (z. B. Bias-Anzeige im Sensor-Panel), kein Lockstep nötig. |
 | 3.2.0 | 2026-07-10 | **Additiv (FR-TRK-036, QW.3).** I062/080 um die ARTAS-Vertrauens-Flags erweitert: **MON** (Oktett 1, `0x80`, monosensor — höchstens ein Sensor im 30-s-Frische-Fenster; lange coastende Tracks ebenfalls MON) und **SPI** (Oktett 1, `0x40`, „Ident"-Puls der letzten Meldung; Quelle: CAT048 I048/020 via `radar_asterix`, transient). **SIM**-Slot (Oktett 2, `0x80`) dokumentiert, wird immer 0 gesendet. **Kein Wire-Bruch** — nur zuvor konstant 0 gesendete Bits werden bei Bedarf gesetzt; Multisensor-Track ohne SPI byte-identisch zu 3.1.x. Konsument: MON/SPI optional auswerten (z. B. Mono-Sensor-Kennzeichnung im Label), kein Lockstep nötig. Details: Abschnitt 4.1. |
 | 3.1.1 | 2026-07-10 | **Dokumentarisch (FR-TRK-035).** Vergabe-Semantik von **I062/040 (Track Number)** festgeschrieben: verwalteter 16-Bit-Pool statt `u32→u16`-Trunkierung der internen ID. Frische Nummern aufsteigend ab 1 (`0` nie vergeben); die Nummer eines gelöschten Tracks (TSE) ist für **60 s Datenzeit quarantänisiert**, bevor sie wiederverwendet werden darf; bei komplett belegtem Nummernraum (> 65 535 gleichzeitige Tracks) initiiert der Tracker keinen neuen Track statt eine Duplikat-Nummer zu senden. **Kein Wire-Format-Bruch** (u16 BE unverändert); Konsumenten-Verhalten unverändert korrekt — die Änderung *beseitigt* eine mögliche stille Nummern-Kollision nach 65 536 Track-Geburten. Details: Abschnitt 4.6. |
@@ -161,7 +174,7 @@ zusätzlichen FSPEC-Bits — unbekannte Items werden anhand ihrer Längen-Regeln
 | 7 | I062/185 | Calculated Track Velocity (Cartesian Vx/Vy) | 4 Oktette | Vx, Vy je i16 BE, LSB = 0,25 m/s |
 | 9 | I062/060 | Track Mode 3/A Code | 2 Oktette | 12-Bit-Antwort (4 Oktal-Ziffern) in den unteren 12 Bit |
 | 10 | I062/245 | Target Identification (Callsign, nur wenn vorhanden) | 7 Oktette | STI/spare-Oktett + 8 × 6-Bit-IA-5-Zeichen; siehe 4.5 |
-| 11 | I062/380 | Aircraft Derived Data (nur Target-Address-Subfeld) | variabel | Primary Subfield Bit 8 (`ADR`, `0x80`) + 24-Bit Mode-S-Adresse, nur wenn vorhanden |
+| 11 | I062/380 | Aircraft Derived Data: Target Address + seit 3.4.0 die Mode-S-EHS-DAPs MHG/SAL/IAR/MAC (je nur wenn vorhanden und frisch) | variabel (compound) | Subfeld-Spec (FX-verkettet) + Subfelder in aufsteigender Nummern-Reihenfolge; siehe 4.7 |
 | 12 | I062/040 | Track Number | 2 Oktette | u16 BE |
 | 13 | I062/080 | Track Status | variabel mit FX | siehe 4.1 |
 | 14 | I062/290 | System Track Update Ages | variabel | siehe 4.2 |
@@ -307,6 +320,51 @@ ID abzuleiten:
 Tracks dieselbe Nummer, und zwischen dem TSE eines Tracks und der Wiedergeburt
 seiner Nummer liegen mindestens 60 s Datenzeit. Format und Kodierung
 (u16 BE) sind unverändert gegenüber allen Vorversionen.
+
+### 4.7 I062/380 — Aircraft Derived Data (DAP-Ausbau seit 3.4.0)
+
+Compound Item: eine **FX-verkettete Subfeld-Spec** (bis zu 4 Oktette; Bit 1
+jedes Oktetts = FX), dann die vorhandenen Subfelder in **aufsteigender
+Subfeld-Nummer**. Firefly sendet fünf der 28 Standard-Subfelder:
+
+| Subfeld | Spec-Position | Name | Länge | Kodierung | Quelle | Seit |
+|---------|---------------|------|-------|-----------|--------|------|
+| #1 | Oktett 1, `0x80` | **ADR** Target Address | 3 | 24-Bit-Mode-S-Adresse BE | SSR-Identität | 1.0.0 |
+| #3 | Oktett 1, `0x20` | **MHG** Magnetic Heading | 2 | u16 BE, LSB **360/2¹⁶ °** | BDS 6,0 | **3.4.0** |
+| #6 | Oktett 1, `0x04` | **SAL** Selected Altitude | 2 | Bit 16 `SAS`=1, Bits 15–14 `Source`=`10` (MCP/FCU), Bits 13–1 Höhe als 13-Bit-Zweierkomplement, LSB **25 ft** | BDS 4,0 (im Autopiloten eingedrehte Höhe) | **3.4.0** |
+| #26 | Oktett 4, `0x08` | **IAR** Indicated Airspeed | 2 | u16 BE, LSB **1 kt** | BDS 6,0 | **3.4.0** |
+| #27 | Oktett 4, `0x04` | **MAC** Mach Number | 2 | u16 BE, LSB **0,008** | BDS 6,0 | **3.4.0** |
+
+**Sende-Regeln.** Jedes Subfeld erscheint **nur**, wenn der Track den Wert
+trägt — und die DAPs zusätzlich nur, solange sie **frisch** sind (letzte
+DAP-tragende Meldung ≤ 30 s Datenzeit; eine veraltete Selected Altitude als
+aktuell anzuzeigen wäre irreführend — Absenz statt Stale-Behauptung). Die
+Spec bleibt **ein Oktett**, solange nur ADR/MHG/SAL gesetzt sind — ein
+DAP-loser Track mit Adresse ist **byte-identisch** zur Vor-3.4.0-Form
+(`0x80` + 3 Adress-Oktette). Erst IAR/MAC verlängern die Spec via FX auf
+**vier** Oktette (Oktette 2/3 tragen nur das FX-Bit: `0x01`).
+
+**Fachlicher Kern: SAL** ist die im Autopiloten **eingedrehte** Zielhöhe
+(BDS 4,0 MCP/FCU) — der Vergleich mit der Freigabe ist die Grundlage der
+**Level-Bust-Erkennung** im ASD.
+
+**Byte-genauer Referenz-Dump** (Adresse `0x3C65AC`, Heading 270°, Selected
+Altitude 35 000 ft, IAS 250 kt, Mach 0,784):
+```
+0xA5 0x01 0x01 0x0C          # Spec: ADR+MHG+SAL+FX | FX | FX | IAR+MAC
+0x3C 0x65 0xAC               # ADR
+0xC0 0x00                    # MHG: 49152 × 360/2¹⁶ = 270°
+0xC5 0x78                    # SAL: SAS=1, Source=10, 1400 × 25 ft
+0x00 0xFA                    # IAR: 250 kt
+0x00 0x62                    # MAC: 98 × 0,008 = 0,784
+```
+Grundwahrheit: `firefly-asterix::cat062::tests::aircraft_derived_data_encodes_dap_subfields_byte_exactly`
+(+ `dap_subfields_round_trip`, inkl. negativer SAL via Zweierkomplement).
+
+**Konsument.** Subfeld-getrieben lesen (jedes Bit einzeln prüfen); unbekannte
+Subfelder haben feste Standard-Längen und können übersprungen werden. Kein
+Lockstep: Ein Decoder, der nur ADR liest, muss lediglich die Spec-Kette und
+die Längen der neuen Subfelder respektieren.
 
 ## 5. Koordinaten
 
