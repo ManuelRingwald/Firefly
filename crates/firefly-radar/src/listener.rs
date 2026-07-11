@@ -14,6 +14,7 @@ use firefly_core::Plot;
 use tokio::net::UdpSocket;
 
 use crate::config::RadarConfig;
+use crate::legacy::{legacy_datagram_to_plots, legacy_datagram_to_service};
 use crate::plot::target_report_to_plot;
 
 /// The largest UDP payload we will read. A CAT048 block is far smaller, but a
@@ -24,6 +25,10 @@ const RECV_BUFFER_BYTES: usize = 65_536;
 /// The leading category octet of a CAT034 service-message block (FEP.1): the
 /// listener dispatches on it, everything else goes down the CAT048 plot path.
 const CAT034: u8 = 34;
+/// The leading category octet of a legacy CAT001 target-report block (FEP.4).
+const CAT001: u8 = 1;
+/// The leading category octet of a legacy CAT002 service-message block (FEP.4).
+const CAT002: u8 = 2;
 
 /// Decode one received datagram into plots (pure: no I/O). A datagram that is not
 /// a valid CAT048 block yields an empty vector — never a panic (the decoder is the
@@ -66,11 +71,19 @@ pub async fn bind_socket(config: &RadarConfig) -> std::io::Result<UdpSocket> {
 }
 
 /// Run the radar listener indefinitely: receive datagrams, dispatch on the
-/// leading category octet — **CAT034** service messages go to `on_service`,
-/// everything else down the **CAT048** plot path to `on_plots` (one call per
-/// datagram that yields at least one message/plot). Never returns under
-/// normal operation; a bind failure logs and returns (the other sources keep
-/// running).
+/// leading category octet — **CAT034/CAT002** service messages go to
+/// `on_service`, **CAT001** legacy target reports are time-anchored and join
+/// the plot path, everything else goes down the **CAT048** plot path to
+/// `on_plots` (one call per datagram that yields at least one message/plot).
+///
+/// The listener keeps the feed's **time anchor** (the last full time of day
+/// seen in a service message): CAT001 records carry only a truncated ToD
+/// (I001/141), which is expanded against this anchor (FEP.4). Until the first
+/// timed service message arrives, legacy plots are dropped rather than given
+/// an invented time.
+///
+/// Never returns under normal operation; a bind failure logs and returns (the
+/// other sources keep running).
 pub async fn run<F, G>(config: &RadarConfig, mut on_plots: F, mut on_service: G)
 where
     F: FnMut(Vec<Plot>),
@@ -89,9 +102,12 @@ where
         sensor_id = config.sensor_id.0,
         port = config.listen_port,
         multicast = config.is_multicast(),
-        "radar ASTERIX (CAT048 + CAT034) listener started (live mode)"
+        "radar ASTERIX (CAT048/034 + legacy CAT001/002) listener started (live mode)"
     );
 
+    // The last full time of day seen on the service stream (CAT002/CAT034) —
+    // the anchor for expanding CAT001's truncated timestamps.
+    let mut anchor_secs: Option<f64> = None;
     let mut buf = [0u8; RECV_BUFFER_BYTES];
     loop {
         let n = match socket.recv_from(&mut buf).await {
@@ -102,15 +118,36 @@ where
             }
         };
         let datagram = &buf[..n];
-        if datagram.first() == Some(&CAT034) {
-            let messages = datagram_to_service(datagram);
-            if !messages.is_empty() {
-                on_service(messages);
+        match datagram.first() {
+            Some(&CAT034) => {
+                let messages = datagram_to_service(datagram);
+                if let Some(t) = messages.iter().filter_map(|m| m.time).next_back() {
+                    anchor_secs = Some(t.0);
+                }
+                if !messages.is_empty() {
+                    on_service(messages);
+                }
             }
-        } else {
-            let plots = datagram_to_plots(datagram, config);
-            if !plots.is_empty() {
-                on_plots(plots);
+            Some(&CAT002) => {
+                let messages = legacy_datagram_to_service(datagram);
+                if let Some(t) = messages.iter().filter_map(|m| m.time).next_back() {
+                    anchor_secs = Some(t.0);
+                }
+                if !messages.is_empty() {
+                    on_service(messages);
+                }
+            }
+            Some(&CAT001) => {
+                let plots = legacy_datagram_to_plots(datagram, config, anchor_secs);
+                if !plots.is_empty() {
+                    on_plots(plots);
+                }
+            }
+            _ => {
+                let plots = datagram_to_plots(datagram, config);
+                if !plots.is_empty() {
+                    on_plots(plots);
+                }
             }
         }
     }
