@@ -142,11 +142,14 @@ Plots parallel in die dort benannte `.ffplots`-Datei aufgezeichnet — die
 Grundlage für deterministisches Replay/Wiederanlauf (ADR 0020; Details und
 Nicht-Fatal-Verhalten in `docs/TECHNICAL.md` §6.2).
 
-Mit mindestens einer Radar-Quelle kann zusätzlich der **Registrierungs-
-Schatten-Monitor** aktiviert werden (`FIREFLY_REGISTRATION_ENABLED=true`,
-REG.2a/ADR 0034): Er schätzt laufend die systematischen Radar-Messfehler
-(Range-/Azimut-Bias) aus dem Datenstrom und exportiert sie als Logs und
-Metriken — ohne die Fusion zu verändern (`docs/TECHNICAL.md` §1.5.2).
+Mit mindestens einer Radar-Quelle kann zusätzlich die **Sensor-Registrierung**
+aktiviert werden (ADR 0034): `FIREFLY_REGISTRATION_ENABLED=true` startet den
+Monitor, der die systematischen Radar-Messfehler (Range-/Azimut-Bias) laufend
+aus dem Datenstrom schätzt (Logs + Metriken, Schattenmodus);
+`FIREFLY_REGISTRATION_APPLY=true` zieht die geschätzten Biases zusätzlich
+**vor der Fusion** von den Radar-Messungen ab — abgesichert durch ein
+Anwendungs-Gate (Beobachtbarkeit, Residuen-Gewinn, Plausibilität) und
+geglättete Übergänge (`docs/TECHNICAL.md` §1.5.2).
 
 > **Orchestrierter Betrieb (ADR 0023).** Dieser Abschnitt beschreibt die
 > **Standalone**-Konfiguration über `FIREFLY_OPENSKY_*` (eine Quelle, von Hand

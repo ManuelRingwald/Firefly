@@ -34,7 +34,10 @@ use firefly_asterix::Cat062Encoder;
 use firefly_core::{Plot, SensorId, SystemTrack, Timestamp};
 use firefly_geo::{LocalFrame, Wgs84};
 use firefly_opensky::OpenSkyConfig;
-use firefly_track::{ProcessNoise, RegistrationMonitor, SensorErrorModel, Tracker, TrackerConfig};
+use firefly_track::{
+    ProcessNoise, RegistrationApplier, RegistrationMonitor, SensorErrorModel, Tracker,
+    TrackerConfig,
+};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
@@ -285,6 +288,15 @@ pub struct RegistrationTick {
     /// Per-sensor bias estimates from the latest run: `(sensor, range bias in
     /// metres, azimuth bias in degrees)`. Empty before the first estimate.
     pub biases: Vec<(SensorId, f64, f64)>,
+    /// Whether a REG.2b correction is currently in effect (always `false`
+    /// without an applier attached).
+    pub apply_active: bool,
+    /// The correction currently **applied** per sensor (REG.2b): `(sensor,
+    /// range bias in metres, azimuth bias in degrees)`. Distinct from
+    /// `biases` (the latest raw estimate) — this is the smoothed, gated value
+    /// actually subtracted from measurements. Empty without an applier or
+    /// while no correction is engaged.
+    pub applied: Vec<(SensorId, f64, f64)>,
 }
 
 /// A live tracker plus its input recorder: the synchronous core driven by the
@@ -297,6 +309,11 @@ pub struct LiveTracker {
     /// plot stream the tracker ingests but never changes it — its estimates
     /// go to logs/metrics only, until REG.2b defines an application policy.
     registration: Option<RegistrationMonitor>,
+    /// The optional registration applier (REG.2b): when attached, the applied
+    /// per-sensor bias is subtracted from radar polar measurements **before**
+    /// they reach the tracker, gated by its [`ApplyPolicy`](firefly_track::ApplyPolicy)
+    /// and advanced once per monitor estimation run.
+    applier: Option<RegistrationApplier>,
     /// The freshest plot data-time seen, the instant snapshots are projected to.
     latest_data_time: Option<f64>,
     /// Total plots handed to the tracker (for metrics, AP9.4c-4).
@@ -310,25 +327,39 @@ impl LiveTracker {
             tracker,
             recorder,
             registration: None,
+            applier: None,
             latest_data_time: None,
             plots_ingested: 0,
         }
     }
 
     /// Attach a registration shadow monitor (REG.2a). The monitor observes
-    /// every ingested batch; it has no effect on the tracker's picture.
+    /// every ingested batch; on its own it has no effect on the tracker's
+    /// picture.
     pub fn with_registration(mut self, monitor: RegistrationMonitor) -> Self {
         self.registration = Some(monitor);
         self
     }
 
+    /// Attach a registration applier (REG.2b): its applied correction is
+    /// subtracted from radar measurements before tracking. The applier only
+    /// *advances* through the monitor's estimation runs — without a monitor
+    /// attached its correction stays frozen at its current state.
+    pub fn with_registration_apply(mut self, applier: RegistrationApplier) -> Self {
+        self.applier = Some(applier);
+        self
+    }
+
     /// Ingest a batch of plots that arrived at wall-clock `recv_unix_ns`.
     ///
-    /// Each plot is **recorded first** (so the `.ffplots` log faithfully mirrors
-    /// the tracker's input), then the whole batch is handed to the tracker by
-    /// data-time. If recording fails, the recorder is dropped and a warning is
-    /// logged — tracking continues, because the live air picture must not stop
-    /// when the disk fills (availability over recording).
+    /// Each plot is **recorded first** (so the `.ffplots` log faithfully
+    /// mirrors the tracker's input — deliberately the **raw** stream, so a
+    /// replay re-runs the same correction logic instead of double-correcting),
+    /// then the batch — bias-corrected if a REG.2b applier is active — is
+    /// handed to the tracker by data-time. If recording fails, the recorder is
+    /// dropped and a warning is logged — tracking continues, because the live
+    /// air picture must not stop when the disk fills (availability over
+    /// recording).
     pub fn ingest(&mut self, plots: &[Plot], recv_unix_ns: u64) {
         if plots.is_empty() {
             return;
@@ -345,7 +376,16 @@ impl LiveTracker {
             }
         }
 
-        self.tracker.process_plots(plots);
+        // Registration correction (REG.2b): subtract each radar's applied bias
+        // before the measurements reach the tracker. A pass-through when no
+        // applier is attached or no correction is in effect.
+        match self.applier.as_ref().filter(|a| a.active()) {
+            Some(applier) => {
+                let corrected: Vec<Plot> = plots.iter().map(|p| applier.correct(p)).collect();
+                self.tracker.process_plots(&corrected);
+            }
+            None => self.tracker.process_plots(plots),
+        }
         self.plots_ingested += plots.len() as u64;
 
         let newest = plots
@@ -357,12 +397,17 @@ impl LiveTracker {
                 .map_or(newest, |prev| prev.max(newest)),
         );
 
-        // Shadow-mode registration (REG.2a): observe the same batch, driven by
-        // the same data-time watermark. Deliberately after the tracker ingest —
-        // nothing the monitor computes may influence this batch's processing.
+        // Registration estimation (REG.2a): observe the same batch, driven by
+        // the same data-time watermark. Deliberately after the tracker ingest,
+        // and deliberately on the RAW plots even while corrections are applied
+        // — the estimate then stays the *full* bias and the applied correction
+        // is a pure low-pass of it (no integrator in the loop, nothing to
+        // oscillate; see firefly_track::RegistrationApplier).
         if let Some(monitor) = self.registration.as_mut() {
             let now = self.latest_data_time.unwrap_or(newest);
-            if let Some(solution) = monitor.observe(plots, now).cloned() {
+            let runs_before = monitor.runs_total();
+            let fresh = monitor.observe(plots, now).cloned();
+            if let Some(solution) = &fresh {
                 let biases: Vec<String> = solution
                     .biases
                     .iter()
@@ -380,9 +425,29 @@ impl LiveTracker {
                     rms_before_m = format!("{:.1}", solution.rms_before_m).as_str(),
                     rms_after_m = format!("{:.1}", solution.rms_after_m).as_str(),
                     observable = solution.observable,
+                    applying = self.applier.is_some(),
                     biases = biases.join("; ").as_str(),
-                    "registration shadow estimate (REG.2a, not applied)"
+                    "registration estimate"
                 );
+            }
+            // Advance the applier exactly once per estimation run — refused
+            // runs count too (they feed the hold/decay policy).
+            if monitor.runs_total() > runs_before {
+                if let Some(applier) = self.applier.as_mut() {
+                    let was_active = applier.active();
+                    applier.update(fresh.as_ref());
+                    if applier.active() != was_active {
+                        info!(
+                            active = applier.active(),
+                            "registration correction {} (REG.2b)",
+                            if applier.active() {
+                                "engaged"
+                            } else {
+                                "disengaged"
+                            }
+                        );
+                    }
+                }
             }
         }
     }
@@ -422,17 +487,31 @@ impl LiveTracker {
         self.recorder.as_ref().map_or(0, PlotRecorder::written)
     }
 
-    /// Snapshot of the registration shadow monitor for the `on_tick` callback
-    /// (REG.2a metrics export). `None` when no monitor is configured.
+    /// Snapshot of the registration state for the `on_tick` callback
+    /// (REG.2a/2b metrics export). `None` when neither a monitor nor an
+    /// applier is configured.
     pub fn registration_tick(&self) -> Option<RegistrationTick> {
-        let monitor = self.registration.as_ref()?;
-        let latest = monitor.latest();
+        if self.registration.is_none() && self.applier.is_none() {
+            return None;
+        }
+        let monitor = self.registration.as_ref();
+        let latest = monitor.and_then(|m| m.latest());
         Some(RegistrationTick {
-            estimates_total: monitor.estimates_total(),
-            last_pair_count: monitor.last_pair_count(),
+            estimates_total: monitor.map_or(0, RegistrationMonitor::estimates_total),
+            last_pair_count: monitor.map_or(0, RegistrationMonitor::last_pair_count),
             observable: latest.is_some_and(|s| s.observable),
             biases: latest.map_or_else(Vec::new, |s| {
                 s.biases
+                    .iter()
+                    .map(|(id, b)| (*id, b.range_m, b.azimuth_deg()))
+                    .collect()
+            }),
+            apply_active: self
+                .applier
+                .as_ref()
+                .is_some_and(RegistrationApplier::active),
+            applied: self.applier.as_ref().map_or_else(Vec::new, |a| {
+                a.applied()
                     .iter()
                     .map(|(id, b)| (*id, b.range_m, b.azimuth_deg()))
                     .collect()
@@ -813,6 +892,104 @@ mod tests {
             without.registration_tick().is_none(),
             "no monitor, no tick state"
         );
+    }
+
+    /// End-to-end proof of REG.2b through the real server path: with an
+    /// applier converged on the radar's bias attached, the tracked position
+    /// sits on the truth; the identical stream without correction carries the
+    /// full bias displacement. REQ: FR-TRK-039
+    #[test]
+    fn registration_apply_corrects_the_radar_picture() {
+        use firefly_track::{ApplyPolicy, RegistrationSolution, SensorBias};
+        use std::collections::BTreeMap;
+
+        let reference = Wgs84::from_degrees(51.0, 10.5, 0.0);
+        let site_pos = Wgs84::from_degrees(51.2, 10.0, 0.0);
+        let radar_id = SensorId(301);
+        let radar = || RadarSensor {
+            id: radar_id,
+            position: site_pos,
+            sigma_range_m: 30.0,
+            sigma_azimuth_deg: 0.05,
+            scan_period: 10.0,
+        };
+        let bias = SensorBias {
+            range_m: 800.0,
+            azimuth_rad: 0.0,
+        };
+
+        // An applier honestly converged on the bias: 30 accepted runs of a
+        // clean, observable, residual-explaining solution.
+        let mut applier = RegistrationApplier::new(ApplyPolicy::default());
+        let solution = RegistrationSolution {
+            biases: BTreeMap::from([(radar_id, bias)]),
+            rms_before_m: 800.0,
+            rms_after_m: 40.0,
+            observable: true,
+        };
+        for _ in 0..30 {
+            applier.update(Some(&solution));
+        }
+
+        let build =
+            || build_live_tracker_multi(reference, std::iter::empty(), std::iter::once(radar()));
+        let mut with_apply = LiveTracker::new(build(), None).with_registration_apply(applier);
+        let mut without = LiveTracker::new(build(), None);
+
+        // One aircraft drifting east, seen only by the biased radar: the
+        // radar reports every target 800 m too far out.
+        let site = LocalFrame::new(site_pos);
+        let truth_at = |k: f64| Wgs84::from_degrees(51.0, 10.5 + k * 0.01, 9_000.0);
+        for k in 0..8 {
+            let t = k as f64 * 10.0;
+            let true_polar = site.geodetic_to_enu(&truth_at(k as f64)).to_polar();
+            let measured = firefly_geo::Polar::new(
+                true_polar.range + bias.range_m,
+                true_polar.azimuth,
+                true_polar.elevation,
+            );
+            let plot = Plot {
+                sensor: radar_id,
+                time: Timestamp(t),
+                measurement: firefly_core::Measurement::Polar(measured),
+                kind: firefly_core::DetectionKind::Secondary,
+                source: firefly_core::SourceKind::ModeS,
+                mode_ac: ModeAC {
+                    icao_address: Some(0x3C_00_01),
+                    ..ModeAC::default()
+                },
+            };
+            with_apply.ingest(&[plot], now_unix_ns());
+            without.ingest(&[plot], now_unix_ns());
+        }
+
+        let frame = LocalFrame::new(reference);
+        let truth = frame.geodetic_to_enu(&truth_at(7.0));
+        let horizontal_error = |live: &mut LiveTracker| {
+            let snapshot = live.snapshot();
+            assert_eq!(snapshot.len(), 1, "one aircraft, one track");
+            let e = frame.geodetic_to_enu(&snapshot[0].position);
+            ((e.east - truth.east).powi(2) + (e.north - truth.north).powi(2)).sqrt()
+        };
+
+        let corrected = horizontal_error(&mut with_apply);
+        let raw = horizontal_error(&mut without);
+        assert!(
+            corrected < 200.0,
+            "corrected picture sits on the truth: {corrected:.0} m off"
+        );
+        assert!(
+            raw > 500.0,
+            "uncorrected picture carries the bias: only {raw:.0} m off"
+        );
+
+        // The tick reports the engaged correction for the metrics export.
+        let tick = with_apply.registration_tick().expect("applier reports");
+        assert!(tick.apply_active);
+        assert_eq!(tick.applied.len(), 1);
+        let (sensor, applied_range, _) = tick.applied[0];
+        assert_eq!(sensor, radar_id);
+        assert!((applied_range - bias.range_m).abs() < 1.0);
     }
 
     /// The async task publishes a snapshot after the first output tick and stops

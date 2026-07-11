@@ -179,24 +179,39 @@ Beispiel: siehe `docs/source-input-contract.md` §2. Referenzpunkt = Mittelpunkt
 **min** Poll-Intervall der Quellen. Jede Quelle stempelt ihre `sensor_id` auf ihre
 Plots; die Sensor-Liveness (CAT063) verfolgt alle Quellen.
 
-### 1.5.2 Sensor-Registrierung — Schatten-Monitor (REG.2a, ADR 0034)
+### 1.5.2 Sensor-Registrierung — Monitor & Korrektur (REG.2a/2b, ADR 0034)
 
 Der Registrierungs-Monitor beobachtet den Live-Plot-Strom, paart
 Radar-Messungen mit geodätischer Referenz (ADS-B/FLARM) bzw. anderen Radaren
 über die ICAO-Adresse und schätzt periodisch die systematischen Messfehler
-(Range-/Azimut-Bias) jedes Radars. **Schattenmodus:** Die Schätzungen werden
-**nur** geloggt und als Metriken exportiert — sie fließen *nicht* in die Fusion
-zurück (Anwendungs-Politik folgt in REG.2b). Sinnvoll nur mit mindestens einer
+(Range-/Azimut-Bias) jedes Radars. Sinnvoll nur mit mindestens einer
 `radar_asterix`-Quelle; ohne Radar ist der Monitor ein No-op (Warn-Log).
+
+**Zwei getrennte Schalter** — das Schließen eines Regelkreises in den
+Fusionspfad wird ausdrücklich aktiviert, nie impliziert:
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
-| `FIREFLY_REGISTRATION_ENABLED` | bool | *(aus)* | `1`/`true`/`yes` (case-insensitiv) aktiviert den Schatten-Monitor. Feste Parameter (REG.2a): 120 s Gleitfenster (Datenzeit), 1 s Pairing-Fenster, Schätz-Kadenz 10 s, min. 20 Korrespondenzen je Lauf. |
+| `FIREFLY_REGISTRATION_ENABLED` | bool | *(aus)* | `1`/`true`/`yes` (case-insensitiv) aktiviert den **Monitor** (Schätzung). Feste Parameter (REG.2a): 120 s Gleitfenster (Datenzeit), 1 s Pairing-Fenster, Schätz-Kadenz 10 s, min. 20 Korrespondenzen je Lauf. Ohne `_APPLY` reiner Schattenmodus: nur Logs + Metriken. |
+| `FIREFLY_REGISTRATION_APPLY` | bool | *(aus)* | `1`/`true`/`yes` aktiviert zusätzlich die **Korrektur** (REG.2b): Die geschätzten Biases werden vor der Fusion von den Radar-Messungen abgezogen. Erfordert den laufenden Monitor (sonst Warn-Log, No-op). |
 
-Jede frische Schätzung erscheint als `info`-Log
-(`registration shadow estimate (REG.2a, not applied)`) mit Paar-Anzahl,
-RMS vor/nach Korrektur, Beobachtbarkeits-Flag und den Bias-Werten je Sensor;
-die Metriken stehen in §3.2 (`firefly_registration_*`).
+**Anwendungs-Politik (REG.2b, fest):** Eine Schätzung wird nur übernommen,
+wenn sie **beobachtbar** ist, die Residuen **signifikant erklärt**
+(RMS nachher ≤ 0,5 × RMS vorher) und **plausibel** ist (|Δr| ≤ 1000 m,
+|Δθ| ≤ 1°). Die angewandte Korrektur folgt der Schätzung **geglättet**
+(exponentiell, α = 0,3 je Schätzlauf — kein Sprung im Lagebild); fällt die
+Politik dauerhaft durch (> 3 Läufe), klingt die Korrektur zur Null ab.
+Stabilität per Konstruktion: Der Monitor schätzt weiterhin auf dem
+**rohen** Strom (voller Bias), die Korrektur ist ein reiner Tiefpass davon —
+kein Integrator, nichts kann oszillieren. Die `.ffplots`-Aufzeichnung
+(§6) enthält bewusst die **rohen** Plots (Replay durchläuft dieselbe
+Korrektur-Logik, statt doppelt zu korrigieren).
+
+Jede frische Schätzung erscheint als `info`-Log (`registration estimate`)
+mit Paar-Anzahl, RMS vor/nach Korrektur, Beobachtbarkeits-Flag und den
+Bias-Werten je Sensor; Übernahme/Rücknahme der Korrektur loggt
+`registration correction engaged/disengaged (REG.2b)`. Die Metriken stehen
+in §3.2 (`firefly_registration_*`).
 
 ### 1.6 WebSocket-Zugangskontrolle (NFR-SEC-001, ADR 0017)
 
@@ -313,8 +328,11 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_registration_estimates_total` | counter | **Registrierung (REG.2a):** Bias-Schätzläufe des Schatten-Monitors. Bleibt 0 ohne `FIREFLY_REGISTRATION_ENABLED` bzw. ohne ausreichende Radar↔Referenz-Korrespondenzen. |
 | `firefly_registration_correspondences` | gauge | **Registrierung:** Korrespondenzen des letzten Schätzversuchs (auch bei Ablehnung wegen zu dünner Evidenz gesetzt — zeigt dem Operator, *warum* keine Schätzung erscheint) |
 | `firefly_registration_observable` | gauge | **Registrierung:** 1 = letzte Schätzung voll beobachtbar, 0 = (noch) keine Schätzung oder rangdefiziente Geometrie |
-| `firefly_registration_bias_range_m{sensor="…"}` | gauge | **Registrierung:** geschätzter Range-Bias je Radar, Meter (Schatten — wird **nicht** angewandt). Erscheint erst nach der ersten Schätzung. |
-| `firefly_registration_bias_azimuth_deg{sensor="…"}` | gauge | **Registrierung:** geschätzter Azimut-Bias je Radar, Grad (Schatten — wird **nicht** angewandt). Erscheint erst nach der ersten Schätzung. |
+| `firefly_registration_bias_range_m{sensor="…"}` | gauge | **Registrierung:** geschätzter Range-Bias je Radar, Meter (roher Schätzwert). Erscheint erst nach der ersten Schätzung. |
+| `firefly_registration_bias_azimuth_deg{sensor="…"}` | gauge | **Registrierung:** geschätzter Azimut-Bias je Radar, Grad (roher Schätzwert). Erscheint erst nach der ersten Schätzung. |
+| `firefly_registration_apply_active` | gauge | **Registrierung (REG.2b):** 1 = eine Korrektur ist aktuell in Kraft, 0 = keine (ohne `FIREFLY_REGISTRATION_APPLY` immer 0; auch 0, solange das Anwendungs-Gate jede Schätzung ablehnt) |
+| `firefly_registration_applied_bias_range_m{sensor="…"}` | gauge | **Registrierung (REG.2b):** aktuell **angewandter** Range-Bias je Radar, Meter — der geglättete, Gate-geprüfte Wert, der tatsächlich von den Messungen abgezogen wird (≠ roher Schätzwert) |
+| `firefly_registration_applied_bias_azimuth_deg{sensor="…"}` | gauge | **Registrierung (REG.2b):** aktuell **angewandter** Azimut-Bias je Radar, Grad |
 
 ### 3.3 Prometheus scrape-Konfiguration
 

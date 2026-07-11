@@ -22,7 +22,7 @@ use firefly_server::{
     resolve_plot_recorder, router, run_live_cat062, run_live_tracker, AppState, FrameSource,
     LiveSnapshot, LiveTracker, Metrics, RadarSensor, ServerConfig, SnapshotRx,
 };
-use firefly_track::{RegistrationConfig, RegistrationMonitor};
+use firefly_track::{ApplyPolicy, RegistrationApplier, RegistrationConfig, RegistrationMonitor};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
 
@@ -266,9 +266,27 @@ async fn build_live_state(
     // path is non-fatal (logged, tracking continues).
     let record_path = std::env::var("FIREFLY_PLOT_RECORD_PATH").ok();
     let recorder = resolve_plot_recorder(record_path.as_deref());
+
+    // Opt-in registration APPLICATION (REG.2b, ADR 0034): subtract the gated,
+    // smoothed bias estimate from radar measurements before fusion. A second,
+    // deliberate switch on top of the monitor — closing a control loop into
+    // the fusion path is opted into explicitly, never implied.
+    let apply = registration_enabled(std::env::var("FIREFLY_REGISTRATION_APPLY").ok().as_deref());
     let mut live = LiveTracker::new(tracker, recorder);
-    if let Some(monitor) = registration {
-        live = live.with_registration(monitor);
+    match (registration, apply) {
+        (Some(monitor), true) => {
+            tracing::info!(
+                "registration correction enabled (REG.2b): gated bias estimates are subtracted before fusion"
+            );
+            live = live
+                .with_registration(monitor)
+                .with_registration_apply(RegistrationApplier::new(ApplyPolicy::default()));
+        }
+        (Some(monitor), false) => live = live.with_registration(monitor),
+        (None, true) => tracing::warn!(
+            "FIREFLY_REGISTRATION_APPLY is set but the registration monitor is not running (set FIREFLY_REGISTRATION_ENABLED and configure a radar_asterix source); nothing will be applied"
+        ),
+        (None, false) => {}
     }
     {
         let m = Arc::clone(&metrics);
@@ -298,6 +316,19 @@ async fn build_live_state(
                     biases.clear();
                     biases.extend(
                         tick.biases
+                            .iter()
+                            .map(|(id, range_m, azimuth_deg)| (id.0, (*range_m, *azimuth_deg))),
+                    );
+                    drop(biases);
+                    m.registration_apply_active
+                        .store(tick.apply_active, std::sync::atomic::Ordering::Relaxed);
+                    let mut applied = m
+                        .registration_applied_biases
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    applied.clear();
+                    applied.extend(
+                        tick.applied
                             .iter()
                             .map(|(id, range_m, azimuth_deg)| (id.0, (*range_m, *azimuth_deg))),
                     );
