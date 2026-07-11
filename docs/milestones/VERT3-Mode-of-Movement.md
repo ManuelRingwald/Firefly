@@ -21,16 +21,29 @@ dafür zwei Items:
 
 ## Technik
 
-**Bewusste Architektur-Entscheidung — kein CA-Modell in der IMM-Bank.**
-Der angekündigte Weg (Constant-Acceleration-Modell als drittes
-IMM-Bank-Mitglied) hätte einen **6-D-Zustand** erfordert; der gesamte
-Fusionskern ist aber auf den 4-D-Zustand festgelegt (LinearKalman auf
-`Matrix4`, Gating, JPDA-Assoziation, Registrierungs-Schätzer). Ein
-6-D-Umbau schneidet durch all das — für Größen, die eine geglättete
-Ableitung der **bereits Kalman-gefilterten** IMM-Kombinationsgeschwindigkeit
-mit weit geringerem Risiko liefert. Die CA-Bank-Erweiterung bleibt ein
-**explizit zurückgestelltes Folge-Häppchen** (dann mit eigenem ADR, weil
-sie den Fusionskern berührt).
+**Bewusste Architektur-Entscheidung — kein CA-Modell in der IMM-Bank
+(Scope-Split VERT.3 / VERT.4).** Der angekündigte Weg (Constant-
+Acceleration-Modell als drittes IMM-Bank-Mitglied) hätte einen
+**6-D-Zustand** erfordert; der gesamte Fusionskern ist aber auf den
+4-D-Zustand festgelegt (LinearKalman auf `Matrix4`/`Vector4`, Gating,
+JPDA-Assoziation, Registrierungs-Schätzer — verifiziert: `Matrix4`/
+`Vector4` durchziehen `motion`/`imm`/`kalman`/`gating`/`pda`/`jpda`/
+`association`/`registration`/`tracker`). Ein 6-D-Umbau schneidet durch
+all das — für Größen, die eine geglättete Ableitung der **bereits
+Kalman-gefilterten** IMM-Kombinationsgeschwindigkeit mit weit geringerem
+Risiko liefert.
+
+Deshalb der **ehrliche Scope-Split**: VERT.3 liefert die **Anzeige-Hälfte**
+(Mode of Movement + Beschleunigung *auf dem Draht*, aus der Ableitung); die
+**Tracking-Hälfte** — das CA-Modell, das die **Prädiktion** in
+Längsbeschleunigungs-Phasen verbessert und einen rausch-/lag-ärmeren
+Filterzustand der Beschleunigung liefert — ist als eigenes Häppchen
+**VERT.4** in der Roadmap ausgewiesen (S5, Kern-Refactor mit Fusions-
+Wirkung, eigener ADR). Die Roadmap bucht VERT.3 entsprechend bei 65 %
+statt der ursprünglich für das Gesamt-VERT.3 vorgesehenen 66,5 %; VERT.4
+holt die Differenz nach. Was VERT.3 damit **nicht** verbessert: die
+Positionsgenauigkeit während echter Beschleunigung — ein CV+CT-IMM
+behandelt sie als Prozessrauschen und läuft dort hinterher.
 
 **Beschleunigungs-Schätzer** (`firefly-track::acceleration`, je Track):
 differenziert konsekutive IMM-Kombinationsschätzungen der Geschwindigkeit
@@ -77,9 +90,10 @@ Byte-genaue Referenz-Vektoren in ICD §4.9.
 
 ## Ehrliche Grenzen (VERT.3)
 
-- **CA-Modell zurückgestellt** (siehe oben): die Beschleunigung ist eine
-  geglättete Ableitung, kein Filter-Zustand — sie verbessert die
-  IMM-Prädiktion selbst (noch) nicht.
+- **CA-Modell zurückgestellt → VERT.4** (siehe oben): die Beschleunigung
+  ist eine geglättete Ableitung, kein Filter-Zustand — sie verbessert die
+  IMM-Prädiktion selbst (noch) nicht. Das ist die Tracking-Hälfte, die
+  VERT.4 als eigener Kern-Refactor mit ADR nachzieht.
 - **Keine Hysterese an den Trend-Schwellen:** ein Wert, der um die
   Schwelle pendelt, kann den Trend flattern lassen — die EWMA-/Kalman-
   Glättung der zugrundeliegenden Schätzer übernimmt die Entprellung;
