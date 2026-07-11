@@ -44,6 +44,8 @@ fn track(id: u32) -> SystemTrack {
         barometric_qnh_corrected: false,
         geometric_altitude_ft: None,
         rocd_ft_min: None,
+        acceleration_mps2: None,
+        mode_of_movement: None,
     }
 }
 

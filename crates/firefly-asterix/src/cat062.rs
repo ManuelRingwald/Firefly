@@ -40,8 +40,6 @@ const CATEGORY: u8 = 62;
 ///
 /// - FRN 2 — spare bit in the standard UAP (never an item).
 /// - FRN 3 — I062/015 Service Identification.
-/// - FRN 8 — I062/210 Calculated Acceleration.
-/// - FRN 15 — I062/200 Mode of Movement.
 /// - FRN 16 — I062/295 Track Data Ages (reserved, not emitted).
 ///
 /// Keeping the FRNs named and in one place documents the bit layout and stops
@@ -57,6 +55,8 @@ mod uap {
     pub const POSITION_CARTESIAN: u8 = 6;
     /// I062/185 — Calculated Track Velocity (Cartesian).
     pub const VELOCITY_CARTESIAN: u8 = 7;
+    /// I062/210 — Calculated Acceleration (Cartesian, VERT.3).
+    pub const ACCELERATION_CARTESIAN: u8 = 8;
     /// I062/060 — Track Mode 3/A Code.
     pub const MODE_3A_CODE: u8 = 9;
     /// I062/245 — Target Identification (callsign / flight ID).
@@ -69,6 +69,8 @@ mod uap {
     pub const TRACK_STATUS: u8 = 13;
     /// I062/290 — System Track Update Ages.
     pub const UPDATE_AGES: u8 = 14;
+    /// I062/200 — Mode of Movement (VERT.3).
+    pub const MODE_OF_MOVEMENT: u8 = 15;
     /// I062/136 — Measured Flight Level.
     pub const MEASURED_FLIGHT_LEVEL: u8 = 17;
     /// I062/130 — Calculated Track Geometric Altitude (VERT.2).
@@ -102,6 +104,17 @@ const AGE_LSB_SECONDS: f64 = 0.25;
 /// 1/4-FL steps. One FL is 100 ft, so the LSB is 25 ft. Verified against
 /// SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.13.
 const FLIGHT_LEVEL_LSB_FT: f64 = 25.0;
+/// I062/210 stores each acceleration component as a signed 8-bit count of
+/// 0.25 m/s² (range ±31.75 m/s²; clamped on encode — beyond ±3 g the value
+/// is a filter transient, not flight). Verified against
+/// SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10.
+const ACCELERATION_LSB_MPS2: f64 = 0.25;
+/// I062/200 bit positions: TRANS bits 8–7, LONG bits 6–5, VERT bits 4–3,
+/// ADF bit 2, spare bit 1. Firefly computes no dual-source altitude
+/// discrepancy yet, so ADF is honestly always 0.
+const MOM_TRANS_SHIFT: u8 = 6;
+const MOM_LONG_SHIFT: u8 = 4;
+const MOM_VERT_SHIFT: u8 = 2;
 /// I062/130 stores the geometric altitude as a signed 16-bit count of
 /// 6.25-ft steps; I062/220 stores the rate of climb/descent the same way
 /// (ft/min). Verified against SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10.
@@ -334,6 +347,14 @@ impl Cat062Encoder {
         if let Some(rocd) = track.rocd_ft_min {
             builder = builder.item(uap::RATE_OF_CLIMB_DESCENT, encode_rocd(rocd));
         }
+        // Kinematics chain (VERT.3, ICD 3.6.0): acceleration and mode of
+        // movement, each only when the tracker carries a determination.
+        if let Some((ax, ay)) = track.acceleration_mps2 {
+            builder = builder.item(uap::ACCELERATION_CARTESIAN, encode_acceleration(ax, ay));
+        }
+        if let Some(mom) = track.mode_of_movement {
+            builder = builder.item(uap::MODE_OF_MOVEMENT, encode_mode_of_movement(&mom));
+        }
 
         builder.finish()
     }
@@ -512,6 +533,39 @@ fn encode_aircraft_derived_data(track: &SystemTrack) -> Vec<u8> {
 fn encode_measured_flight_level(flight_level_ft: f64) -> Vec<u8> {
     let ticks = (flight_level_ft / FLIGHT_LEVEL_LSB_FT).round() as i16;
     ticks.to_be_bytes().to_vec()
+}
+
+/// I062/210 — Calculated Acceleration: Ax, Ay each a signed 8-bit count of
+/// 0.25-m/s² steps (east/north), clamped to the field's ±31.75 m/s² range.
+fn encode_acceleration(ax_mps2: f64, ay_mps2: f64) -> Vec<u8> {
+    let tick = |a: f64| ((a / ACCELERATION_LSB_MPS2).round().clamp(-128.0, 127.0)) as i8;
+    vec![tick(ax_mps2) as u8, tick(ay_mps2) as u8]
+}
+
+/// I062/200 — Mode of Movement: one octet, TRANS (bits 8–7), LONG (bits
+/// 6–5), VERT (bits 4–3), ADF (bit 2, always 0 — no dual-source altitude
+/// discrepancy check yet), spare (bit 1).
+fn encode_mode_of_movement(mom: &firefly_core::ModeOfMovement) -> Vec<u8> {
+    use firefly_core::{CourseTrend, SpeedTrend, VerticalTrend};
+    let trans: u8 = match mom.course {
+        CourseTrend::Constant => 0,
+        CourseTrend::RightTurn => 1,
+        CourseTrend::LeftTurn => 2,
+        CourseTrend::Undetermined => 3,
+    };
+    let long: u8 = match mom.speed {
+        SpeedTrend::Constant => 0,
+        SpeedTrend::Increasing => 1,
+        SpeedTrend::Decreasing => 2,
+        SpeedTrend::Undetermined => 3,
+    };
+    let vert: u8 = match mom.vertical {
+        VerticalTrend::Level => 0,
+        VerticalTrend::Climb => 1,
+        VerticalTrend::Descent => 2,
+        VerticalTrend::Undetermined => 3,
+    };
+    vec![(trans << MOM_TRANS_SHIFT) | (long << MOM_LONG_SHIFT) | (vert << MOM_VERT_SHIFT)]
 }
 
 /// I062/130 — Calculated Track Geometric Altitude: a signed 16-bit count of
@@ -757,6 +811,11 @@ pub struct DecodedRecord {
     pub barometric_qnh_corrected: bool,
     /// I062/220 Calculated Rate of Climb/Descent, ft/min, if present (VERT.2).
     pub rocd_ft_min: Option<f64>,
+    /// I062/210 Calculated Acceleration `(a_east, a_north)`, m/s², if present
+    /// (VERT.3).
+    pub acceleration_mps2: Option<(f64, f64)>,
+    /// I062/200 Mode of Movement, if present (VERT.3).
+    pub mode_of_movement: Option<firefly_core::ModeOfMovement>,
 }
 
 /// Errors that can occur while decoding a CAT062 data block.
@@ -847,6 +906,8 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
     let mut barometric_altitude_ft = None;
     let mut barometric_qnh_corrected = false;
     let mut rocd_ft_min = None;
+    let mut acceleration_mps2 = None;
+    let mut mode_of_movement = None;
     let mut magnetic_heading_deg = None;
     let mut selected_altitude_ft = None;
     let mut ias_kt = None;
@@ -950,6 +1011,17 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
                 let b = cursor.take(2)?;
                 rocd_ft_min = Some(i16::from_be_bytes([b[0], b[1]]) as f64 * ROCD_LSB_FT_MIN);
             }
+            uap::ACCELERATION_CARTESIAN => {
+                let b = cursor.take(2)?;
+                acceleration_mps2 = Some((
+                    b[0] as i8 as f64 * ACCELERATION_LSB_MPS2,
+                    b[1] as i8 as f64 * ACCELERATION_LSB_MPS2,
+                ));
+            }
+            uap::MODE_OF_MOVEMENT => {
+                let octet = cursor.take(1)?[0];
+                mode_of_movement = Some(decode_mode_of_movement(octet));
+            }
             uap::ESTIMATED_ACCURACIES => {
                 position_uncertainty = Some(decode_accuracies(cursor.take(5)?))
             }
@@ -991,6 +1063,8 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         barometric_altitude_ft,
         barometric_qnh_corrected,
         rocd_ft_min,
+        acceleration_mps2,
+        mode_of_movement,
     })
 }
 
@@ -1107,6 +1181,31 @@ fn ia5_decode(code: u8) -> u8 {
 /// I062/040 — the inverse of [`encode_track_number`].
 fn decode_track_number(bytes: &[u8]) -> u16 {
     u16::from_be_bytes(bytes.try_into().unwrap())
+}
+
+/// I062/200 — the inverse of [`encode_mode_of_movement`].
+fn decode_mode_of_movement(octet: u8) -> firefly_core::ModeOfMovement {
+    use firefly_core::{CourseTrend, ModeOfMovement, SpeedTrend, VerticalTrend};
+    ModeOfMovement {
+        course: match (octet >> MOM_TRANS_SHIFT) & 0b11 {
+            0 => CourseTrend::Constant,
+            1 => CourseTrend::RightTurn,
+            2 => CourseTrend::LeftTurn,
+            _ => CourseTrend::Undetermined,
+        },
+        speed: match (octet >> MOM_LONG_SHIFT) & 0b11 {
+            0 => SpeedTrend::Constant,
+            1 => SpeedTrend::Increasing,
+            2 => SpeedTrend::Decreasing,
+            _ => SpeedTrend::Undetermined,
+        },
+        vertical: match (octet >> MOM_VERT_SHIFT) & 0b11 {
+            0 => VerticalTrend::Level,
+            1 => VerticalTrend::Climb,
+            2 => VerticalTrend::Descent,
+            _ => VerticalTrend::Undetermined,
+        },
+    }
 }
 
 /// I062/136 — the inverse of [`encode_measured_flight_level`]: a signed 16-bit
@@ -1272,6 +1371,8 @@ mod tests {
             barometric_qnh_corrected: false,
             geometric_altitude_ft: None,
             rocd_ft_min: None,
+            acceleration_mps2: None,
+            mode_of_movement: None,
         }
     }
 
@@ -1862,6 +1963,50 @@ mod tests {
         assert_eq!(records[0].barometric_altitude_ft, Some(35_000.0));
         assert!(!records[0].barometric_qnh_corrected);
         assert_eq!(records[0].rocd_ft_min, None);
+    }
+
+    /// The kinematics items encode byte-exactly (VERT.3, ICD 3.6.0):
+    /// I062/210 = Ax/Ay als i8 × 0,25 m/s² (clamped), I062/200 = TRANS/LONG/
+    /// VERT in one octet with ADF = 0 — and round-trip through the decoder;
+    /// a track without kinematics stays byte-identical. REQ: FR-TRK-043
+    #[test]
+    fn kinematics_items_encode_byte_exactly_and_round_trip() {
+        use firefly_core::{CourseTrend, ModeOfMovement, SpeedTrend, VerticalTrend};
+
+        // +1 m/s² east (4 ticks), −0.5 m/s² north (−2 ticks).
+        assert_eq!(encode_acceleration(1.0, -0.5), vec![0x04, 0xFE]);
+        // Clamped: ±100 m/s² is a transient, the field ends at ±31.75.
+        assert_eq!(encode_acceleration(100.0, -100.0), vec![0x7F, 0x80]);
+        // Right turn + increasing speed + climb: 01|01|01|0|0 = 0x54.
+        let mom = ModeOfMovement {
+            course: CourseTrend::RightTurn,
+            speed: SpeedTrend::Increasing,
+            vertical: VerticalTrend::Climb,
+        };
+        assert_eq!(encode_mode_of_movement(&mom), vec![0x54]);
+        // Left turn + undetermined speed + level: 10|11|00|0|0 = 0xB0.
+        let mom2 = ModeOfMovement {
+            course: CourseTrend::LeftTurn,
+            speed: SpeedTrend::Undetermined,
+            vertical: VerticalTrend::Level,
+        };
+        assert_eq!(encode_mode_of_movement(&mom2), vec![0xB0]);
+
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let mut t = track(1);
+        t.acceleration_mps2 = Some((1.0, -0.5));
+        t.mode_of_movement = Some(mom);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records[0].acceleration_mps2, Some((1.0, -0.5)));
+        assert_eq!(records[0].mode_of_movement, Some(mom));
+
+        // Absence: no kinematics → pre-3.6.0 bytes.
+        let plain = encoder.encode(Timestamp(12.0), &[track(1)]);
+        let records = decode_data_block(&plain).unwrap();
+        assert_eq!(records[0].acceleration_mps2, None);
+        assert_eq!(records[0].mode_of_movement, None);
     }
 
     /// I062/245 packs 8 characters as 8 × 6-bit IA-5 codes (48 bits = 6
