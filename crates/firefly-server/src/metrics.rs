@@ -121,6 +121,16 @@ pub struct Metrics {
     /// (the raw estimate) — this smoothed, gated value is what is actually
     /// subtracted from measurements. Rendered as labelled gauges.
     pub registration_applied_biases: Mutex<BTreeMap<u16, (f64, f64)>>,
+
+    // --- Radar service messages (FEP.1, CAT034) ---
+    /// Total CAT034 north markers received across all radar sources (counter).
+    /// Stays 0 without a `radar_asterix` source or when the radar sends no
+    /// service messages.
+    pub radar_north_markers_total: AtomicU64,
+    /// The **measured** antenna scan period per radar (FEP.1): sensor id →
+    /// seconds per revolution, estimated from north-marker intervals. Rendered
+    /// as labelled gauges; absent until the first measurement.
+    pub radar_scan_periods: Mutex<BTreeMap<u16, f64>>,
 }
 
 /// A guard that increments `ws_clients_connected` (and `ws_clients_total`) on
@@ -352,6 +362,29 @@ pub fn render(metrics: &Metrics) -> String {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner),
     );
+    write_metric(
+        &mut out,
+        "firefly_radar_north_markers_total",
+        "counter",
+        "Total CAT034 north markers received across all radar sources (FEP.1).",
+        metrics.radar_north_markers_total.load(Ordering::Relaxed) as f64,
+    );
+    // Labelled per-sensor gauges, rendered by hand like the bias gauges —
+    // absent until a period has actually been measured.
+    let periods = metrics
+        .radar_scan_periods
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !periods.is_empty() {
+        out.push_str(
+            "# HELP firefly_radar_scan_period_seconds Measured antenna scan period per radar, seconds per revolution (from CAT034 north markers).\n# TYPE firefly_radar_scan_period_seconds gauge\n",
+        );
+        for (sensor, period) in periods.iter() {
+            out.push_str(&format!(
+                "firefly_radar_scan_period_seconds{{sensor=\"{sensor}\"}} {period}\n"
+            ));
+        }
+    }
     out
 }
 
@@ -466,6 +499,10 @@ mod tests {
             .lock()
             .unwrap()
             .insert(301, (148.5, 0.29));
+        metrics
+            .radar_north_markers_total
+            .store(120, Ordering::Relaxed);
+        metrics.radar_scan_periods.lock().unwrap().insert(301, 4.7);
 
         let text = render(&metrics);
 
@@ -511,6 +548,9 @@ mod tests {
         assert!(text.contains("# TYPE firefly_registration_estimates_total counter"));
         assert!(text.contains("# TYPE firefly_registration_bias_range_m gauge"));
         assert!(text.contains("# TYPE firefly_registration_applied_bias_range_m gauge"));
+        assert!(text.contains("firefly_radar_north_markers_total 120"));
+        assert!(text.contains("firefly_radar_scan_period_seconds{sensor=\"301\"} 4.7"));
+        assert!(text.contains("# TYPE firefly_radar_scan_period_seconds gauge"));
     }
 
     /// Without any registration estimate the labelled bias gauges are absent —
@@ -523,6 +563,7 @@ mod tests {
         assert!(!text.contains("firefly_registration_bias_range_m{"));
         assert!(!text.contains("firefly_registration_bias_azimuth_deg{"));
         assert!(!text.contains("firefly_registration_applied_bias_range_m{"));
+        assert!(!text.contains("firefly_radar_scan_period_seconds{"));
     }
 
     /// The connected-client guard increments on creation and decrements again

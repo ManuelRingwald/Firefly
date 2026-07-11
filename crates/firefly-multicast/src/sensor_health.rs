@@ -53,6 +53,10 @@ struct SensorLive {
     /// The most recent failure reason. Reset to [`SensorReason::Ok`] on every
     /// successful plot; set by [`SensorHealthMonitor::record_failure`].
     reason: SensorReason,
+    /// A staleness timeout derived from the **measured** scan period (FEP.1,
+    /// CAT034 north markers) — overrides the configured timeout when set,
+    /// because the antenna's real rotation beats the nominal config value.
+    timeout_override: Option<Duration>,
 }
 
 /// One sensor's health at a single instant: whether it is active and, when
@@ -132,6 +136,7 @@ impl SensorHealthMonitor {
                     SensorLive {
                         last_seen: Some(now),
                         reason: SensorReason::Ok,
+                        timeout_override: None,
                     },
                 )
             })
@@ -155,6 +160,27 @@ impl SensorHealthMonitor {
             let entry = live.entry(sensor_id).or_default();
             entry.last_seen = Some(now);
             entry.reason = SensorReason::Ok;
+        }
+    }
+
+    /// Update `sensor_id`'s staleness threshold from a **measured** scan
+    /// period (seconds per antenna revolution, FEP.1): the timeout becomes
+    /// `STALE_FACTOR × period`, replacing the one derived from the configured
+    /// nominal period. Driven by the CAT034 north-marker estimator — the
+    /// antenna's real rotation is the honest basis for "how long may this
+    /// sensor be silent before it counts as degraded".
+    ///
+    /// Non-finite or non-positive periods and unregistered sensor IDs are
+    /// silently ignored.
+    pub fn update_scan_period(&self, sensor_id: SensorId, period_secs: f64) {
+        if !period_secs.is_finite() || period_secs <= 0.0 {
+            return;
+        }
+        if self.sensors.contains_key(&sensor_id) {
+            let secs = (period_secs * STALE_FACTOR).max(1.0);
+            let mut live = self.live.lock().unwrap();
+            live.entry(sensor_id).or_default().timeout_override =
+                Some(Duration::from_secs_f64(secs));
         }
     }
 
@@ -186,9 +212,12 @@ impl SensorHealthMonitor {
 
         for (&id, entry) in &self.sensors {
             let state = live.get(&id).copied().unwrap_or_default();
+            // The measured scan period (FEP.1), when available, defines the
+            // staleness window; the configured nominal period is the fallback.
+            let timeout = state.timeout_override.unwrap_or(entry.timeout);
             let active = state
                 .last_seen
-                .map(|t| now.duration_since(t) <= entry.timeout)
+                .map(|t| now.duration_since(t) <= timeout)
                 .unwrap_or(false);
             if active {
                 sensors_active += 1;
@@ -367,6 +396,45 @@ mod tests {
             SensorReason::Ok,
             "an active sensor has no failure reason on the wire"
         );
+    }
+
+    /// A measured scan period (FEP.1) replaces the configured staleness
+    /// window in both directions: a *slower* real antenna keeps an otherwise
+    /// stale sensor active; a *faster* one degrades a silent sensor sooner.
+    /// REQ: FR-NET-014
+    #[test]
+    fn measured_scan_period_overrides_the_configured_timeout() {
+        // Configured 4 s (timeout 10 s); last plot 20 s ago → stale by config.
+        let m = SensorHealthMonitor::new_live([(sid(1), 4.0)]);
+        let past = Instant::now() - Duration::from_secs(20);
+        m.record_activity(sid(1), past);
+        assert!(!m.snapshot(Instant::now()).per_sensor[&sid(1)].active);
+
+        // The antenna really turns every 10 s (timeout 25 s) → active again.
+        m.update_scan_period(sid(1), 10.0);
+        assert!(m.snapshot(Instant::now()).per_sensor[&sid(1)].active);
+
+        // Measured faster than configured: 12 s silence, config 10 s (25 s
+        // timeout) says active — the real 2 s antenna (5 s timeout) says stale.
+        let m = SensorHealthMonitor::new_live([(sid(2), 10.0)]);
+        m.record_activity(sid(2), Instant::now() - Duration::from_secs(12));
+        assert!(m.snapshot(Instant::now()).per_sensor[&sid(2)].active);
+        m.update_scan_period(sid(2), 2.0);
+        assert!(!m.snapshot(Instant::now()).per_sensor[&sid(2)].active);
+    }
+
+    /// Garbage periods (0, negative, NaN) and unknown sensors are ignored —
+    /// the untrusted CAT034 path must not corrupt the health thresholds.
+    /// REQ: FR-NET-014
+    #[test]
+    fn implausible_measured_periods_are_ignored() {
+        let m = SensorHealthMonitor::new_live([(sid(1), 4.0)]);
+        m.record_activity(sid(1), Instant::now());
+        m.update_scan_period(sid(1), 0.0);
+        m.update_scan_period(sid(1), -3.0);
+        m.update_scan_period(sid(1), f64::NAN);
+        m.update_scan_period(sid(99), 8.0); // unregistered
+        assert!(m.snapshot(Instant::now()).per_sensor[&sid(1)].active);
     }
 
     /// A successful plot clears a previously recorded failure reason.
