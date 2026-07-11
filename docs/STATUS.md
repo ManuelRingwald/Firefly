@@ -10,6 +10,29 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (VERT.1 — Meteo/QNH-Dienst)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **VERT.1 — Meteo/QNH-Dienst (FR-TRK-041, SDPS-003-Analogon):** Fundament
+  der Vertikal-Kette. Neue Crate **`firefly-meteo`**: `QnhService`
+  (regionaler Lookup — nächstgelegene anwendbare Region, Radius optional;
+  **ohne anwendbare Region ehrlich `StandardAtmosphere`** — ein QNH wird
+  nie erfunden), **exakte ICAO-Barometrie**
+  `pressure_altitude_to_qnh_altitude` (Druckhöhe → Druck → QNH-Höhe,
+  κ = 0,1902632; Identität bei Standard-QNH, Faustregel ~27 ft/hPa fällt
+  im Test heraus), `MeteoConfig` (`FIREFLY_METEO_QNH` JSON;
+  Plausibilitätsband [870, 1085] hPa, malform/implausibel = **Startfehler**,
+  unset = leer + INFO). Server-Verdrahtung: Parse beim Start (fatal wie
+  `FIREFLY_SOURCES`), Metriken `firefly_meteo_qnh_regions` +
+  `firefly_meteo_qnh_hpa{region}`. **Kein Wire-/ICD-Bezug** — die
+  Verwertung (QNH-korrigierte Höhe → I062/135, additiver ICD-Bump +
+  Wayfinder-Issue) ist VERT.2. Ehrliche Grenzen: env-Provider (extern
+  aktualisiert); Live-METAR-Provider + Temperatur-Korrektur =
+  Folge-Häppchen. 8 neue Tests, Gates grün. Roadmap-Stand: **58,5 %**.
+- **Nächster Schritt:** **VERT.2** ankündigen — Höhen-Tracking (Mode-C +
+  geometrisch) + RoCD → I062/135/130/220, QNH-korrigiert (S5) — und
+  Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-11 (FEP.5 — CAT020/019-WAM/MLAT-Eingang)
 
 - **Zuletzt aktualisiert:** 2026-07-11

@@ -366,6 +366,26 @@ Weitere Variable mit Default: `FIREFLY_MLAT_SENSOR_ID` (`240`). Als
 > (Vertrag v1.7.0, Felder `listen`?/`sac`?/`sic`?/`sensor_id`?);
 > `FIREFLY_SOURCES` hat dann **Vorrang** vor `FIREFLY_MLAT_*`.
 
+### Schritt 4f (optional): QNH-Regionen (Meteo-Dienst, VERT.1)
+
+Für die **Vertikal-Kette** (QNH-korrigierte Höhen unterhalb der Transition
+Altitude, Verwertung ab VERT.2) kann Firefly **regionale QNH-Werte**
+mitgegeben werden. Ohne Konfiguration gilt überall die Standardatmosphäre
+(1013,25 hPa) — ehrlich gekennzeichnet, aber unterhalb der Transition
+Altitude entsprechend ungenau (~27–30 ft je hPa Abweichung).
+
+```bash
+export FIREFLY_METEO_QNH='[
+  {"name":"EDDF","lat":50.03,"lon":8.57,"radius_nm":60,"qnh_hpa":1008},
+  {"name":"EDDK","lat":50.87,"lon":7.14,"radius_nm":60,"qnh_hpa":1011}
+]'
+```
+
+`radius_nm` ist optional (fehlt = unbegrenzt); implausible Werte
+(`qnh_hpa` außerhalb [870, 1085]) oder malformes JSON brechen den Start ab.
+Die Werte werden vom Betreiber extern im Wetter-Zyklus aktualisiert; ein
+automatischer METAR-Abruf ist ein dokumentiertes Folge-Häppchen.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den

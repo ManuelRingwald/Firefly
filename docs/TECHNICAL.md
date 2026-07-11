@@ -258,6 +258,27 @@ degradiert/NOGO, wird gewarnt.
 > Technologie); ein eigenes MLT-Age-Subfeld wäre ein ICD-Bump und ist
 > bewusst ein Folge-Häppchen.
 
+#### Meteo/QNH-Dienst (`FIREFLY_METEO_QNH`, VERT.1)
+
+Der SDPS-003-Baustein: **regionale QNH-Werte** für die Vertikal-Kette.
+Mode-C/Flugflächen sind Druckhöhen (Referenz 1013,25 hPa); unterhalb der
+Transition Altitude braucht die wahre Höhe das lokale **QNH** (~27–30 ft
+Fehler pro hPa). Der Dienst hält eine Menge von QNH-Regionen und liefert per
+Positions-Lookup das anwendbare QNH; ohne anwendbare Region antwortet er
+**ehrlich gekennzeichnet** mit der Standardatmosphäre (nie ein erfundenes
+QNH). Die Verwertung im Höhen-Tracking (QNH-korrigierte Höhe → I062/135)
+ist VERT.2.
+
+| Variable | Typ | Default | Bedeutung |
+|----------|-----|---------|-----------|
+| `FIREFLY_METEO_QNH` | JSON-Array | — (leer) | QNH-Regionen: `[{"name":"EDDF","lat":50.03,"lon":8.57,"radius_nm":60,"qnh_hpa":1008}, …]`. `radius_nm` optional (fehlt = unbegrenzt, konkurriert nur über Nähe); `qnh_hpa` muss im Plausibilitätsband [870, 1085] liegen. Malformes JSON oder implausible Werte → **Start-Abbruch**. Unset/leer = Standardatmosphäre überall (INFO im Log). |
+
+> **Betrieb:** Der env-getriebene Provider ist bewusst der erste Schritt —
+> der Betreiber (oder Wayfinders Orchestrator) setzt die Werte und
+> aktualisiert sie extern im Wetter-Zyklus. Ein Live-Provider (periodischer
+> METAR-Abruf) braucht eine Netz-Freigabe-Entscheidung des Deployments und
+> einen eigenen ADR (Folge-Häppchen).
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.7.0. Im **Live-Modus** liest Firefly
@@ -438,6 +459,8 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_registration_apply_active` | gauge | **Registrierung (REG.2b):** 1 = eine Korrektur ist aktuell in Kraft, 0 = keine (ohne `FIREFLY_REGISTRATION_APPLY` immer 0; auch 0, solange das Anwendungs-Gate jede Schätzung ablehnt) |
 | `firefly_registration_applied_bias_range_m{sensor="…"}` | gauge | **Registrierung (REG.2b):** aktuell **angewandter** Range-Bias je Radar, Meter — der geglättete, Gate-geprüfte Wert, der tatsächlich von den Messungen abgezogen wird (≠ roher Schätzwert) |
 | `firefly_registration_applied_bias_azimuth_deg{sensor="…"}` | gauge | **Registrierung (REG.2b):** aktuell **angewandter** Azimut-Bias je Radar, Grad |
+| `firefly_meteo_qnh_regions` | gauge | **VERT.1:** Anzahl konfigurierter QNH-Regionen (0 = Standardatmosphäre überall) |
+| `firefly_meteo_qnh_hpa{region="…"}` | gauge | **VERT.1:** konfiguriertes QNH je Region, hPa. Erscheint nur bei konfigurierten Regionen. |
 | `firefly_radar_north_markers_total` | counter | **FEP.1:** empfangene CAT034-Nordmarken über alle Radar-Quellen |
 | `firefly_radar_scan_period_seconds{sensor="…"}` | gauge | **FEP.1:** **gemessene** Antennen-Umlaufzeit je Radar (Sekunden, aus Nordmarken-Intervallen). Erscheint erst nach der ersten Messung; speist die CAT063-Staleness-Schwelle. |
 

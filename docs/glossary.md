@@ -77,6 +77,17 @@ forschungsorientierten Aggregator mit OAuth2-Zugang, ADR 0019/0024) — Communit
 wie Forschungs-Aggregatoren liefern Hobby-/Forschungsqualität, keine
 zertifizierte Surveillance.
 
+**QNH / Druckhöhe / Transition Altitude**
+Ein Mode-C-Transponder meldet die **Druckhöhe**: die Höhe, bei der der
+gemessene statische Druck in der **Standardatmosphäre** (1013,25 hPa)
+auftritt. Oberhalb der **Transition Altitude** fliegen alle nach diesem
+Standard (Flugflächen — relativ stimmig, absolut wetterabhängig).
+Unterhalb fliegt der Verkehr nach **QNH**, dem auf Meereshöhe reduzierten
+lokalen Luftdruck: Erst mit QNH wird aus der Druckhöhe die wahre Höhe
+(~27–30 ft je hPa Abweichung; ein kräftiges Tief ⇒ > 800 ft Fehler).
+Fireflys Meteo-Dienst (VERT.1, SDPS-003-Analogon) hält regionale QNH-Werte
+und kennzeichnet ehrlich, wenn nur die Standardatmosphäre verfügbar ist.
+
 **WAM / MLAT** (*Wide Area Multilateration*)
 Überwachung durch **Laufzeitdifferenz-Messung** (TDOA): mehrere
 Bodenstationen empfangen dasselbe Transponder-Signal; aus den
