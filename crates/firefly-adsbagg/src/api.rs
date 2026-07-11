@@ -155,6 +155,7 @@ pub(crate) fn parse_aircraft(
         icao_address: icao,
         callsign,
         spi: false,
+        daps: firefly_core::Daps::default(),
     };
 
     // Data-time: the server timestamp minus this aircraft's position age, so

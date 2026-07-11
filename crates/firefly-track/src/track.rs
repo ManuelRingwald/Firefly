@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use firefly_core::{Callsign, ModeAC, SensorId, SourceKind, TrackId};
+use firefly_core::{Callsign, Daps, ModeAC, SensorId, SourceKind, TrackId};
 use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
 
@@ -146,6 +146,17 @@ pub struct Track {
     /// (CAT062 I062/080 SPI, FR-TRK-036).
     #[serde(default)]
     spi: bool,
+    /// Downlink Aircraft Parameters (Mode S EHS, FEP.2): merged per field
+    /// from every DAP-carrying associated report — different BDS registers
+    /// arrive in different reports, so a per-field merge keeps the freshest
+    /// valid value of each. Reported outward only while fresh (see
+    /// [`fresh_daps`](Self::fresh_daps)).
+    #[serde(default)]
+    daps: Daps,
+    /// Data time of the most recent DAP-carrying report, the freshness basis
+    /// for [`fresh_daps`](Self::fresh_daps).
+    #[serde(default)]
+    daps_time: Option<f64>,
 }
 
 impl Track {
@@ -168,6 +179,8 @@ impl Track {
             source_hits: SourceHits::default(),
             sensor_hits: BTreeMap::new(),
             spi: false,
+            daps: Daps::default(),
+            daps_time: None,
         }
     }
 
@@ -370,7 +383,7 @@ impl Track {
     /// losing one SSR reply should not erase what we already know. (The flight
     /// level is "sticky" in the same sense; it still tracks climbs/descents
     /// because every Mode C reply overwrites it.)
-    pub(crate) fn update_identity(&mut self, mode_ac: &ModeAC) {
+    pub(crate) fn update_identity(&mut self, mode_ac: &ModeAC, time: f64) {
         // SPI is the one deliberately NON-sticky attribute: it describes the
         // last reply only, so every associated plot overwrites it — set and
         // cleared alike (FR-TRK-036).
@@ -386,6 +399,25 @@ impl Track {
         }
         if mode_ac.callsign.is_some() {
             self.callsign = mode_ac.callsign;
+        }
+        // DAPs merge per field (different BDS registers arrive in different
+        // reports); the report's data time stamps the freshness basis
+        // (FR-TRK-040).
+        if !mode_ac.daps.is_empty() {
+            self.daps.merge_from(&mode_ac.daps);
+            self.daps_time = Some(self.daps_time.map_or(time, |prev| prev.max(time)));
+        }
+    }
+
+    /// The track's DAPs, but only while **fresh**: the most recent
+    /// DAP-carrying report lies within `window` seconds of `now`. Stale
+    /// intent data is worse than none — an hour-old selected altitude shown
+    /// as current would mislead the controller — so staleness yields the
+    /// empty set and the wire omits the subfields (FR-TRK-040).
+    pub fn fresh_daps(&self, now: f64, window: f64) -> Daps {
+        match self.daps_time {
+            Some(t) if now - t <= window => self.daps,
+            _ => Daps::default(),
         }
     }
 }
@@ -420,16 +452,56 @@ mod tests {
     #[test]
     fn identity_is_absorbed_from_ssr_reply() {
         let mut track = fresh_track();
-        track.update_identity(&ModeAC {
-            mode_3a: Some(0o2613),
-            flight_level_ft: Some(35_000.0),
-            icao_address: Some(0x0040_0123),
-            callsign: Some(Callsign::new("DLH123")),
-            spi: false,
-        });
+        track.update_identity(
+            &ModeAC {
+                mode_3a: Some(0o2613),
+                flight_level_ft: Some(35_000.0),
+                icao_address: Some(0x0040_0123),
+                callsign: Some(Callsign::new("DLH123")),
+                spi: false,
+                daps: Daps::default(),
+            },
+            0.0,
+        );
         assert_eq!(track.mode_3a(), Some(0o2613));
         assert_eq!(track.icao_address(), Some(0x0040_0123));
         assert_eq!(track.callsign(), Some(Callsign::new("DLH123")));
+    }
+
+    /// DAPs from different BDS registers (arriving in different reports)
+    /// merge per field; a DAP-less report does not clear them; and once the
+    /// last DAP-carrying report ages beyond the freshness window they are
+    /// withheld — stale intent data shown as current would mislead.
+    /// REQ: FR-TRK-040
+    #[test]
+    fn daps_merge_across_reports_and_report_only_while_fresh() {
+        let mut track = fresh_track();
+
+        let mut bds40 = ModeAC::default();
+        bds40.daps.selected_altitude_ft = Some(35_008.0);
+        track.update_identity(&bds40, 100.0);
+
+        let mut bds60 = ModeAC::default();
+        bds60.daps.magnetic_heading_deg = Some(270.0);
+        track.update_identity(&bds60, 105.0);
+
+        let fresh = track.fresh_daps(110.0, 30.0);
+        assert_eq!(
+            fresh.selected_altitude_ft,
+            Some(35_008.0),
+            "merged across reports"
+        );
+        assert_eq!(fresh.magnetic_heading_deg, Some(270.0));
+
+        // A DAP-less report (e.g. a plain SSR reply) does not clear them…
+        track.update_identity(&ModeAC::default(), 120.0);
+        assert_eq!(
+            track.fresh_daps(125.0, 30.0).selected_altitude_ft,
+            Some(35_008.0)
+        );
+
+        // …but staleness withholds the whole set.
+        assert!(track.fresh_daps(200.0, 30.0).is_empty(), "stale → withheld");
     }
 
     /// A primary-only plot (no SSR reply) does not erase a previously known
@@ -438,15 +510,19 @@ mod tests {
     #[test]
     fn missing_ssr_reply_does_not_clear_known_identity() {
         let mut track = fresh_track();
-        track.update_identity(&ModeAC {
-            mode_3a: Some(0o2613),
-            flight_level_ft: None,
-            icao_address: Some(0x0040_0123),
-            callsign: Some(Callsign::new("DLH123")),
-            spi: false,
-        });
+        track.update_identity(
+            &ModeAC {
+                mode_3a: Some(0o2613),
+                flight_level_ft: None,
+                icao_address: Some(0x0040_0123),
+                callsign: Some(Callsign::new("DLH123")),
+                spi: false,
+                daps: Daps::default(),
+            },
+            0.0,
+        );
 
-        track.update_identity(&ModeAC::default());
+        track.update_identity(&ModeAC::default(), 0.0);
 
         assert_eq!(track.mode_3a(), Some(0o2613), "squawk stays sticky");
         assert_eq!(
@@ -467,20 +543,28 @@ mod tests {
     #[test]
     fn new_ssr_reply_overwrites_known_identity() {
         let mut track = fresh_track();
-        track.update_identity(&ModeAC {
-            mode_3a: Some(0o2613),
-            flight_level_ft: None,
-            icao_address: Some(0x0040_0123),
-            callsign: None,
-            spi: false,
-        });
-        track.update_identity(&ModeAC {
-            mode_3a: Some(0o7000),
-            flight_level_ft: None,
-            icao_address: Some(0x0040_0123),
-            callsign: None,
-            spi: false,
-        });
+        track.update_identity(
+            &ModeAC {
+                mode_3a: Some(0o2613),
+                flight_level_ft: None,
+                icao_address: Some(0x0040_0123),
+                callsign: None,
+                spi: false,
+                daps: Daps::default(),
+            },
+            0.0,
+        );
+        track.update_identity(
+            &ModeAC {
+                mode_3a: Some(0o7000),
+                flight_level_ft: None,
+                icao_address: Some(0x0040_0123),
+                callsign: None,
+                spi: false,
+                daps: Daps::default(),
+            },
+            0.0,
+        );
 
         assert_eq!(track.mode_3a(), Some(0o7000));
     }
@@ -491,16 +575,20 @@ mod tests {
     #[test]
     fn spi_is_transient_not_sticky() {
         let mut track = fresh_track();
-        track.update_identity(&ModeAC {
-            mode_3a: Some(0o2613),
-            flight_level_ft: None,
-            icao_address: None,
-            callsign: None,
-            spi: true,
-        });
+        track.update_identity(
+            &ModeAC {
+                mode_3a: Some(0o2613),
+                flight_level_ft: None,
+                icao_address: None,
+                callsign: None,
+                spi: true,
+                daps: Daps::default(),
+            },
+            0.0,
+        );
         assert!(track.spi(), "SPI set by the reply that carried it");
 
-        track.update_identity(&ModeAC::default());
+        track.update_identity(&ModeAC::default(), 0.0);
         assert!(!track.spi(), "next reply without SPI clears it");
         assert_eq!(track.mode_3a(), Some(0o2613), "identity stays sticky");
     }

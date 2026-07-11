@@ -12,7 +12,7 @@ mod system_track;
 mod time;
 
 pub use ids::{SensorId, TargetId, TrackId};
-pub use plot::{Callsign, DetectionKind, Measurement, ModeAC, Plot, SourceKind};
+pub use plot::{Callsign, Daps, DetectionKind, Measurement, ModeAC, Plot, SourceKind};
 pub use sensor::Sensor;
 pub use system_track::{Provenance, SourceAges, SystemTrack, PROVENANCE_FRESH_S};
 pub use time::Timestamp;

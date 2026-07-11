@@ -79,6 +79,69 @@ impl Callsign {
     }
 }
 
+/// **Downlink Aircraft Parameters** (DAPs) from Mode S EHS BDS registers
+/// (FEP.2): what the aircraft itself reports about its state and *intent*.
+/// A Mode S EHS radar interrogates the transponder's BDS 4,0 / 5,0 / 6,0
+/// registers and delivers them in CAT048 I048/250; the decoder populates only
+/// fields whose **status bit** the transponder set — every field here is
+/// individually optional, and `None` means "not validly reported", never 0.
+///
+/// The operational crown jewel is `selected_altitude_ft` (BDS 4,0): the level
+/// dialled into the autopilot — the basis of level-bust detection (does the
+/// crew's intent match the clearance, *before* the aircraft moves?).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct Daps {
+    /// BDS 4,0 — MCP/FCU selected altitude, feet: what is dialled into the
+    /// autopilot.
+    pub selected_altitude_ft: Option<f64>,
+    /// BDS 5,0 — roll angle, degrees (positive = right bank).
+    pub roll_angle_deg: Option<f64>,
+    /// BDS 5,0 — true track angle, degrees [0, 360).
+    pub true_track_deg: Option<f64>,
+    /// BDS 5,0 — ground speed, knots.
+    pub ground_speed_kt: Option<f64>,
+    /// BDS 5,0 — true airspeed, knots.
+    pub true_airspeed_kt: Option<f64>,
+    /// BDS 6,0 — magnetic heading, degrees [0, 360).
+    pub magnetic_heading_deg: Option<f64>,
+    /// BDS 6,0 — indicated airspeed, knots.
+    pub ias_kt: Option<f64>,
+    /// BDS 6,0 — Mach number.
+    pub mach: Option<f64>,
+    /// BDS 6,0 — barometric altitude rate, feet per minute.
+    pub barometric_vertical_rate_ft_min: Option<f64>,
+}
+
+impl Daps {
+    /// True when no field carries a value.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Per-field merge: every field `newer` carries overwrites this one's —
+    /// fields `newer` lacks keep their previous value. Different BDS
+    /// registers arrive in different reports; merging keeps the freshest
+    /// valid value of each parameter without one register wiping another.
+    pub fn merge_from(&mut self, newer: &Daps) {
+        macro_rules! merge {
+            ($($field:ident),+) => {
+                $(if newer.$field.is_some() { self.$field = newer.$field; })+
+            };
+        }
+        merge!(
+            selected_altitude_ft,
+            roll_angle_deg,
+            true_track_deg,
+            ground_speed_kt,
+            true_airspeed_kt,
+            magnetic_heading_deg,
+            ias_kt,
+            mach,
+            barometric_vertical_rate_ft_min
+        );
+    }
+}
+
 /// Secondary-radar replies attached to a plot.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModeAC {
@@ -99,6 +162,11 @@ pub struct ModeAC {
     /// leave it `false`. `serde(default)` keeps pre-SPI `.ffplots` readable.
     #[serde(default)]
     pub spi: bool,
+    /// Downlink Aircraft Parameters from Mode S EHS (FEP.2). Populated only
+    /// by the CAT048 radar path (I048/250, BDS 4,0/5,0/6,0); empty from the
+    /// ADS-B/FLARM adapters. `serde(default)` keeps older `.ffplots` readable.
+    #[serde(default)]
+    pub daps: Daps,
 }
 
 /// Where a plot's position measurement comes from, and in which frame it lives.

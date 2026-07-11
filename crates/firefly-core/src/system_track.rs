@@ -21,7 +21,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{SensorId, TrackId};
-use crate::plot::Callsign;
+use crate::plot::{Callsign, Daps};
 use crate::time::Timestamp;
 use firefly_geo::Wgs84;
 
@@ -115,6 +115,13 @@ pub struct SystemTrack {
     /// I062/080.
     #[serde(default)]
     pub spi: bool,
+    /// **Fresh** Downlink Aircraft Parameters (Mode S EHS, FEP.2): populated
+    /// only while the track received DAP-carrying reports within the
+    /// provenance freshness window — stale values are withheld rather than
+    /// shown as current (the wire then omits the subfields, absence over a
+    /// stale claim). Maps to CAT062 I062/380 MHG/SAL/IAR/MAC.
+    #[serde(default)]
+    pub daps: Daps,
     /// Whether this is the **final** report for the track — it has just been
     /// deleted from the tracker's live set, and this record carries its last
     /// known state once so a consumer can remove it deterministically instead
@@ -246,6 +253,7 @@ mod tests {
             coasting: false,
             monosensor: false,
             spi: false,
+            daps: Daps::default(),
             ended: false,
             update_age: 0.0,
             position_uncertainty: 0.0,

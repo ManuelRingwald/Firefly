@@ -103,6 +103,7 @@ pub(crate) fn parse_state(
         icao_address: Some(icao),
         callsign,
         spi: false,
+        daps: firefly_core::Daps::default(),
     };
 
     // OpenSky timestamp is Unix epoch; the tracker works with seconds since

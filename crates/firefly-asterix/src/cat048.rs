@@ -28,9 +28,10 @@
 
 use std::collections::BTreeSet;
 
-use firefly_core::{Callsign, Timestamp};
+use firefly_core::{Callsign, Daps, Timestamp};
 use firefly_geo::Polar;
 
+use crate::bds;
 use crate::fspec;
 
 /// The ASTERIX category number for monoradar target reports.
@@ -284,6 +285,10 @@ pub struct DecodedTargetReport {
     /// I048/020 SPI — Special Position Identification ("ident" pulse) present
     /// in this report. `false` when I048/020 is absent.
     pub spi: bool,
+    /// I048/250 — Downlink Aircraft Parameters decoded from the report's
+    /// Mode S EHS BDS registers (4,0 / 5,0 / 6,0; FEP.2). Empty when
+    /// I048/250 is absent or carries only other registers.
+    pub daps: Daps,
 }
 
 /// Errors that can occur while decoding a CAT048 data block. Mirrors
@@ -381,6 +386,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedTargetReport, Cat048Decod
     let mut callsign = None;
     let mut track_number = None;
     let mut spi = false;
+    let mut daps = Daps::default();
 
     for frn in frns {
         let format = item_format(frn).ok_or(Cat048DecodeError::UnknownItem(frn))?;
@@ -407,6 +413,16 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedTargetReport, Cat048Decod
             uap::TRACK_NUMBER => {
                 track_number = Some(u16::from_be_bytes([bytes[0], bytes[1]]) & TRACK_NUMBER_MASK)
             }
+            uap::MODE_S_MB_DATA => {
+                // I048/250: [REP] then REP × (7-octet MB field + 1-octet BDS
+                // register number). Each EHS register merges its valid fields
+                // into the report's DAPs (FEP.2); unknown registers decode to
+                // nothing. The repetitive framing already delimited `bytes`.
+                for entry in bytes[1..].chunks_exact(8) {
+                    let mb: [u8; 7] = entry[..7].try_into().expect("chunk is 8 octets");
+                    daps.merge_from(&bds::decode_register(entry[7], &mb));
+                }
+            }
             _ => {} // present but not plot-relevant — length already consumed
         }
     }
@@ -427,6 +443,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedTargetReport, Cat048Decod
         callsign,
         track_number,
         spi,
+        daps,
     })
 }
 
@@ -660,6 +677,38 @@ mod tests {
             assert_eq!(d.has_secondary(), sec, "secondary for {want:?}");
             assert_eq!(d.is_mode_s(), modes, "mode-s for {want:?}");
         }
+    }
+
+    /// I048/250 with BDS 4,0 and BDS 6,0 entries decodes and MERGES the EHS
+    /// DAPs (FEP.2): selected altitude from 4,0; heading/IAS/Mach/vertical
+    /// rate from 6,0; an interleaved unknown register contributes nothing.
+    /// REQ: FR-TRK-040
+    #[test]
+    fn mode_s_mb_data_decodes_and_merges_ehs_daps() {
+        let record = [
+            0x81, 0x20, // FSPEC {1, 10}: I048/010 + I048/250
+            0x19, 0x02, // I048/010
+            0x03, // I048/250 REP=3
+            // BDS 4,0: status=1, selected altitude 2188 × 16 ft = 35 008 ft.
+            0xC4, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,
+            // BDS 1,0 (unknown to the DAP decoder): ignored.
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x10,
+            // BDS 6,0: heading -90° (→270°), IAS 250 kt, Mach 0.78,
+            // vertical rate -1024 ft/min.
+            0xE0, 0x09, 0xF5, 0x30, 0xFF, 0x00, 0x00, 0x60,
+        ];
+        let mut block = vec![CATEGORY, 0x00, (3 + record.len()) as u8];
+        block.extend_from_slice(&record);
+
+        let reports = decode_target_reports(&block).expect("decodes");
+        assert_eq!(reports.len(), 1);
+        let daps = reports[0].daps;
+        assert_eq!(daps.selected_altitude_ft, Some(35_008.0));
+        assert_eq!(daps.magnetic_heading_deg, Some(270.0));
+        assert_eq!(daps.ias_kt, Some(250.0));
+        assert!((daps.mach.unwrap() - 0.78).abs() < 1e-9);
+        assert_eq!(daps.barometric_vertical_rate_ft_min, Some(-1024.0));
+        assert!(daps.roll_angle_deg.is_none(), "no BDS 5,0 in this report");
     }
 
     /// A negative (below-datum) flight level uses the 14-bit two's complement.

@@ -99,6 +99,16 @@ ASTERIX ist **bit-genau und binär**: Ein Datenblock ist `[CAT][LEN][Record…]`
 (CAT = Kategorie-Nummer, LEN = Gesamtlänge), jeder Record beginnt mit einem
 *FSPEC* (s. u.), gefolgt von den vorhandenen *Data Items* in fester Reihenfolge.
 
+**BDS-Register / DAPs** (*Comm-B Data Selector*, *Downlink Aircraft Parameters*)
+Ein Mode-S-Transponder führt genormte 56-Bit-**Register** (BDS), die ein
+EHS-Radar (*Enhanced Surveillance*) gezielt abfragt und in CAT048 I048/250
+mitliefert. Die Inhalte heißen **DAPs**: was das Flugzeug selbst über Zustand
+und **Absicht** meldet — BDS 4,0 die im Autopiloten **eingedrehte Zielhöhe**
+(Selected Altitude, Basis der Level-Bust-Erkennung), BDS 5,0 Roll/Kurs/
+Geschwindigkeit über Grund, BDS 6,0 Steuerkurs/IAS/Mach/Vertikalrate. Jedes
+Feld trägt ein **Status-Bit** — nur als gültig markierte Werte zählen.
+Firefly reicht MHG/SAL/IAS/Mach im CAT062 I062/380 weiter (FEP.2, ICD 3.4.0).
+
 **Nordmarke** (*North Marker*, CAT034 Message Type 1)
 Die Servicemeldung, die ein Radar einmal **pro Antennenumdrehung** beim
 Überstreichen von Nord sendet. Der zeitliche Abstand zweier Nordmarken *ist*

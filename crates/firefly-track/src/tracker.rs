@@ -850,7 +850,7 @@ impl Tracker {
                 self.tracks[ti].imm.update_pda(&[*cm], &[0.0, 1.0]);
                 self.tracks[ti].mark_hit(t);
                 self.tracks[ti].record_hit_from(sensor, t);
-                self.tracks[ti].update_identity(&plot.mode_ac);
+                self.tracks[ti].update_identity(&plot.mode_ac, t);
                 self.tracks[ti].record_source_hit(plot.source, t, plot.kind.has_primary());
                 handled[mi] = true;
             }
@@ -906,7 +906,7 @@ impl Tracker {
                     // Translate JPDA measurement index → original items index.
                     let orig_mi = non_icao[mi].0;
                     let plot = &items[orig_mi].0;
-                    self.tracks[ti].update_identity(&plot.mode_ac);
+                    self.tracks[ti].update_identity(&plot.mode_ac, t);
                     // Per-technology provenance bookkeeping (ADR 0027): book the
                     // associated plot's technology (and PSR for a combined dwell).
                     self.tracks[ti].record_source_hit(plot.source, t, plot.kind.has_primary());
@@ -949,7 +949,7 @@ impl Tracker {
                 self.next_id += 1;
                 let mut track = Track::new(id, number, imm, t);
                 let founding = &items[orig_mi].0;
-                track.update_identity(&founding.mode_ac);
+                track.update_identity(&founding.mode_ac, t);
                 track.record_hit_from(sensor, t);
                 // Per-technology provenance bookkeeping (ADR 0027): the founding
                 // plot's technology (and PSR if it is a combined dwell).
@@ -1005,6 +1005,10 @@ fn system_track_from(
         // multi-radar feed whose sensors rarely land in one opportunity.
         monosensor: track.fresh_sensor_count(time, PROVENANCE_FRESH_S) <= 1,
         spi: track.spi(),
+        // DAPs only while fresh (FR-TRK-040): a stale selected altitude shown
+        // as current would mislead — withheld, and the wire then omits the
+        // I062/380 subfields.
+        daps: track.fresh_daps(time, PROVENANCE_FRESH_S),
         ended: false,
         update_age,
         position_uncertainty: estimate.position_uncertainty(),
@@ -1110,6 +1114,7 @@ mod tests {
                 icao_address: Some(icao),
                 callsign: None,
                 spi: false,
+                daps: firefly_core::Daps::default(),
             },
         }
     }
@@ -2091,6 +2096,7 @@ mod tests {
                 icao_address: None,
                 callsign: None,
                 spi: false,
+                daps: firefly_core::Daps::default(),
             },
         };
 
