@@ -10,6 +10,34 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (FEP.5 — CAT020/019-WAM/MLAT-Eingang)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **FEP.5 — WAM/MLAT CAT020/019 (FR-IO-012 + FR-NET-017, Quell-Kontrakt
+  v1.7.0 additiv):** Firefly empfängt jetzt **Multilateration** — die dritte
+  operative Überwachungstechnologie; damit sind **alle vier klassischen
+  ARTAS-Eingangsklassen** bedient (Radar 048/034 + 001/002, ADS-B 021,
+  WAM 020/019). Neue Decoder `firefly-asterix::cat020`/`cat019`: Position
+  I020/041 WGS84 hochauflösend (LSB 180/2²⁵ °), **σ je Meldung aus I020/500
+  SDP** (Standardabweichung der Positionslösung, konservatives max(σx,σy);
+  fehlend → 150-m-Default), CAT019 mit NOGO-Disziplin (nur 0 =
+  operational-Anspruch). Neue Crate **`firefly-mlat`** (spiegelt
+  `firefly-adsb021`): **Drop-Regeln** Feldmonitor (RAB)/SIM/TST/GBS bzw.
+  positions-/zeitlos; Dispatch CAT020 → Plots, **CAT019 → CAT063-Liveness**
+  (Statusmeldung = Aktivität; degraded/NOGO → WARN); kein Standort/bbox
+  nötig. Verdrahtung: `mlat_asterix` (Kontrakt v1.7.0) oder
+  `FIREFLY_MLAT_*` standalone; Sensor-Default 240, Port 8020, Metriken
+  `firefly_mlat_reports_received_total`/`firefly_sources_mlat`. UAPs gegen
+  asterix-specs/libasterix-Referenz verifiziert; Fuzz-Targets
+  `cat020_decode`/`cat019_decode` (4,2 M/5,0 M Läufe ohne Befund).
+  **Ausgabe-ICD unverändert.** Ehrliche Grenzen: Provenienz erscheint als
+  Mode S (eigenes MLT-Age-Subfeld = ICD-Bump, Folge-Häppchen);
+  I020/202-Geschwindigkeit ungenutzt. Wayfinder-Nachzug (Orchestrator-UI):
+  **Issue #240** (`from-firefly`, analog #239). 22 neue Tests, Gates grün.
+  Roadmap-Stand: **55,5 %**.
+- **Nächster Schritt:** **VERT.1** ankündigen — SDPS-003 Meteo/QNH-Dienst
+  (S3) — und Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-11 (FEP.4 — CAT001/002-Legacy-Radar-Eingang)
 
 - **Zuletzt aktualisiert:** 2026-07-11

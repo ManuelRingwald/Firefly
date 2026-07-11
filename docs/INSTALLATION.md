@@ -340,6 +340,32 @@ Bodenstation die **einzige** Quelle, zusätzlich `FIREFLY_SYSTEM_REF_*` setzen
 > `listen`?/`sac`?/`sic`?/`sensor_id`?); `FIREFLY_SOURCES` hat dann **Vorrang**
 > vor `FIREFLY_ADSB021_*`.
 
+### Schritt 4e (optional): WAM/MLAT-System (CAT020/019 über UDP)
+
+Ein **Multilaterations-System** (WAM) kann seine Zielmeldungen als **ASTERIX
+CAT020** und seinen Systemstatus als **CAT019** über UDP senden (FEP.5) —
+unabhängige Überwachung neben Radar und ADS-B. Der Adapter ist per
+`FIREFLY_MLAT_ENABLED=true` zuschaltbar; die Messunsicherheit kommt je
+Meldung aus **I020/500** (Standardabweichung der Positionslösung).
+Feldmonitor-, Simulations-/Test- und Bodenziele werden verworfen. Kein
+Standort nötig (CAT020-Positionen sind geodätisch).
+
+```bash
+export FIREFLY_MLAT_ENABLED=true
+export FIREFLY_MLAT_SAC=25
+export FIREFLY_MLAT_SIC=40
+# Listen-Endpoint: Multicast-Gruppe (wird beigetreten) oder 0.0.0.0 (Unicast).
+export FIREFLY_MLAT_GROUP=239.255.0.20
+export FIREFLY_MLAT_PORT=8020
+```
+
+Weitere Variable mit Default: `FIREFLY_MLAT_SENSOR_ID` (`240`). Als
+**einzige** Quelle zusätzlich `FIREFLY_SYSTEM_REF_*` setzen (Schritt 5).
+
+> **Orchestrierter Betrieb:** als `mlat_asterix`-Eintrag in `FIREFLY_SOURCES`
+> (Vertrag v1.7.0, Felder `listen`?/`sac`?/`sic`?/`sensor_id`?);
+> `FIREFLY_SOURCES` hat dann **Vorrang** vor `FIREFLY_MLAT_*`.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den
