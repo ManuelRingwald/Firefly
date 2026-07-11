@@ -45,7 +45,7 @@ pub use cat062::{
 };
 pub use cat063::{
     decode_sensor_block, Cat063DecodeError, Cat063Encoder, DecodedSensorStatus, SensorReason,
-    SensorReport,
+    SensorReport, SsrBias,
 };
 pub use cat065::{
     decode_status_block, Cat065DecodeError, Cat065Encoder, DecodedStatus, MESSAGE_TYPE_SDPS_STATUS,

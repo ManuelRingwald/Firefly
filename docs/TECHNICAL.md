@@ -213,6 +213,12 @@ Bias-Werten je Sensor; Übernahme/Rücknahme der Korrektur loggt
 `registration correction engaged/disengaged (REG.2b)`. Die Metriken stehen
 in §3.2 (`firefly_registration_*`).
 
+**Draht (REG.3, ICD 3.3.0):** Bei aktiver Korrektur trägt der
+CAT063-Sensor-Status je Radar zusätzlich die **angewandte** Bias-Korrektur
+in I063/080 (Range Gain/Bias) und I063/081 (Azimut-Bias) — nachgelagerte
+Konsumenten sehen, was das SDPS gerade herausrechnet. Ohne Korrektur werden
+die Items nicht gesendet (Absenz = „keine Korrektur").
+
 ### 1.6 WebSocket-Zugangskontrolle (NFR-SEC-001, ADR 0017)
 
 Beide Variablen sind **opt-in** — ohne Konfiguration ist kein Schutz aktiv

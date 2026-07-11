@@ -21,7 +21,21 @@
 
 ## Version
 
-**3.2.0** (2026-07-10) — **Additiv (FR-TRK-036, ARTAS-Roadmap QW.3):** I062/080
+**3.3.0** (2026-07-11) — **Additiv (FR-IO-008, ARTAS-Roadmap REG.3/ADR 0034):**
+CAT063-Records tragen bei **aktiver Registrierungs-Korrektur** (REG.2b,
+`FIREFLY_REGISTRATION_APPLY`) je Radar-Sensor die **angewandte
+Bias-Korrektur** in den EUROCONTROL-Standard-Items **I063/080** (SSR/Mode-S
+Range Gain + Bias; SRG immer 0, SRB LSB 1/128 NM ≈ 14,47 m) und **I063/081**
+(SSR/Mode-S Azimuth Bias; SAB LSB 360/2¹⁶ ° ≈ 0,0055°). Publiziert wird der
+**angewandte** Wert (was das SDPS tatsächlich herausrechnet), nicht der rohe
+Schätzwert; ohne Korrektur bleiben die Items **weg** (Absenz = „keine
+Korrektur", keine Null-Behauptung). FSPEC wächst dann auf `0xBB 0x80`
+(Record 16 Oktette). **Kein Wire-Bruch:** feste Item-Längen an
+Standard-UAP-Positionen, ein Decoder ohne Bias-Auswertung überspringt sie
+FSPEC-getrieben (Vorwärtskompatibilitäts-Regel aus 3.0.0). Details:
+Abschnitt 9.
+
+Vorgänger **3.2.0** (2026-07-10) — **Additiv (FR-TRK-036, ARTAS-Roadmap QW.3):** I062/080
 (Track Status) trägt jetzt die **Vertrauens-Flags** nach ARTAS-Vorbild:
 **MON** (Oktett 1, `0x80` — Track nur von höchstens einem Sensor gestützt,
 keine Kreuz-Prüfung durch eine zweite Quelle) und **SPI** (Oktett 1, `0x40` —
@@ -64,6 +78,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 3.3.0 | 2026-07-11 | **Additiv (FR-IO-008, REG.3/ADR 0034).** CAT063 trägt bei aktiver Registrierungs-Korrektur (REG.2b) die **angewandte per-Sensor-Bias-Korrektur**: **I063/080** (FRN 7; SRG=0 + SRB, LSB 1/128 NM) und **I063/081** (FRN 8; SAB, LSB 360/2¹⁶ °). Nur bei in Kraft befindlicher Korrektur gesendet — Absenz = „keine Korrektur". FSPEC dann `0xBB 0x80`, Record 16 Oktette; byte-genauer Referenz-Dump in Abschnitt 9. **Kein Wire-Bruch** (FSPEC-getrieben, feste Längen, Standard-UAP). Konsument: optional auswerten (z. B. Bias-Anzeige im Sensor-Panel), kein Lockstep nötig. |
 | 3.2.0 | 2026-07-10 | **Additiv (FR-TRK-036, QW.3).** I062/080 um die ARTAS-Vertrauens-Flags erweitert: **MON** (Oktett 1, `0x80`, monosensor — höchstens ein Sensor im 30-s-Frische-Fenster; lange coastende Tracks ebenfalls MON) und **SPI** (Oktett 1, `0x40`, „Ident"-Puls der letzten Meldung; Quelle: CAT048 I048/020 via `radar_asterix`, transient). **SIM**-Slot (Oktett 2, `0x80`) dokumentiert, wird immer 0 gesendet. **Kein Wire-Bruch** — nur zuvor konstant 0 gesendete Bits werden bei Bedarf gesetzt; Multisensor-Track ohne SPI byte-identisch zu 3.1.x. Konsument: MON/SPI optional auswerten (z. B. Mono-Sensor-Kennzeichnung im Label), kein Lockstep nötig. Details: Abschnitt 4.1. |
 | 3.1.1 | 2026-07-10 | **Dokumentarisch (FR-TRK-035).** Vergabe-Semantik von **I062/040 (Track Number)** festgeschrieben: verwalteter 16-Bit-Pool statt `u32→u16`-Trunkierung der internen ID. Frische Nummern aufsteigend ab 1 (`0` nie vergeben); die Nummer eines gelöschten Tracks (TSE) ist für **60 s Datenzeit quarantänisiert**, bevor sie wiederverwendet werden darf; bei komplett belegtem Nummernraum (> 65 535 gleichzeitige Tracks) initiiert der Tracker keinen neuen Track statt eine Duplikat-Nummer zu senden. **Kein Wire-Format-Bruch** (u16 BE unverändert); Konsumenten-Verhalten unverändert korrekt — die Änderung *beseitigt* eine mögliche stille Nummern-Kollision nach 65 536 Track-Geburten. Details: Abschnitt 4.6. |
 | 3.1.0 | 2026-07-06 | **Additiv (ADR 0033).** CAT063 trägt bei einem degradierten Sensor optional den **per-Quelle-Fehlergrund** im **I063/RE** (Reserved Expansion Field, FRN 13): Vendor-Subfeld **`SRC-REASON`** (u8: `1=unreachable`, `2=auth`, `3=rate_limited`). RE-Layout: `[LEN=0x03][SUBFIELD=0x80][SRC-REASON]`, selbst-begrenzend. **Nur** bei degradiertem Sensor mit bekanntem Grund gesendet (operationelle Records unverändert 9 Oktette). FSPEC wächst dann auf 2 Oktette (`0xB9 0x04`). **Kein Wire-Bruch:** ein Decoder, der RE nicht auswertet, überspringt es über sein Längen-Oktett. Grund aus den HTTP-ADS-B-Pollern (OpenSky/adsb_aggregator); FLARM/Radar ohne Grund (kein RE). Antwort auf Wayfinder #197. Details: Abschnitt 9. |
@@ -446,16 +461,45 @@ FSPEC-Oktett `0xB8`.
 | 3 | I063/030 | 3 | Time of Day, 24-Bit, **1/128 s** seit UTC-Mitternacht (wie I062/070). **Wall-clock-Aussendezeit**, nicht Datenzeit. |
 | 4 | I063/050 | 2 | Sensor Identifier (SAC/SIC) des **Sensors**, über den dieser Record berichtet. SAC = `0` (Firefly-Konvention für lokale Sensoren); **SIC identifiziert den einzelnen Sensor** (die `sensor_id` der jeweiligen Quelle). |
 | 5 | I063/060 | 1+ | Sensor Configuration & Status. Erstes Oktett: **CON-Feld** (Bits 8/7): `00` = operationell (`0x00`), `01` = degradiert (`0x40`), `10` = Initialisierung (`0x80`), `11` = nicht verbunden (`0xC0`). Bits 6–2 = PSR/SSR/MDS/ADS/MLT-GO/NOGO, Bit 1 = FX. Firefly sendet nur `0x00` (aktiv) oder `0x40` (kein Plot innerhalb `2.5 × scan_period`), FX clear. |
+| 7 | I063/080 | 4 | **SSR/Mode-S Range Gain and Bias** (seit 3.3.0, REG.3/ADR 0034 — nur bei aktiver Registrierungs-Korrektur, s. u.). Zwei 16-Bit-Zweierkomplement-Felder, big-endian: **SRG** (Range Gain, LSB 10⁻⁵, dimensionslos — Firefly schätzt keinen Gain und sendet **immer 0**) und **SRB** (Range Bias, LSB **1/128 NM ≈ 14,47 m**; positiv = Sensor misst zu weit). |
+| 8 | I063/081 | 2 | **SSR/Mode-S Azimuth Bias** (seit 3.3.0, wie FRN 7 nur bei aktiver Korrektur). **SAB**: 16-Bit-Zweierkomplement, big-endian, LSB **360/2¹⁶ ° ≈ 0,0055°**; positiv = Uhrzeigersinn-Offset. |
 
 > **I063/010 vs I063/050.** In CAT063 identifiziert I063/010 das **meldende
 > SDPS** (dieselbe SAC/SIC wie in CAT062/CAT065), I063/050 den **berichteten
 > Sensor**. Der Konsument liest die Sensor-Identität aus **I063/050** (FRN 4).
 
-> Weitere CAT063-UAP-Items (I063/015 Service Identification, I063/070–I063/092
-> Zeit-/Positions-/Bias-Statistik, SP) gehören zu anderen Reports und werden
-> vom periodischen Sensor-Status **nicht** gesendet. Ein Decoder soll ihre
-> Präsenz-Bits tolerieren bzw. — wenn er sie nicht auswertet — ihre
+> Weitere CAT063-UAP-Items (I063/015 Service Identification, I063/070
+> Zeit-Bias, I063/090–I063/092 PSR-Bias-Statistik, SP) werden **nicht**
+> gesendet — Firefly schätzt (noch) keinen Zeitstempel- und keinen
+> PSR-spezifischen Bias, und Absenz ist ehrlicher als eine Null. Ein Decoder
+> soll ihre Präsenz-Bits tolerieren bzw. — wenn er sie nicht auswertet — ihre
 > Längen-Regeln beachten (Vorwärtskompatibilität, Abschnitt 3).
+
+**I063/080 + I063/081 — Registrierungs-Zustand (seit 3.3.0, REG.3/ADR 0034).**
+Firefly schätzt laufend die systematischen Messfehler seiner Radar-Quellen
+(Range-/Azimut-Bias, ADR 0034) und kann sie vor der Fusion herausrechnen
+(REG.2b, opt-in). Die beiden Items publizieren die **aktuell angewandte
+Korrektur** je Sensor — also das, was das SDPS tatsächlich von den Messungen
+abzieht, **nicht** den rohen Schätzwert. Sende-Regel: Die Items erscheinen
+**nur**, wenn für diesen Sensor eine Korrektur in Kraft ist
+(`FIREFLY_REGISTRATION_APPLY` aktiv **und** Anwendungs-Gate bestanden);
+andernfalls bleiben die FSPEC-Bits 7/8 leer — **Absenz bedeutet „keine
+Korrektur", eine gesendete 0 würde fälschlich „Bias exakt Null bestätigt"
+behaupten.** Beide Items kommen stets **gemeinsam**; ein Decoder sollte
+dennoch jedes für sich (per FSPEC-Bit) lesen. Mit gesetzten Items wächst die
+FSPEC auf zwei Oktette: **`0xBB 0x80`** (FRN 1+3+4+5+7 + FX, dann FRN 8);
+der Record hat dann 16 Oktette.
+
+**Byte-genauer Referenz-Dump** (operationeller Sensor SIC = 1 mit angewandter
+Korrektur 150 m / 0,3°; SRB = round(150 / 14,46875) = 10, SAB =
+round(0,3 / 0,0054932) = 55):
+```
+0x3F 0x00 0x13 0xBB 0x80 0x19 0x02 0x00 0x00 0x00 0x00 0x01 0x00
+0x00 0x00 0x00 0x0A 0x00 0x37
+```
+(`LEN` = 19; FSPEC `0xBB 0x80`; I063/010 = `19 02`; I063/030 = `00 00 00`;
+I063/050 = `00 01`; I063/060 = `0x00`; I063/080 = `00 00` (SRG=0) `00 0A`
+(SRB=10 ≈ 144,7 m); I063/081 = `00 37` (SAB=55 ≈ 0,302°).)
 
 **I063/RE — per-Quelle-Fehlergrund (`SRC-REASON`, seit 3.1.0, ADR 0033).** Bei
 einem **degradierten** Sensor mit **bekanntem** Grund trägt der Record zusätzlich

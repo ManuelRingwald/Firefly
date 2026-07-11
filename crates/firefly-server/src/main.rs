@@ -790,6 +790,11 @@ fn spawn_cat063_sensor_sender(monitor: Arc<SensorHealthMonitor>, metrics: Arc<Me
                 return;
             }
         };
+        // The applied registration corrections (REG.2b) travel to the wire via
+        // the tick-updated metrics map — the CAT063 record then tells consumers
+        // what the picture is corrected by (REG.3, ADR 0034). Empty (no items
+        // emitted) unless FIREFLY_REGISTRATION_APPLY engaged a correction.
+        let bias_metrics = Arc::clone(&metrics);
         let result = firefly_multicast::run_cat063_sender(
             &socket,
             destination,
@@ -797,6 +802,24 @@ fn spawn_cat063_sensor_sender(monitor: Arc<SensorHealthMonitor>, metrics: Arc<Me
             monitor,
             period,
             utc_time_of_day_secs,
+            move || {
+                bias_metrics
+                    .registration_applied_biases
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .iter()
+                    .map(|(sensor, (range_m, azimuth_deg))| {
+                        (
+                            *sensor,
+                            firefly_asterix::SsrBias {
+                                range_gain: 0.0,
+                                range_bias_m: *range_m,
+                                azimuth_bias_deg: *azimuth_deg,
+                            },
+                        )
+                    })
+                    .collect()
+            },
             |active, total| {
                 metrics
                     .sensors_active

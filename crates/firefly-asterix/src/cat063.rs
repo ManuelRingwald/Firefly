@@ -26,13 +26,18 @@
 //! | 3   | I063/030 | Time of Message (1/128 s since UTC midnight)   |
 //! | 4   | I063/050 | Sensor Identifier — the **sensor** (SAC/SIC)   |
 //! | 5   | I063/060 | Sensor Configuration and Status (CON + GO/NOGO)|
+//! | 7   | I063/080 | SSR/Mode S Range Gain and Bias (REG.3, only when a correction is applied) |
+//! | 8   | I063/081 | SSR/Mode S Azimuth Bias (REG.3, only when a correction is applied) |
 //!
-//! The full UAP also defines I063/015 (FRN2, Service Identification), the radar
-//! bias items (I063/070/080/081/090/091/092, FRN6–11) and the Reserved
-//! Expansion / Special Purpose fields at high FRNs; Firefly transmits only the
-//! subset above (transmitting a subset of UAP items is standard-conformant — the
-//! FSPEC marks which items are present). The standard FSPEC for our subset is
-//! `0xB8` (FRN 1 + 3 + 4 + 5, FX clear).
+//! The full UAP also defines I063/015 (FRN2, Service Identification), I063/070
+//! (FRN6, Time Stamping Bias — Firefly estimates no time bias yet), the PSR
+//! bias items (I063/090/091/092, FRN9–11 — no PSR-specific estimation yet) and
+//! the Reserved Expansion / Special Purpose fields at high FRNs; Firefly
+//! transmits only the subset above (transmitting a subset of UAP items is
+//! standard-conformant — the FSPEC marks which items are present). The
+//! standard FSPEC for the plain subset is `0xB8` (FRN 1 + 3 + 4 + 5, FX
+//! clear); with an applied registration correction (REG.3, ADR 0034) it
+//! extends to `0xBB 0x80` (adds FRN 7 + 8).
 //!
 //! **I063/010 vs I063/050 (the key correctness point).** In CAT063, I063/010
 //! identifies **who reports** (the SDPS that produces the message — the same
@@ -98,9 +103,38 @@ mod uap {
     pub const SENSOR_IDENTIFIER: u8 = 4;
     /// I063/060 — Sensor Configuration and Status.
     pub const SENSOR_CONFIGURATION_STATUS: u8 = 5;
+    /// I063/080 — SSR/Mode S Range Gain and Bias (REG.3).
+    pub const SSR_RANGE_GAIN_AND_BIAS: u8 = 7;
+    /// I063/081 — SSR/Mode S Azimuth Bias (REG.3).
+    pub const SSR_AZIMUTH_BIAS: u8 = 8;
     /// I063/RE — Reserved Expansion Field (explicit length). Firefly carries the
     /// per-source failure reason here (ADR 0033).
     pub const RESERVED_EXPANSION: u8 = 13;
+}
+
+/// I063/080 SRB — range bias LSB: 1/128 nautical mile (≈ 14.47 m).
+const RANGE_BIAS_LSB_M: f64 = 1_852.0 / 128.0;
+/// I063/080 SRG — range gain LSB: 10⁻⁵ (dimensionless).
+const RANGE_GAIN_LSB: f64 = 1e-5;
+/// I063/081 SAB — azimuth bias LSB: 360/2¹⁶ degrees.
+const AZIMUTH_BIAS_LSB_DEG: f64 = 360.0 / 65_536.0;
+
+/// The SDPS's current estimate of a sensor's SSR/Mode-S systematic errors, as
+/// carried in I063/080 (range gain + range bias) and I063/081 (azimuth bias) —
+/// the wire form of Firefly's registration state (REG.3, ADR 0034).
+///
+/// Firefly publishes the **applied** correction (what the fusion actually
+/// subtracts, REG.2b), not the raw estimate: the wire tells consumers what the
+/// picture is corrected by. `range_gain` is a multiplicative range error
+/// (LSB 10⁻⁵); Firefly's estimator models no gain term, so it always emits 0.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SsrBias {
+    /// Range gain (dimensionless, 0 = no gain error). Always 0 from Firefly.
+    pub range_gain: f64,
+    /// Range bias, metres (positive = the sensor measures too far).
+    pub range_bias_m: f64,
+    /// Azimuth bias, degrees (positive = clockwise offset).
+    pub azimuth_bias_deg: f64,
 }
 
 /// The I063/RE Reserved Expansion Field layout Firefly emits for a degraded
@@ -170,8 +204,10 @@ impl SensorReason {
 }
 
 /// One sensor's status to encode into a CAT063 record: which sensor (`sic`),
-/// whether it is operational, and — when degraded — why ([`SensorReason`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// whether it is operational, — when degraded — why ([`SensorReason`]), and
+/// — when the SDPS applies a registration correction — the bias state
+/// ([`SsrBias`], REG.3).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SensorReport {
     /// I063/050 SIC of this sensor (the SAC is the encoder's `sensor_sac`).
     pub sic: u8,
@@ -180,6 +216,10 @@ pub struct SensorReport {
     /// The failure reason, emitted in I063/RE **only** when degraded and not
     /// [`SensorReason::Ok`]. An operational sensor carries no RE field.
     pub reason: SensorReason,
+    /// The applied registration correction, emitted as I063/080 + I063/081
+    /// **only** when present (REG.3). `None` — no correction in effect, no
+    /// bias items on the wire: absence is honest, a zero would be a claim.
+    pub ssr_bias: Option<SsrBias>,
 }
 
 /// Encodes Sensor Status records into a CAT063 data block.
@@ -232,6 +272,19 @@ impl Cat063Encoder {
                     uap::SENSOR_CONFIGURATION_STATUS,
                     vec![encode_con(report.operational)],
                 );
+            // Registration state (REG.3): only when a correction is actually
+            // in effect — absence means "no correction", never a zero claim.
+            if let Some(bias) = report.ssr_bias {
+                builder = builder
+                    .item(
+                        uap::SSR_RANGE_GAIN_AND_BIAS,
+                        encode_range_gain_and_bias(bias),
+                    )
+                    .item(
+                        uap::SSR_AZIMUTH_BIAS,
+                        encode_azimuth_bias(bias.azimuth_bias_deg),
+                    );
+            }
             // Attach the failure reason only for a degraded sensor with a known
             // reason: an operational (or reason-unknown) sensor stays a plain
             // 9-octet record, so the RE field is genuinely additive.
@@ -265,6 +318,30 @@ fn encode_con(operational: bool) -> u8 {
     }
 }
 
+/// Scale a value to a two's-complement 16-bit wire field, saturating at the
+/// type bounds (a clamped extreme is more honest than a wrapped sign flip).
+fn scale_i16(value: f64) -> i16 {
+    value.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16
+}
+
+/// I063/080 — SSR/Mode S Range Gain and Bias: SRG (two's complement, LSB 10⁻⁵)
+/// followed by SRB (two's complement, LSB 1/128 NM), both big-endian.
+fn encode_range_gain_and_bias(bias: SsrBias) -> Vec<u8> {
+    let gain = scale_i16(bias.range_gain / RANGE_GAIN_LSB);
+    let range = scale_i16(bias.range_bias_m / RANGE_BIAS_LSB_M);
+    let mut out = gain.to_be_bytes().to_vec();
+    out.extend_from_slice(&range.to_be_bytes());
+    out
+}
+
+/// I063/081 — SSR/Mode S Azimuth Bias: two's complement, LSB 360/2¹⁶ degrees,
+/// big-endian.
+fn encode_azimuth_bias(azimuth_deg: f64) -> Vec<u8> {
+    scale_i16(azimuth_deg / AZIMUTH_BIAS_LSB_DEG)
+        .to_be_bytes()
+        .to_vec()
+}
+
 /// Wrap the concatenated record bytes in the CAT063 block envelope:
 /// `[CAT=63][LEN big-endian u16][records…]`, where LEN includes the 3-byte
 /// header.
@@ -292,6 +369,9 @@ pub struct DecodedSensorStatus {
     /// I063/RE `SRC-REASON` — the per-source failure reason when degraded
     /// (ADR 0033). [`SensorReason::Ok`] when no RE field is present.
     pub reason: SensorReason,
+    /// I063/080 + I063/081 — the SDPS's applied registration correction for
+    /// this sensor (REG.3). `None` when neither bias item is present.
+    pub ssr_bias: Option<SsrBias>,
 }
 
 /// Errors that can occur while decoding a CAT063 data block.
@@ -393,6 +473,8 @@ fn decode_record(
     let mut operational: Option<bool> = None;
     // Absent RE field ⇒ no recorded reason ⇒ Ok.
     let mut reason = SensorReason::Ok;
+    // Absent bias items ⇒ no correction in effect.
+    let mut ssr_bias: Option<SsrBias> = None;
 
     for frn in frns {
         match frn {
@@ -419,6 +501,19 @@ fn decode_record(
                 while octet & I063_060_FX != 0 {
                     octet = take(1)?[0];
                 }
+            }
+            uap::SSR_RANGE_GAIN_AND_BIAS => {
+                let b = take(4)?;
+                let entry = ssr_bias.get_or_insert_with(SsrBias::default);
+                entry.range_gain = i16::from_be_bytes([b[0], b[1]]) as f64 * RANGE_GAIN_LSB;
+                entry.range_bias_m = i16::from_be_bytes([b[2], b[3]]) as f64 * RANGE_BIAS_LSB_M;
+            }
+            uap::SSR_AZIMUTH_BIAS => {
+                let b = take(2)?;
+                ssr_bias
+                    .get_or_insert_with(SsrBias::default)
+                    .azimuth_bias_deg =
+                    i16::from_be_bytes([b[0], b[1]]) as f64 * AZIMUTH_BIAS_LSB_DEG;
             }
             uap::RESERVED_EXPANSION => {
                 // I063/RE is explicit-length: the first octet is the field length
@@ -451,6 +546,7 @@ fn decode_record(
             uap::SENSOR_CONFIGURATION_STATUS,
         ))?,
         reason,
+        ssr_bias,
     };
     Ok((record, cur))
 }
@@ -465,12 +561,13 @@ mod tests {
         Cat063Encoder::new(DataSourceId::new(25, 2), 0)
     }
 
-    /// An operational sensor report (no RE field).
+    /// An operational sensor report (no RE field, no bias items).
     fn ok(sic: u8) -> SensorReport {
         SensorReport {
             sic,
             operational: true,
             reason: SensorReason::Ok,
+            ssr_bias: None,
         }
     }
 
@@ -480,6 +577,7 @@ mod tests {
             sic,
             operational: false,
             reason: SensorReason::Ok,
+            ssr_bias: None,
         }
     }
 
@@ -489,6 +587,22 @@ mod tests {
             sic,
             operational: false,
             reason,
+            ssr_bias: None,
+        }
+    }
+
+    /// An operational sensor report carrying an applied registration
+    /// correction (I063/080 + I063/081 emitted, REG.3).
+    fn ok_with_bias(sic: u8, range_bias_m: f64, azimuth_bias_deg: f64) -> SensorReport {
+        SensorReport {
+            sic,
+            operational: true,
+            reason: SensorReason::Ok,
+            ssr_bias: Some(SsrBias {
+                range_gain: 0.0,
+                range_bias_m,
+                azimuth_bias_deg,
+            }),
         }
     }
 
@@ -694,6 +808,7 @@ mod tests {
             sic: 1,
             operational: true,
             reason: SensorReason::Auth, // should be ignored
+            ssr_bias: None,
         };
         let block = encoder().encode(0.0, &[report]);
         assert_eq!(block[2], 0x0C, "LEN=12, no RE field");
@@ -717,6 +832,88 @@ mod tests {
     fn unknown_reason_code_maps_to_unreachable() {
         assert_eq!(SensorReason::from_code(9), SensorReason::Unreachable);
         assert_eq!(SensorReason::from_code(0), SensorReason::Ok);
+    }
+
+    /// A sensor with an applied registration correction emits I063/080 +
+    /// I063/081 at their standard UAP positions (FRN 7, 8), exact bytes.
+    /// This is the byte-level ground truth for Wayfinder's bias decoder
+    /// (REG.3). Values: 150 m → SRB = round(150 / 14.46875) = 10 = 0x000A;
+    /// 0.3° → SAB = round(0.3 / (360/2¹⁶)) = 55 = 0x0037; SRG always 0.
+    #[test]
+    fn sensor_with_bias_matches_reference_dump() {
+        let block = encoder().encode(0.0, &[ok_with_bias(1, 150.0, 0.3)]);
+        assert_eq!(
+            block,
+            vec![
+                0x3F, 0x00, 0x13, // CAT=63, LEN=19 (3 + 16)
+                0xBB, 0x80, // FSPEC: FRN 1+3+4+5+7 (+FX), then FRN 8
+                0x19, 0x02, // I063/010 SDPS 25/2
+                0x00, 0x00, 0x00, // I063/030 time=0
+                0x00, 0x01, // I063/050 sensor 0/1
+                0x00, // I063/060 CON=00 (operational)
+                0x00, 0x00, 0x00, 0x0A, // I063/080: SRG=0, SRB=10 (≈144.7 m)
+                0x00, 0x37, // I063/081: SAB=55 (≈0.302°)
+            ]
+        );
+    }
+
+    /// Bias values — including negative ones — round-trip through encode →
+    /// decode within one LSB (range: 1/128 NM ≈ 14.47 m; azimuth: 360/2¹⁶ ≈
+    /// 0.0055°). REG.3
+    #[test]
+    fn bias_round_trips_within_lsb() {
+        for (range_m, azimuth_deg) in [(150.0, 0.3), (-150.0, -0.3), (0.0, 0.0), (997.3, -0.87)] {
+            let block = encoder().encode(0.0, &[ok_with_bias(1, range_m, azimuth_deg)]);
+            let records = decode_sensor_block(&block).expect("decodes");
+            let bias = records[0].ssr_bias.expect("bias items present");
+            assert!(
+                (bias.range_bias_m - range_m).abs() <= RANGE_BIAS_LSB_M / 2.0 + 1e-9,
+                "range {range_m} m → {} m",
+                bias.range_bias_m
+            );
+            assert!(
+                (bias.azimuth_bias_deg - azimuth_deg).abs() <= AZIMUTH_BIAS_LSB_DEG / 2.0 + 1e-9,
+                "azimuth {azimuth_deg}° → {}°",
+                bias.azimuth_bias_deg
+            );
+            assert_eq!(bias.range_gain, 0.0, "Firefly estimates no gain");
+        }
+    }
+
+    /// Without a correction in effect no bias items are emitted — absence is
+    /// the honest signal, a zero would be a claim. Old-decoder compatibility:
+    /// the no-bias record is byte-identical to the pre-REG.3 form. REG.3
+    #[test]
+    fn no_bias_emits_no_bias_items() {
+        let block = encoder().encode(0.0, &[ok(1)]);
+        assert_eq!(block[3], 0xB8, "single-octet FSPEC, FRN 7/8 clear");
+        let records = decode_sensor_block(&block).expect("decodes");
+        assert_eq!(records[0].ssr_bias, None);
+    }
+
+    /// A bias-carrying record and a plain record coexist in one block — the
+    /// per-record FSPEC keeps them self-delimiting. REG.3
+    #[test]
+    fn mixed_bias_and_plain_records_decode() {
+        let block = encoder().encode(0.0, &[ok_with_bias(1, 150.0, 0.3), ok(2), degraded(3)]);
+        let records = decode_sensor_block(&block).expect("decodes");
+        assert_eq!(records.len(), 3);
+        assert!(records[0].ssr_bias.is_some());
+        assert_eq!(records[1].ssr_bias, None);
+        assert_eq!(records[2].ssr_bias, None);
+        assert!(!records[2].operational);
+    }
+
+    /// Range bias magnitudes beyond the i16 wire range saturate instead of
+    /// wrapping the sign — a clamped extreme is safer than a flipped one.
+    #[test]
+    fn out_of_range_bias_saturates() {
+        // i16::MAX * 14.46875 ≈ 474 km; ask for far more.
+        let block = encoder().encode(0.0, &[ok_with_bias(1, 1.0e9, 400.0)]);
+        let records = decode_sensor_block(&block).expect("decodes");
+        let bias = records[0].ssr_bias.expect("present");
+        assert!((bias.range_bias_m - i16::MAX as f64 * RANGE_BIAS_LSB_M).abs() < 1e-6);
+        assert!(bias.range_bias_m > 0.0, "sign preserved, not wrapped");
     }
 
     /// A hostile record whose FSPEC chains FX octets past the supported FRN
