@@ -142,8 +142,9 @@ impl Player {
     }
 
     /// The default output heartbeat period (seconds): the fastest radar's scan
-    /// period (ADR 0013, Häppchen 13.4). The caller (server) may override it via
-    /// configuration (`FIREFLY_OUTPUT_PERIOD`) at the cut-over (Häppchen 13.7).
+    /// period (ADR 0013, Häppchen 13.4). The live server derives its cadence
+    /// from the configured sources instead (min poll interval); a dedicated
+    /// `FIREFLY_OUTPUT_PERIOD` override was never wired up.
     pub fn default_output_period(&self) -> f64 {
         self.default_output_period
     }

@@ -462,6 +462,18 @@ Simulator-Output (Scans mit SystemTracks) für deterministische Replay-Tests.
 Aufzeichnungen entstehen automatisch bei Nutzung des `firefly-recorder`-Crates
 (konfigurierbar). Das Format ist JSON-Lines (ein `Frame` pro Zeile).
 
+Die beiden CLI-Werkzeuge des Crates (`record`, `replay`) sind env-getrieben:
+
+| Variable | Werkzeug | Default | Bedeutung |
+|----------|----------|---------|-----------|
+| `FIREFLY_RECORD_OUTPUT` | `record` | `recording.ffrec` | Pfad der `.ffrec`-Ausgabedatei |
+| `FIREFLY_REPLAY_INPUT` | `replay` | `recording.ffrec` | Pfad der `.ffrec`-Eingabedatei |
+| `FIREFLY_REPLAY_SPEED` | `replay` | `1.0` | Abspieltempo (`2.0` = doppelt so schnell) |
+
+> Nicht zu verwechseln mit den `FIREFLY_REPLAY_PLOTS_*`-Variablen des
+> **Plot**-Replays (§5.2/§6): `.ffrec` speichert den Tracker-**Output**
+> (Frames), `.ffplots` den Tracker-**Input** (Plots).
+
 ### 5.2 Replay einer Aufzeichnung
 
 ```bash
