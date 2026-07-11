@@ -10,6 +10,30 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (REG.2b — Bias-Korrektur vor der Fusion; AP-REG-Kern komplett)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **REG.2b — Korrektur vor der Fusion (ADR 0034, FR-TRK-039):** Der Kreis ist
+  geschlossen — geschätzte Radar-Biases werden **vor** der Fusion abgezogen,
+  abgesichert durch die **Anwendungs-Politik** (`ApplyPolicy` +
+  `RegistrationApplier` in `firefly-track`): Gate = `observable` ∧
+  RMS-nachher ≤ 0,5 × RMS-vorher ∧ |Δr| ≤ 1000 m ∧ |Δθ| ≤ 1°; angewandt =
+  exponentieller Tiefpass (α = 0,3 je Lauf), Gate-Ausfälle 3 Läufe gehalten,
+  dann Abklingen zur Null. **Oszillationsfrei per Konstruktion:** Monitor
+  schätzt weiter auf dem rohen Strom (voller Bias), Korrektur = reiner
+  Tiefpass — kein Integrator. Server: Korrektur vor `process_plots` (nur
+  gelistete Radare), Applier rückt genau einmal je Schätzlauf vor
+  (`runs_total`), `.ffplots` bleibt roh (Replay-Parität). **Doppeltes
+  Opt-in:** `FIREFLY_REGISTRATION_APPLY` zusätzlich zu `_ENABLED`. Metriken:
+  `firefly_registration_apply_active` + angewandte Bias-Gauges je Sensor
+  (getrennt vom rohen Schätzwert). 6 neue Tests, darunter geschlossene Kette
+  (monotone Konvergenz auf 150 m/0,3°, korrigierte Messung < 10 m neben der
+  Wahrheit) und Server-End-to-End (korrigiertes Lagebild auf der Wahrheit,
+  unkorrigiertes trägt den 800-m-Bias). **Kein Wire-/ICD-Bezug.** Gates grün.
+  Roadmap-Stand: **40 %**.
+- **Nächster Schritt:** **REG.3** ankündigen — Bias-Statistik auf den Draht
+  (I063/070–092, Referenz-Vektoren, ICD-Bump; S3, additiv, Wayfinder-Issue).
+
 ## 🎯 Stand 2026-07-11 (REG.2a — Registrierungs-Schatten-Monitor im Live-Server)
 
 - **Zuletzt aktualisiert:** 2026-07-11
