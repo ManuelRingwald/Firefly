@@ -15,6 +15,7 @@
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddrV4};
 
+use firefly_adsb021::Adsb021Config;
 use firefly_adsbagg::AdsbAggConfig;
 use firefly_core::SensorId;
 use firefly_flarm::FlarmConfig;
@@ -42,6 +43,10 @@ pub enum SourceType {
     AdsbAggregator,
     FlarmAprs,
     RadarAsterix,
+    /// ADS-B ground station emitting ASTERIX CAT021 over UDP (FEP.3,
+    /// contract v1.6.0) — the production ADS-B input, replacing internet
+    /// REST for deployments with their own station.
+    AdsbAsterix,
 }
 
 /// WGS84 bounding box. Field names match Wayfinder's `source_config` so the
@@ -125,6 +130,8 @@ pub enum SourceError {
     /// An `adsb_aggregator` source names a provider outside the closed
     /// vocabulary (`adsb_lol` | `adsb_fi`; ADR 0031).
     UnknownProvider { index: usize, provider: String },
+    /// An `adsb_asterix` source has an invalid field (FEP.3, contract v1.6.0).
+    InvalidAdsbStation { index: usize, reason: &'static str },
 }
 
 impl fmt::Display for SourceError {
@@ -147,6 +154,9 @@ impl fmt::Display for SourceError {
             ),
             SourceError::InvalidRadar { index, reason } => {
                 write!(f, "FIREFLY_SOURCES[{index}]: invalid radar source: {reason}")
+            }
+            SourceError::InvalidAdsbStation { index, reason } => {
+                write!(f, "FIREFLY_SOURCES[{index}]: invalid adsb_asterix source: {reason}")
             }
             SourceError::UnknownProvider { index, provider } => write!(
                 f,
@@ -382,6 +392,52 @@ pub fn radar_config_from_spec(spec: &SourceSpec, index: usize) -> Result<RadarCo
     Ok(cfg)
 }
 
+/// Build an [`Adsb021Config`] from an `adsb_asterix` spec at list position
+/// `index` (FEP.3, contract v1.6.0). CAT021 reports are geodetic self-reports,
+/// so — unlike the radar — **no site position** is needed; and like the radar
+/// the source takes **no** credential (raw UDP; trust boundary is network
+/// isolation, ADR 0017) and no bbox (the station's coverage is whatever it
+/// hears). `listen` (`group:port`) selects the UDP endpoint (a multicast group
+/// is joined); absent → `0.0.0.0:<default port>`. `sac`/`sic` (0..255) and
+/// `sensor_id` come from the spec.
+///
+/// The caller guarantees `spec.source_type == SourceType::AdsbAsterix`.
+pub fn adsb021_config_from_spec(
+    spec: &SourceSpec,
+    index: usize,
+) -> Result<Adsb021Config, SourceError> {
+    let (listen_group, listen_port) = match &spec.listen {
+        Some(s) => parse_listen(s).ok_or(SourceError::InvalidAdsbStation {
+            index,
+            reason: "listen must be a group:port address",
+        })?,
+        None => (Ipv4Addr::UNSPECIFIED, firefly_adsb021::DEFAULT_PORT),
+    };
+    let to_byte = |v: Option<u16>, what: &'static str| -> Result<u8, SourceError> {
+        match v {
+            None => Ok(0),
+            Some(x) if x <= u8::MAX as u16 => Ok(x as u8),
+            Some(_) => Err(SourceError::InvalidAdsbStation {
+                index,
+                reason: what,
+            }),
+        }
+    };
+
+    let mut cfg = Adsb021Config {
+        enabled: true,
+        sac: to_byte(spec.sac, "sac must be 0..255")?,
+        sic: to_byte(spec.sic, "sic must be 0..255")?,
+        listen_group,
+        listen_port,
+        ..Adsb021Config::default()
+    };
+    if let Some(sid) = spec.sensor_id {
+        cfg.sensor_id = SensorId(sid);
+    }
+    Ok(cfg)
+}
+
 /// Parse a `group:port` listen endpoint into its IPv4 address and port.
 fn parse_listen(s: &str) -> Option<(Ipv4Addr, u16)> {
     let sock: SocketAddrV4 = s.trim().parse().ok()?;
@@ -433,18 +489,20 @@ pub struct ResolvedSources {
     pub flarm: Vec<FlarmConfig>,
     /// One [`RadarConfig`] per `radar_asterix` source, in list order (ADR 0028).
     pub radar: Vec<RadarConfig>,
+    /// One [`Adsb021Config`] per `adsb_asterix` source, in list order (FEP.3,
+    /// contract v1.6.0).
+    pub adsb021: Vec<Adsb021Config>,
     /// Reserved types present but without an adapter yet — the caller logs a WARN
     /// and skips them (availability over completeness, ADR 0023). Empty now that
     /// all three vocabulary types have adapters; kept for forward compatibility.
     pub skipped: Vec<SourceType>,
 }
 
-/// Resolve a parsed source list into runnable adapter configs. An `adsb_opensky`
-/// entry becomes an [`OpenSkyConfig`] and a `flarm_aprs` entry a [`FlarmConfig`]
-/// (credentials resolved via `get_env`); `radar_asterix` goes to `skipped`
-/// (reserved, no adapter yet). A malformed entry (missing/invalid bbox, bad
-/// credential) is a hard error — a configured source that cannot run must not be
-/// silently dropped.
+/// Resolve a parsed source list into runnable adapter configs — every type of
+/// the closed vocabulary maps onto its adapter config (credentials resolved
+/// via `get_env` where the type takes one). A malformed entry (missing/invalid
+/// bbox, bad credential, bad listen endpoint) is a hard error — a configured
+/// source that cannot run must not be silently dropped.
 pub fn resolve_sources(
     specs: &[SourceSpec],
     get_env: impl Fn(&str) -> Option<String>,
@@ -453,6 +511,7 @@ pub fn resolve_sources(
     let mut adsbagg = Vec::new();
     let mut flarm = Vec::new();
     let mut radar = Vec::new();
+    let mut adsb021 = Vec::new();
     let skipped = Vec::new();
     for (index, spec) in specs.iter().enumerate() {
         match spec.source_type {
@@ -462,6 +521,7 @@ pub fn resolve_sources(
             SourceType::AdsbAggregator => adsbagg.push(adsbagg_config_from_spec(spec, index)?),
             SourceType::FlarmAprs => flarm.push(flarm_config_from_spec(spec, index, &get_env)?),
             SourceType::RadarAsterix => radar.push(radar_config_from_spec(spec, index)?),
+            SourceType::AdsbAsterix => adsb021.push(adsb021_config_from_spec(spec, index)?),
         }
     }
     Ok(ResolvedSources {
@@ -469,6 +529,7 @@ pub fn resolve_sources(
         adsbagg,
         flarm,
         radar,
+        adsb021,
         skipped,
     })
 }
@@ -1221,6 +1282,81 @@ mod tests {
             rep.poll_interval_secs, 15,
             "aggregator cadence drives output"
         );
+    }
+
+    // --- adsb_asterix (FEP.3, contract v1.6.0) ----------------------------
+
+    #[test]
+    fn adsb021_config_maps_identity_and_listen() {
+        let spec = SourceSpec {
+            source_type: SourceType::AdsbAsterix,
+            sac: Some(25),
+            sic: Some(10),
+            sensor_id: Some(231),
+            listen: Some("239.255.0.21:9021".into()),
+            ..SourceSpec::default()
+        };
+        let cfg = adsb021_config_from_spec(&spec, 0).expect("valid");
+        assert!(cfg.enabled);
+        assert_eq!((cfg.sac, cfg.sic), (25, 10));
+        assert_eq!(cfg.sensor_id, SensorId(231));
+        assert_eq!(cfg.listen_group, std::net::Ipv4Addr::new(239, 255, 0, 21));
+        assert_eq!(cfg.listen_port, 9021);
+        assert!(cfg.is_multicast());
+    }
+
+    #[test]
+    fn adsb021_minimal_spec_uses_defaults_and_needs_no_bbox_or_site() {
+        // Unlike the radar there is no site and unlike the internet feeds no
+        // bbox — a bare {"type":"adsb_asterix"} is a valid source.
+        let spec = SourceSpec {
+            source_type: SourceType::AdsbAsterix,
+            ..SourceSpec::default()
+        };
+        let cfg = adsb021_config_from_spec(&spec, 0).expect("valid");
+        assert!(cfg.enabled);
+        assert_eq!(cfg.listen_group, std::net::Ipv4Addr::UNSPECIFIED);
+        assert_eq!(cfg.listen_port, firefly_adsb021::DEFAULT_PORT);
+        assert_eq!(cfg.sensor_id, Adsb021Config::default().sensor_id);
+        assert!(!cfg.is_multicast());
+    }
+
+    #[test]
+    fn adsb021_bad_listen_or_sac_is_an_error() {
+        let bad_listen = SourceSpec {
+            source_type: SourceType::AdsbAsterix,
+            listen: Some("not-an-address".into()),
+            ..SourceSpec::default()
+        };
+        assert!(matches!(
+            adsb021_config_from_spec(&bad_listen, 2),
+            Err(SourceError::InvalidAdsbStation { index: 2, .. })
+        ));
+
+        let bad_sac = SourceSpec {
+            source_type: SourceType::AdsbAsterix,
+            sac: Some(300),
+            ..SourceSpec::default()
+        };
+        assert!(matches!(
+            adsb021_config_from_spec(&bad_sac, 0),
+            Err(SourceError::InvalidAdsbStation { .. })
+        ));
+    }
+
+    #[test]
+    fn resolve_routes_adsb021_sources() {
+        let json = r#"[
+            {"type":"adsb_asterix","sac":25,"sic":10,"sensor_id":231,
+             "listen":"239.255.0.21:8021"},
+            {"type":"radar_asterix","sac":1,"sic":4,"lat":50.03,"lon":8.57}
+        ]"#;
+        let specs = parse_sources(json).expect("valid");
+        let resolved = resolve_sources(&specs, no_env).expect("valid");
+        assert_eq!(resolved.adsb021.len(), 1);
+        assert_eq!(resolved.adsb021[0].sensor_id, SensorId(231));
+        assert_eq!(resolved.radar.len(), 1);
+        assert!(resolved.opensky.is_empty());
     }
 
     // --- helpers ---------------------------------------------------------

@@ -1,0 +1,18 @@
+[package]
+name = "firefly-adsb021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "ADS-B ground-station input adapter: decodes CAT021 target reports over UDP into firefly-core Plots (FEP.3)."
+
+[dependencies]
+firefly-core = { workspace = true }
+firefly-geo = { workspace = true }
+firefly-asterix = { workspace = true }
+tokio = { version = "1", features = ["net", "time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
