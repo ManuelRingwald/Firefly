@@ -34,7 +34,7 @@ use firefly_asterix::Cat062Encoder;
 use firefly_core::{Plot, SensorId, SystemTrack, Timestamp};
 use firefly_geo::{LocalFrame, Wgs84};
 use firefly_opensky::OpenSkyConfig;
-use firefly_track::{ProcessNoise, SensorErrorModel, Tracker, TrackerConfig};
+use firefly_track::{ProcessNoise, RegistrationMonitor, SensorErrorModel, Tracker, TrackerConfig};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
@@ -262,12 +262,41 @@ pub fn build_live_tracker_multi(
     Tracker::new(tracker_config)
 }
 
+/// Is the registration shadow monitor opt-in flag set? Accepts the value of
+/// `FIREFLY_REGISTRATION_ENABLED`: `1`/`true`/`yes` (case-insensitive,
+/// whitespace-trimmed) enable it; anything else — including unset — leaves it
+/// off. Same convention as the other boolean env knobs. REG.2a, REQ: FR-TRK-038
+pub fn registration_enabled(value: Option<&str>) -> bool {
+    value.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+}
+
+/// The registration shadow monitor's state as handed to the `on_tick` callback
+/// (REG.2a): everything the metrics endpoint exports, snapshotted once per
+/// output tick. `None` when no monitor is configured.
+#[derive(Clone, Debug)]
+pub struct RegistrationTick {
+    /// How many estimates the monitor has produced so far (counter).
+    pub estimates_total: u64,
+    /// Correspondences found by the most recent estimation attempt (gauge).
+    pub last_pair_count: usize,
+    /// Whether the latest estimate was fully observable (`false` before the
+    /// first estimate).
+    pub observable: bool,
+    /// Per-sensor bias estimates from the latest run: `(sensor, range bias in
+    /// metres, azimuth bias in degrees)`. Empty before the first estimate.
+    pub biases: Vec<(SensorId, f64, f64)>,
+}
+
 /// A live tracker plus its input recorder: the synchronous core driven by the
 /// async [`run_live_tracker`] task. Kept free of any timing/IO scheduling so it
 /// is fully unit-testable.
 pub struct LiveTracker {
     tracker: Tracker,
     recorder: Option<PlotRecorder>,
+    /// The optional registration shadow monitor (REG.2a): observes the same
+    /// plot stream the tracker ingests but never changes it — its estimates
+    /// go to logs/metrics only, until REG.2b defines an application policy.
+    registration: Option<RegistrationMonitor>,
     /// The freshest plot data-time seen, the instant snapshots are projected to.
     latest_data_time: Option<f64>,
     /// Total plots handed to the tracker (for metrics, AP9.4c-4).
@@ -280,9 +309,17 @@ impl LiveTracker {
         Self {
             tracker,
             recorder,
+            registration: None,
             latest_data_time: None,
             plots_ingested: 0,
         }
+    }
+
+    /// Attach a registration shadow monitor (REG.2a). The monitor observes
+    /// every ingested batch; it has no effect on the tracker's picture.
+    pub fn with_registration(mut self, monitor: RegistrationMonitor) -> Self {
+        self.registration = Some(monitor);
+        self
     }
 
     /// Ingest a batch of plots that arrived at wall-clock `recv_unix_ns`.
@@ -319,6 +356,35 @@ impl LiveTracker {
             self.latest_data_time
                 .map_or(newest, |prev| prev.max(newest)),
         );
+
+        // Shadow-mode registration (REG.2a): observe the same batch, driven by
+        // the same data-time watermark. Deliberately after the tracker ingest —
+        // nothing the monitor computes may influence this batch's processing.
+        if let Some(monitor) = self.registration.as_mut() {
+            let now = self.latest_data_time.unwrap_or(newest);
+            if let Some(solution) = monitor.observe(plots, now).cloned() {
+                let biases: Vec<String> = solution
+                    .biases
+                    .iter()
+                    .map(|(id, b)| {
+                        format!(
+                            "sensor {}: dr={:+.1} m, dtheta={:+.4} deg",
+                            id.0,
+                            b.range_m,
+                            b.azimuth_deg()
+                        )
+                    })
+                    .collect();
+                info!(
+                    pairs = monitor.last_pair_count(),
+                    rms_before_m = format!("{:.1}", solution.rms_before_m).as_str(),
+                    rms_after_m = format!("{:.1}", solution.rms_after_m).as_str(),
+                    observable = solution.observable,
+                    biases = biases.join("; ").as_str(),
+                    "registration shadow estimate (REG.2a, not applied)"
+                );
+            }
+        }
     }
 
     /// The current air picture, projected to the latest data-time and appended
@@ -356,6 +422,24 @@ impl LiveTracker {
         self.recorder.as_ref().map_or(0, PlotRecorder::written)
     }
 
+    /// Snapshot of the registration shadow monitor for the `on_tick` callback
+    /// (REG.2a metrics export). `None` when no monitor is configured.
+    pub fn registration_tick(&self) -> Option<RegistrationTick> {
+        let monitor = self.registration.as_ref()?;
+        let latest = monitor.latest();
+        Some(RegistrationTick {
+            estimates_total: monitor.estimates_total(),
+            last_pair_count: monitor.last_pair_count(),
+            observable: latest.is_some_and(|s| s.observable),
+            biases: latest.map_or_else(Vec::new, |s| {
+                s.biases
+                    .iter()
+                    .map(|(id, b)| (*id, b.range_m, b.azimuth_deg()))
+                    .collect()
+            }),
+        })
+    }
+
     /// The latest data-time seen by the tracker, or `None` before the first
     /// plot arrives. Used by [`run_live_tracker`] to populate the data-time
     /// field of the published [`LiveSnapshot`].
@@ -374,8 +458,10 @@ impl LiveTracker {
 ///   time + tracks) is published over `snapshot_tx`. A send error (no receivers
 ///   yet) is ignored — the snapshot is the latest value any future reader sees.
 ///   Before the first poll the snapshot carries the empty sentinel.
-///   `on_tick` is called after each tick with `(plots_ingested, records_written)`
-///   so callers can update Prometheus counters (AP9.4c-4).
+///   `on_tick` is called after each tick with `(plots_ingested,
+///   records_written, registration_tick)` so callers can update Prometheus
+///   counters (AP9.4c-4; the registration snapshot is `None` without a
+///   shadow monitor, REG.2a).
 ///
 /// When every sender on `plots_rx` is dropped the recorder is flushed and the
 /// task returns, so a clean shutdown loses no recorded plots.
@@ -386,7 +472,7 @@ pub async fn run_live_tracker<F>(
     output_period: Duration,
     on_tick: F,
 ) where
-    F: Fn(u64, u64),
+    F: Fn(u64, u64, Option<RegistrationTick>),
 {
     let mut ticker = tokio::time::interval(output_period);
     // A delayed tick should not fire a burst of catch-up ticks afterwards.
@@ -415,7 +501,7 @@ pub async fn run_live_tracker<F>(
                 let time = live.latest_data_time().unwrap_or(Timestamp(0.0));
                 let tracks = live.snapshot();
                 let _ = snapshot_tx.send(LiveSnapshot { time, tracks: Arc::new(tracks) });
-                on_tick(live.plots_ingested(), live.records_written());
+                on_tick(live.plots_ingested(), live.records_written(), live.registration_tick());
             }
         }
     }
@@ -664,6 +750,71 @@ mod tests {
         assert_eq!(replayed, expected);
     }
 
+    /// The opt-in flag follows the boolean env convention: `1`/`true`/`yes`
+    /// (case-insensitive, trimmed) enable, everything else — including unset —
+    /// stays off. REG.2a. REQ: FR-TRK-038
+    #[test]
+    fn registration_flag_parses_the_boolean_convention() {
+        for on in ["1", "true", "yes", " TRUE ", "Yes"] {
+            assert!(registration_enabled(Some(on)), "{on:?} enables");
+        }
+        for off in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("false"),
+            Some("no"),
+            Some("on"),
+        ] {
+            assert!(!registration_enabled(off), "{off:?} stays off");
+        }
+    }
+
+    /// The registration monitor is a **shadow**: with and without it attached,
+    /// the same plot stream yields the identical air picture, and the tick
+    /// snapshot only reports monitor state. REG.2a. REQ: FR-TRK-038
+    #[test]
+    fn registration_shadow_mode_does_not_change_the_picture() {
+        use std::collections::BTreeMap;
+        let radar_site = LocalFrame::new(Wgs84::from_degrees(51.5, 10.0, 0.0));
+        let monitor = firefly_track::RegistrationMonitor::new(
+            LocalFrame::new(Wgs84::from_degrees(51.0, 10.5, 0.0)),
+            BTreeMap::from([(SensorId(300), radar_site)]),
+            firefly_track::RegistrationConfig::default(),
+        );
+
+        let mut with_monitor =
+            LiveTracker::new(build_live_tracker(&config()), None).with_registration(monitor);
+        let mut without = LiveTracker::new(build_live_tracker(&config()), None);
+
+        for k in 0..8 {
+            let t = k as f64 * 10.0;
+            let plots = vec![
+                adsb(t, 51.0, 10.5 + k as f64 * 0.01, 0x3C_00_01),
+                adsb(t, 50.0, 11.5 - k as f64 * 0.01, 0x3C_00_02),
+            ];
+            with_monitor.ingest(&plots, now_unix_ns());
+            without.ingest(&plots, now_unix_ns());
+        }
+
+        assert_eq!(
+            with_monitor.snapshot(),
+            without.snapshot(),
+            "the shadow monitor must not alter the air picture"
+        );
+
+        let tick = with_monitor
+            .registration_tick()
+            .expect("a configured monitor reports tick state");
+        assert_eq!(tick.estimates_total, 0, "no radar plots, no estimate");
+        assert!(!tick.observable);
+        assert!(tick.biases.is_empty());
+        assert!(
+            without.registration_tick().is_none(),
+            "no monitor, no tick state"
+        );
+    }
+
     /// The async task publishes a snapshot after the first output tick and stops
     /// cleanly when its input channel closes. Uses paused time so the test is
     /// deterministic and instant.
@@ -677,7 +828,7 @@ mod tests {
             plots_rx,
             snapshot_tx,
             Duration::from_millis(100),
-            |_, _| {},
+            |_, _, _| {},
         ));
 
         // Feed enough hits to confirm a track.

@@ -6,7 +6,9 @@
 //! metrics is small and fixed, and a hand-rolled exposition keeps the
 //! dependency surface minimal.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::Mutex;
 
 /// Process-wide counters/gauges, shared via [`crate::AppState`] and the
 /// CAT062 multicast task.
@@ -91,6 +93,25 @@ pub struct Metrics {
     pub sources_flarm: AtomicU64,
     /// Number of configured `radar_asterix` sources (gauge, static per process).
     pub sources_radar: AtomicU64,
+
+    // --- Registration shadow monitor (REG.2a, ADR 0034) ---
+    /// Total number of registration bias estimates produced by the shadow
+    /// monitor (counter). Stays 0 unless `FIREFLY_REGISTRATION_ENABLED` is set
+    /// and enough radar↔truth correspondences accumulate.
+    pub registration_estimates_total: AtomicU64,
+    /// Correspondences found by the most recent registration estimation
+    /// attempt (gauge) — also updated when the attempt was refused for too
+    /// little evidence, so an operator can see *why* no estimate appears.
+    pub registration_correspondences: AtomicU64,
+    /// Whether the latest registration estimate was fully observable (gauge,
+    /// 0/1). 0 before the first estimate and while the sensor geometry is
+    /// rank-deficient (e.g. co-located radars without a geodetic reference).
+    pub registration_observable: AtomicBool,
+    /// Latest per-radar bias estimates from the shadow monitor: sensor id →
+    /// (range bias m, azimuth bias deg). Rendered as labelled gauges. A Mutex
+    /// (not atomics) because the map is small, updated once per output tick
+    /// and read once per /metrics scrape.
+    pub registration_biases: Mutex<BTreeMap<u16, (f64, f64)>>,
 }
 
 /// A guard that increments `ws_clients_connected` (and `ws_clients_total`) on
@@ -276,6 +297,51 @@ pub fn render(metrics: &Metrics) -> String {
         "Number of sensors currently active (received a recent plot).",
         metrics.sensors_active.load(Ordering::Relaxed) as f64,
     );
+    write_metric(
+        &mut out,
+        "firefly_registration_estimates_total",
+        "counter",
+        "Total registration bias estimates produced by the shadow monitor (REG.2a).",
+        metrics.registration_estimates_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_registration_correspondences",
+        "gauge",
+        "Correspondences found by the most recent registration estimation attempt.",
+        metrics.registration_correspondences.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_registration_observable",
+        "gauge",
+        "1 if the latest registration estimate was fully observable, else 0.",
+        f64::from(metrics.registration_observable.load(Ordering::Relaxed)),
+    );
+    // Per-sensor bias gauges need labels, which write_metric's fixed layout
+    // does not cover — render them by hand, only when estimates exist.
+    let biases = metrics
+        .registration_biases
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !biases.is_empty() {
+        out.push_str(
+            "# HELP firefly_registration_bias_range_m Latest estimated range bias per radar sensor, metres (shadow, not applied).\n# TYPE firefly_registration_bias_range_m gauge\n",
+        );
+        for (sensor, (range_m, _)) in biases.iter() {
+            out.push_str(&format!(
+                "firefly_registration_bias_range_m{{sensor=\"{sensor}\"}} {range_m}\n"
+            ));
+        }
+        out.push_str(
+            "# HELP firefly_registration_bias_azimuth_deg Latest estimated azimuth bias per radar sensor, degrees (shadow, not applied).\n# TYPE firefly_registration_bias_azimuth_deg gauge\n",
+        );
+        for (sensor, (_, azimuth_deg)) in biases.iter() {
+            out.push_str(&format!(
+                "firefly_registration_bias_azimuth_deg{{sensor=\"{sensor}\"}} {azimuth_deg}\n"
+            ));
+        }
+    }
     out
 }
 
@@ -336,6 +402,20 @@ mod tests {
         metrics.cat063_status_sent_total.store(7, Ordering::Relaxed);
         metrics.sensors_total.store(3, Ordering::Relaxed);
         metrics.sensors_active.store(2, Ordering::Relaxed);
+        metrics
+            .registration_estimates_total
+            .store(9, Ordering::Relaxed);
+        metrics
+            .registration_correspondences
+            .store(24, Ordering::Relaxed);
+        metrics
+            .registration_observable
+            .store(true, Ordering::Relaxed);
+        metrics
+            .registration_biases
+            .lock()
+            .unwrap()
+            .insert(301, (150.25, 0.3));
 
         let text = render(&metrics);
 
@@ -370,6 +450,23 @@ mod tests {
         assert!(text.contains("# TYPE firefly_cat063_status_sent_total counter"));
         assert!(text.contains("# TYPE firefly_sensors_total gauge"));
         assert!(text.contains("# TYPE firefly_sensors_active gauge"));
+        assert!(text.contains("firefly_registration_estimates_total 9"));
+        assert!(text.contains("firefly_registration_correspondences 24"));
+        assert!(text.contains("firefly_registration_observable 1"));
+        assert!(text.contains("firefly_registration_bias_range_m{sensor=\"301\"} 150.25"));
+        assert!(text.contains("firefly_registration_bias_azimuth_deg{sensor=\"301\"} 0.3"));
+        assert!(text.contains("# TYPE firefly_registration_estimates_total counter"));
+        assert!(text.contains("# TYPE firefly_registration_bias_range_m gauge"));
+    }
+
+    /// Without any registration estimate the labelled bias gauges are absent —
+    /// an empty series is clearer than a misleading 0-bias line. REG.2a.
+    #[test]
+    fn registration_bias_gauges_absent_without_estimates() {
+        let text = render(&Metrics::default());
+        assert!(text.contains("firefly_registration_estimates_total 0"));
+        assert!(!text.contains("firefly_registration_bias_range_m{"));
+        assert!(!text.contains("firefly_registration_bias_azimuth_deg{"));
     }
 
     /// The connected-client guard increments on creation and decrements again
