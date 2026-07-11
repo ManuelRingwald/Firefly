@@ -77,6 +77,16 @@ forschungsorientierten Aggregator mit OAuth2-Zugang, ADR 0019/0024) — Communit
 wie Forschungs-Aggregatoren liefern Hobby-/Forschungsqualität, keine
 zertifizierte Surveillance.
 
+**NACp** (*Navigation Accuracy Category — Position*)
+Der Qualitätsindikator, den ein ADS-B-Ziel mit jeder Positionsmeldung
+mitsendet (DO-260B/ED-102A): eine Stufe 0–11, die die **95-%-Positions-
+unsicherheit (EPU)** der Meldung begrenzt — NACp 11 ≈ 3 m EPU, NACp 8
+≈ 92,6 m, NACp 0 = unbekannt. Firefly leitet daraus die Messunsicherheit
+**je Meldung** ab (σ ≈ EPU/2, FEP.3), statt wie bei den Internet-Quellen eine
+pauschale Annahme zu treffen; fehlender/unbekannter NACp wird bewusst
+**konservativ** (250 m) gewichtet — wer keine Qualität meldet, verdient
+weniger Vertrauen.
+
 **ASTERIX** (*All-purpose Structured Eurocontrol Surveillance Information
 Exchange*)
 Das europäische Standard-Datenformat, in dem Radare und Systeme ihre Meldungen
@@ -85,7 +95,9 @@ austauschen. In „Kategorien" gegliedert:
   desselben Radar-Feeds wie CAT048; Firefly misst daraus die echte
   Antennen-Umlaufzeit und Sensor-Liveness ohne Verkehr (FEP.1).
 - **CAT048:** Einzelradar-Zielmeldungen (Plots/Tracks eines Radars).
-- **CAT021:** ADS-B-Meldungen.
+- **CAT021:** ADS-B-Zielmeldungen einer **Bodenstation** — je Meldung die
+  WGS84-Selbstmeldung eines Luftfahrzeugs samt Identität und
+  Qualitätsindikatoren (NACp); Fireflys Produktions-Eingang für ADS-B (FEP.3).
 - **CAT062:** fertige System-Tracks (die fusionierte Luftlage).
 - **CAT063:** Sensor-Status-Meldungen — Per-Sensor-Liveness des SDPS (ADR 0022,
   UAP-Standardisierung ADR 0032, per-Quelle-Fehlergrund ADR 0033).

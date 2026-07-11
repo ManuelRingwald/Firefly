@@ -306,6 +306,34 @@ Netz-/Quellen-Isolation (ADR 0017), wie bei den anderen Feeds.
 > `sac`/`sic`/`lat`/`lon`/`listen`); `FIREFLY_SOURCES` hat dann **Vorrang** vor
 > `FIREFLY_RADAR_*`.
 
+### Schritt 4d (optional): ADS-B-Bodenstation (CAT021 über UDP)
+
+Eine **eigene ADS-B-Bodenstation** kann ihre Zielmeldungen als **ASTERIX CAT021
+über UDP** senden (FEP.3) — der Produktions-Bezugsweg für ADS-B, statt der
+Internet-REST-Quellen (Schritt 4/4b). Der Adapter ist per
+`FIREFLY_ADSB021_ENABLED=true` zuschaltbar und speist **geodätische Plots** in
+denselben Tracker; die Messunsicherheit kommt aus dem **NACp** jeder Meldung.
+Boden-/Simulations-/Testziele werden verworfen. Kein Stations-Standort nötig
+(CAT021-Positionen sind WGS84-Selbstmeldungen).
+
+```bash
+export FIREFLY_ADSB021_ENABLED=true
+export FIREFLY_ADSB021_SAC=25
+export FIREFLY_ADSB021_SIC=10
+# Listen-Endpoint: Multicast-Gruppe (wird beigetreten) oder 0.0.0.0 (Unicast).
+export FIREFLY_ADSB021_GROUP=239.255.0.21
+export FIREFLY_ADSB021_PORT=8021
+```
+
+Weitere Variable mit Default: `FIREFLY_ADSB021_SENSOR_ID` (`230`). Ist die
+Bodenstation die **einzige** Quelle, zusätzlich `FIREFLY_SYSTEM_REF_*` setzen
+(Schritt 5) — die Quelle trägt keine BBox zum Referenzpunkt bei.
+
+> **Orchestrierter Betrieb:** als `adsb_asterix`-Eintrag in `FIREFLY_SOURCES`
+> (Vertrag `docs/source-input-contract.md` v1.6.0, Felder
+> `listen`?/`sac`?/`sic`?/`sensor_id`?); `FIREFLY_SOURCES` hat dann **Vorrang**
+> vor `FIREFLY_ADSB021_*`.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den

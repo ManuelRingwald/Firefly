@@ -183,15 +183,47 @@ gesetztem Status-Bit) und reicht MHG/SAL/IAR/MAC — solange frisch (≤ 30 s) �
 im CAT062 **I062/380** weiter (ICD 3.4.0, additiv). Kein Schalter nötig; ohne
 EHS-Daten ändert sich nichts am Draht.
 
+#### ADS-B-Bodenstations-Adapter (`FIREFLY_ADSB021_*`, FEP.3)
+
+Vierter Live-Quell-Adapter: eine **eigene ADS-B-Bodenstation** über **ASTERIX
+CAT021 über UDP** — der Produktions-Bezugsweg für ADS-B (Push statt Poll,
+lokal statt Internet-REST). Standalone per `FIREFLY_ADSB021_ENABLED=true`
+oder als `adsb_asterix`-Eintrag in `FIREFLY_SOURCES` (Kontrakt v1.6.0).
+Liefert **geodätische Plots** (WGS84-Selbstmeldungen); die Messunsicherheit
+wird **je Meldung** aus dem **NACp**-Qualitätsindikator abgeleitet
+(DO-260B, σ ≈ EPU/2; ohne/mit NACp 0 → konservative 250 m — bewusst
+schlechter als die 75-m-Annahme der Internet-Quellen). Boden-, Simulations-
+und Testziele (GBS/SIM/TST in I021/040) werden **verworfen** und gelangen
+nie ins Luftlagebild.
+
+| Variable | Typ | Default | Bedeutung |
+|----------|-----|---------|-----------|
+| `FIREFLY_ADSB021_ENABLED` | bool | `false` | Adapter im Standalone-Live-Modus aktivieren |
+| `FIREFLY_ADSB021_SAC` / `_SIC` | u8 | `0` / `0` | Erwartete Stations-Identität (I021/010) |
+| `FIREFLY_ADSB021_GROUP` | IPv4 | `0.0.0.0` | Listen-Adresse: Multicast-Gruppe → beigetreten, sonst Unicast-Bind |
+| `FIREFLY_ADSB021_PORT` | u16 | `8021` | UDP-Port des CAT021-Eingangs |
+| `FIREFLY_ADSB021_SENSOR_ID` | u16 | `230` | Sensor-ID der ADS-B-Stations-Plots |
+
+> **Hinweis Referenzpunkt:** `adsb_asterix` trägt keine bbox und keinen
+> Standort zum System-Referenzpunkt bei. Ist es die **einzige** Quelle,
+> `FIREFLY_SYSTEM_REF_*` setzen (ADR 0021), sonst liegt der Tracking-Frame-
+> Ursprung auf dem Default.
+>
+> **Sicherheit:** wie beim Radar — ASTERIX-UDP ist nicht authentifiziert; der
+> CAT021-Decoder ist robust (kein Panic auf Eingabe, gefuzzt:
+> `cat021_decode`), Vertrauensgrenze = Netz-Isolation (ADR 0017). Der Decoder
+> erwartet die **Edition-2.x-UAP**; eine 0.26-Station scheitert laut (Decode-
+> Fehler im Log) statt still falsch zu dekodieren.
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
-Maßgeblich: `docs/source-input-contract.md` v1.5.0. Im **Live-Modus** liest Firefly
+Maßgeblich: `docs/source-input-contract.md` v1.6.0. Im **Live-Modus** liest Firefly
 seine Quellen aus einer JSON-Liste, die ein Orchestrator (Wayfinder) je Instanz
 setzt — ein Eintrag je Quelle, mehrere Adapter speisen denselben Live-Tracker.
 
 | Variable | Typ | Standard | Bedeutung |
 |----------|-----|----------|-----------|
-| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`/`FIREFLY_ADSBAGG_*`/`FIREFLY_FLARM_*`. Eintrag: `{type, bbox?, provider?, sac?, sic?, sensor_id?, cred_env?, lat?, lon?, height_m?, listen?, poll_interval_secs?}`. `type` ∈ `adsb_opensky` / `adsb_aggregator` / `flarm_aprs` / `radar_asterix` (alle unterstützt). `provider` (nur `adsb_aggregator`): `adsb_lol` (Default) \| `adsb_fi`; unbekannt → **Start-Abbruch**. `poll_interval_secs` (`adsb_opensky`/`adsb_aggregator`, `> 0`; fehlt/`0` → Default 10 s, ADR 0029/0031) überschreibt das Poll-Intervall. Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
+| `FIREFLY_SOURCES` | JSON-Array | — | Quell-Liste. Gesetzt → **Vorrang** vor `FIREFLY_OPENSKY_*`/`FIREFLY_ADSBAGG_*`/`FIREFLY_FLARM_*`/`FIREFLY_RADAR_*`/`FIREFLY_ADSB021_*`. Eintrag: `{type, bbox?, provider?, sac?, sic?, sensor_id?, cred_env?, lat?, lon?, height_m?, listen?, poll_interval_secs?}`. `type` ∈ `adsb_opensky` / `adsb_aggregator` / `flarm_aprs` / `radar_asterix` / `adsb_asterix` (alle unterstützt). `provider` (nur `adsb_aggregator`): `adsb_lol` (Default) \| `adsb_fi`; unbekannt → **Start-Abbruch**. `poll_interval_secs` (`adsb_opensky`/`adsb_aggregator`, `> 0`; fehlt/`0` → Default 10 s, ADR 0029/0031) überschreibt das Poll-Intervall. Unbekannter `type` oder malformes JSON → **Start-Abbruch**. |
 | `FIREFLY_SOURCE_<n>_SECRET` o. ä. | string | — | Beliebig **benannte** Credential-Env, von einem Eintrag per `cred_env` referenziert. Wert quellenabhängig: `client_id:client_secret` (`adsb_opensky`) bzw. `callsign:passcode` (`flarm_aprs`), Split am ersten `:`; nie im JSON-Blob. |
 
 Beispiel: siehe `docs/source-input-contract.md` §2. Referenzpunkt = Mittelpunkt der
@@ -343,11 +375,13 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_adsbagg_rate_limited_total` | counter | **Live-Modus:** Aggregator-Polls mit HTTP 429 (Teilmenge der Poll-Fehler); jeder 429 dehnt das Poll-Intervall exponentiell (Backoff wie #49) |
 | `firefly_flarm_plots_received_total` | counter | **Live-Modus:** Empfangene FLARM/OGN-Plots (APRS-IS, ADR 0026) |
 | `firefly_radar_plots_received_total` | counter | **Live-Modus:** Dekodierte Radar-ASTERIX-Plots (CAT048/UDP, ADR 0028) |
+| `firefly_adsb021_reports_received_total` | counter | **Live-Modus:** Dekodierte ADS-B-Bodenstations-Meldungen, die Plots wurden (CAT021/UDP, FEP.3) |
 | `firefly_live_plot_batches_dropped_total` | counter | **Live-Modus:** Plot-Batches verworfen, weil der Quell→Tracker-Kanal voll war (Back-Pressure-Verlust). Wächst nur unter Überlast — Operator-Signal zum Skalieren/Drosseln. |
 | `firefly_sources_opensky` | gauge | Anzahl konfigurierter `adsb_opensky`-Quellen (Quell-Mix, ADR 0023) |
 | `firefly_sources_adsbagg` | gauge | Anzahl konfigurierter `adsb_aggregator`-Quellen (ADR 0031) |
 | `firefly_sources_flarm` | gauge | Anzahl konfigurierter `flarm_aprs`-Quellen |
 | `firefly_sources_radar` | gauge | Anzahl konfigurierter `radar_asterix`-Quellen |
+| `firefly_sources_adsb021` | gauge | Anzahl konfigurierter `adsb_asterix`-Quellen (CAT021-Bodenstation, FEP.3) |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |
@@ -391,7 +425,7 @@ firefly_tracks_active
 rate(firefly_live_plot_batches_dropped_total[1m])
 
 # Konfigurierter Quell-Mix dieser Instanz:
-firefly_sources_opensky + firefly_sources_adsbagg + firefly_sources_flarm + firefly_sources_radar
+firefly_sources_opensky + firefly_sources_adsbagg + firefly_sources_flarm + firefly_sources_radar + firefly_sources_adsb021
 ```
 
 ---
@@ -461,6 +495,18 @@ Simulator-Output (Scans mit SystemTracks) für deterministische Replay-Tests.
 
 Aufzeichnungen entstehen automatisch bei Nutzung des `firefly-recorder`-Crates
 (konfigurierbar). Das Format ist JSON-Lines (ein `Frame` pro Zeile).
+
+Die beiden CLI-Werkzeuge des Crates (`record`, `replay`) sind env-getrieben:
+
+| Variable | Werkzeug | Default | Bedeutung |
+|----------|----------|---------|-----------|
+| `FIREFLY_RECORD_OUTPUT` | `record` | `recording.ffrec` | Pfad der `.ffrec`-Ausgabedatei |
+| `FIREFLY_REPLAY_INPUT` | `replay` | `recording.ffrec` | Pfad der `.ffrec`-Eingabedatei |
+| `FIREFLY_REPLAY_SPEED` | `replay` | `1.0` | Abspieltempo (`2.0` = doppelt so schnell) |
+
+> Nicht zu verwechseln mit den `FIREFLY_REPLAY_PLOTS_*`-Variablen des
+> **Plot**-Replays (§5.2/§6): `.ffrec` speichert den Tracker-**Output**
+> (Frames), `.ffplots` den Tracker-**Input** (Plots).
 
 ### 5.2 Replay einer Aufzeichnung
 

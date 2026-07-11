@@ -8,6 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use firefly_adsb021::Adsb021Config;
 use firefly_adsbagg::{AdsbAggConfig, AdsbAggPoller};
 use firefly_asterix::{Cat062Encoder, SensorReason};
 use firefly_core::{Plot, SensorId};
@@ -117,12 +118,18 @@ async fn build_live_state(
     let adsbagg = resolved.adsbagg;
     let flarm = resolved.flarm;
     let radar = resolved.radar;
+    let adsb021 = resolved.adsb021;
 
     // With no active source adapter the tracker idles and the instance serves a
     // deliberate EMPTY SKY (plus the CAT065 heartbeat). That is the complete
     // picture then, so report ready immediately — live_ready is otherwise set
     // by the first plot of an adapter, which will never come (ADR 0030).
-    if opensky.is_empty() && adsbagg.is_empty() && flarm.is_empty() && radar.is_empty() {
+    if opensky.is_empty()
+        && adsbagg.is_empty()
+        && flarm.is_empty()
+        && radar.is_empty()
+        && adsb021.is_empty()
+    {
         metrics
             .live_ready
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -135,9 +142,10 @@ async fn build_live_state(
     let sensor_id = representative.sensor_id;
     let output_period = Duration::from_secs(representative.poll_interval_secs);
 
-    // Geodetic source sensors (OpenSky, aggregator, FLARM) and their scan
-    // periods: the polled adapters use their poll interval, FLARM a nominal (it
-    // is a push stream). These share the common tracking frame (geodetic path).
+    // Geodetic source sensors (OpenSky, aggregator, FLARM, CAT021 station) and
+    // their scan periods: the polled adapters use their poll interval, the push
+    // streams (FLARM, CAT021) a nominal. These share the common tracking frame
+    // (geodetic path).
     let geodetic_sensors: Vec<(SensorId, f64)> = opensky
         .iter()
         .map(|c| (c.sensor_id, c.poll_interval_secs as f64))
@@ -150,6 +158,11 @@ async fn build_live_state(
             flarm
                 .iter()
                 .map(|c| (c.sensor_id, sources::FLARM_NOMINAL_SCAN_SECS)),
+        )
+        .chain(
+            adsb021
+                .iter()
+                .map(|c| (c.sensor_id, firefly_adsb021::NOMINAL_UPDATE_SECS)),
         )
         .collect();
 
@@ -179,6 +192,7 @@ async fn build_live_state(
         adsbagg_sources = adsbagg.len(),
         flarm_sources = flarm.len(),
         radar_sources = radar.len(),
+        adsb021_sources = adsb021.len(),
         lat_min = representative.lat_min,
         lat_max = representative.lat_max,
         lon_min = representative.lon_min,
@@ -203,6 +217,9 @@ async fn build_live_state(
     metrics
         .sources_radar
         .store(radar.len() as u64, Ordering::Relaxed);
+    metrics
+        .sources_adsb021
+        .store(adsb021.len() as u64, Ordering::Relaxed);
 
     // Channel: source adapters → live tracker (bounded; drop batches if the
     // tracker is busy rather than blocking a network callback). Each source clones
@@ -374,6 +391,14 @@ async fn build_live_state(
             Arc::clone(&sensor_monitor),
         );
     }
+    for cfg in adsb021 {
+        spawn_adsb021_listener_live(
+            cfg,
+            plots_tx.clone(),
+            Arc::clone(&metrics),
+            Arc::clone(&sensor_monitor),
+        );
+    }
 
     // Spawn the live CAT062 feed, if enabled.
     spawn_cat062_live(Arc::clone(&metrics), reference, snapshot_rx.clone());
@@ -434,11 +459,18 @@ fn resolve_live_sources() -> sources::ResolvedSources {
             } else {
                 Vec::new()
             };
+            let adsb021_cfg = Adsb021Config::from_env();
+            let adsb021 = if adsb021_cfg.enabled {
+                vec![adsb021_cfg]
+            } else {
+                Vec::new()
+            };
             return sources::ResolvedSources {
                 opensky,
                 adsbagg,
                 flarm,
                 radar,
+                adsb021,
                 skipped: Vec::new(),
             };
         }
@@ -462,6 +494,7 @@ fn resolve_live_sources() -> sources::ResolvedSources {
         && resolved.adsbagg.is_empty()
         && resolved.flarm.is_empty()
         && resolved.radar.is_empty()
+        && resolved.adsb021.is_empty()
     {
         tracing::warn!("FIREFLY_SOURCES: no live source adapter active (empty sky)");
     }
@@ -745,6 +778,42 @@ fn spawn_radar_listener_live(
                 }
             },
         )
+        .await;
+    });
+}
+
+/// Spawn the ADS-B ground-station (CAT021) UDP listener in Live mode (FEP.3):
+/// each decoded datagram's plots are sent into `plots_tx` so the tracker fuses
+/// them with the radar/internet-ADS-B inputs. A full channel drops the batch
+/// with a warning (availability over back-pressure).
+///
+/// Sets `metrics.live_ready = true` on the first batch and counts reports in
+/// `adsb021_reports_received_total`. Notifies `sensor_monitor` so the station's
+/// liveness is tracked (CAT063). The listener never returns under normal
+/// operation; a bind failure logs and returns (other sources keep running).
+fn spawn_adsb021_listener_live(
+    config: Adsb021Config,
+    plots_tx: mpsc::Sender<Vec<Plot>>,
+    metrics: Arc<Metrics>,
+    sensor_monitor: Arc<SensorHealthMonitor>,
+) {
+    let sensor_id = config.sensor_id;
+    tokio::spawn(async move {
+        firefly_adsb021::run(&config, move |plots| {
+            metrics
+                .live_ready
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            metrics
+                .adsb021_reports_received_total
+                .fetch_add(plots.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
+            if let Err(e) = plots_tx.try_send(plots) {
+                metrics
+                    .live_plot_batches_dropped_total
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tracing::warn!("plot channel full; dropping ADS-B CAT021 batch: {e}");
+            }
+        })
         .await;
     });
 }

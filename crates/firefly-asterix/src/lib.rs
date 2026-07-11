@@ -33,6 +33,7 @@
 //! REQ: FR-IO-003, FR-TRK-008
 
 mod bds;
+mod cat021;
 mod cat034;
 mod cat048;
 mod cat062;
@@ -40,6 +41,7 @@ mod cat063;
 mod cat065;
 mod fspec;
 
+pub use cat021::{decode_adsb_reports, Cat021DecodeError, DecodedAdsbReport};
 pub use cat034::{
     decode_service_messages, Cat034DecodeError, DecodedServiceMessage, ServiceMessageType,
 };
