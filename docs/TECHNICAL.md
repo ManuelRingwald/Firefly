@@ -163,6 +163,19 @@ fließen in denselben Tracker (Fusion mit ADS-B/FLARM).
 > (kein Panic auf Eingabe, length-checked, Mutations-/Trunkierungs-getestet).
 > Vertrauensgrenze = Netz-/Quellen-Isolation (ADR 0017).
 
+**CAT034-Servicemeldungen (FEP.1):** Derselbe UDP-Eingang verarbeitet zusätzlich
+**CAT034** (Nordmarke, Sektor-Meldungen; Dispatch am führenden CAT-Oktett,
+`0x22` = 34 / `0x30` = 48). Wirkung: (1) **Gemessene Scan-Periode** — aus den
+Nordmarken-Intervallen (geglättet, Ausreißer-/Mitternachts-tolerant) wird die
+echte Antennen-Umlaufzeit bestimmt; sie ersetzt den konfigurierten Nominalwert
+als **CAT063-Staleness-Basis** (`2,5 ×` gemessene Periode) und erscheint als
+Metrik `firefly_radar_scan_period_seconds{sensor=…}`. (2) **Liveness ohne
+Verkehr** — jede Servicemeldung zählt als Sensor-Aktivität: „leerer Himmel"
+und „totes Radar" sind eingangsseitig unterscheidbar. Sendet der Radarkopf
+keine Servicemeldungen, bleibt alles beim konfigurierten Verhalten
+(`FIREFLY_RADAR_SCAN_SECS`). Die Tracker-Löschkadenz bleibt in FEP.1 bewusst
+beim Konfigurationswert. Der CAT034-Decoder ist gefuzzt (`cat034_decode`).
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.5.0. Im **Live-Modus** liest Firefly
@@ -339,6 +352,8 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_registration_apply_active` | gauge | **Registrierung (REG.2b):** 1 = eine Korrektur ist aktuell in Kraft, 0 = keine (ohne `FIREFLY_REGISTRATION_APPLY` immer 0; auch 0, solange das Anwendungs-Gate jede Schätzung ablehnt) |
 | `firefly_registration_applied_bias_range_m{sensor="…"}` | gauge | **Registrierung (REG.2b):** aktuell **angewandter** Range-Bias je Radar, Meter — der geglättete, Gate-geprüfte Wert, der tatsächlich von den Messungen abgezogen wird (≠ roher Schätzwert) |
 | `firefly_registration_applied_bias_azimuth_deg{sensor="…"}` | gauge | **Registrierung (REG.2b):** aktuell **angewandter** Azimut-Bias je Radar, Grad |
+| `firefly_radar_north_markers_total` | counter | **FEP.1:** empfangene CAT034-Nordmarken über alle Radar-Quellen |
+| `firefly_radar_scan_period_seconds{sensor="…"}` | gauge | **FEP.1:** **gemessene** Antennen-Umlaufzeit je Radar (Sekunden, aus Nordmarken-Intervallen). Erscheint erst nach der ersten Messung; speist die CAT063-Staleness-Schwelle. |
 
 ### 3.3 Prometheus scrape-Konfiguration
 

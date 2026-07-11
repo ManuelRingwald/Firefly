@@ -38,10 +38,12 @@
 mod config;
 mod listener;
 mod plot;
+mod service;
 
 pub use config::{
     RadarConfig, DEFAULT_PORT, DEFAULT_SCAN_PERIOD_SECS, DEFAULT_SIGMA_AZIMUTH_DEG,
     DEFAULT_SIGMA_RANGE_M,
 };
-pub use listener::{bind_socket, datagram_to_plots, listen_addr, run};
+pub use listener::{bind_socket, datagram_to_plots, datagram_to_service, listen_addr, run};
 pub use plot::target_report_to_plot;
+pub use service::ScanPeriodEstimator;

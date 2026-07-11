@@ -690,21 +690,61 @@ fn spawn_radar_listener_live(
         "radar ASTERIX (CAT048) listener starting (live mode)"
     );
     tokio::spawn(async move {
-        firefly_radar::run(&config, move |plots| {
-            metrics
-                .live_ready
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            metrics
-                .radar_plots_received_total
-                .fetch_add(plots.len() as u64, std::sync::atomic::Ordering::Relaxed);
-            sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
-            if let Err(e) = plots_tx.try_send(plots) {
-                metrics
-                    .live_plot_batches_dropped_total
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                tracing::warn!("plot channel full; dropping radar batch: {e}");
-            }
-        })
+        let plot_metrics = Arc::clone(&metrics);
+        let plot_monitor = Arc::clone(&sensor_monitor);
+        // The scan-period estimator (FEP.1): measures the antenna's true
+        // rotation from CAT034 north markers, feeding the CAT063 liveness
+        // threshold and the per-sensor metric. Owned by this task — one
+        // estimator per radar source.
+        let mut estimator = firefly_radar::ScanPeriodEstimator::new();
+        firefly_radar::run(
+            &config,
+            move |plots| {
+                plot_metrics
+                    .live_ready
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                plot_metrics
+                    .radar_plots_received_total
+                    .fetch_add(plots.len() as u64, std::sync::atomic::Ordering::Relaxed);
+                plot_monitor.record_activity(sensor_id, std::time::Instant::now());
+                if let Err(e) = plots_tx.try_send(plots) {
+                    plot_metrics
+                        .live_plot_batches_dropped_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tracing::warn!("plot channel full; dropping radar batch: {e}");
+                }
+            },
+            move |messages| {
+                // Any service message proves the sensor alive — that is the
+                // point of FEP.1: liveness independent of traffic.
+                sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
+                for message in &messages {
+                    if message.message_type != firefly_asterix::ServiceMessageType::NorthMarker {
+                        continue;
+                    }
+                    metrics
+                        .radar_north_markers_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(time) = message.time else { continue };
+                    let before = estimator.period_secs();
+                    if let Some(period) = estimator.observe_north_marker(time.as_secs()) {
+                        sensor_monitor.update_scan_period(sensor_id, period);
+                        metrics
+                            .radar_scan_periods
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .insert(sensor_id.0, period);
+                        if before.is_none() {
+                            tracing::info!(
+                                sensor_id = sensor_id.0,
+                                period_s = format!("{period:.2}").as_str(),
+                                "radar scan period measured from CAT034 north markers (FEP.1)"
+                            );
+                        }
+                    }
+                }
+            },
+        )
         .await;
     });
 }
