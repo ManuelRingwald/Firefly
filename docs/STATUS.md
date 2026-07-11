@@ -30,9 +30,9 @@
   ohne Vertikal-Daten byte-identisch alt, I062/136 unverändert daneben;
   byte-genaue Referenz-Vektoren in ICD §4.8. Ehrliche Grenzen: ein
   Filter-Satz für alle Baro-Quellen; RoCD aus eigener Messung (BDS-6,0-
-  Fusion = Folge-Häppchen); keine Temperatur-Korrektur. **Wayfinder-Issue
-  folgt** (GitHub-MCP war beim Abschluss nicht erreichbar — nach
-  Wiederverbindung anlegen und hier + in todo-for-wayfinder.md eintragen).
+  Fusion = Folge-Häppchen); keine Temperatur-Korrektur. **Wayfinder-Nachzug:
+  Issue #241** (`from-firefly`; Decoder + Label: geglättete Höhe,
+  QNH-Kennzeichnung, RoCD-Pfeil).
   8 neue Tests (Filter 4, Track 1, Encoder/Decoder 2, apply_qnh 1), Gates
   grün, cat062-Fuzz-Smoke 5,5 M Läufe. Roadmap-Stand: **62,5 %**.
 - **Nächster Schritt:** **VERT.3** ankündigen — Mode of Movement +
