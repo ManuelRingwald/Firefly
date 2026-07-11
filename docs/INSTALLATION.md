@@ -300,6 +300,12 @@ Weitere Variablen mit Defaults: `FIREFLY_RADAR_HEIGHT_M` (`0`),
 ASTERIX-UDP ist **nicht authentifiziert** — die Vertrauensgrenze ist die
 Netz-/Quellen-Isolation (ADR 0017), wie bei den anderen Feeds.
 
+Der Eingang versteht neben CAT048/CAT034 auch die **Legacy-Generation
+CAT001/CAT002** (FEP.4) — ein älterer Radarkopf wird mit denselben Variablen
+konfiguriert, ohne weiteres Zutun. Voraussetzung: Der Kopf sendet CAT002
+mit (Standard bei realen Anlagen), denn daraus kommt die volle Tageszeit,
+an der die trunkierten CAT001-Zeitstempel verankert werden.
+
 > **Orchestrierter Betrieb:** Im auto-orchestrierten Pfad (ADR 0023) setzt der
 > Orchestrator den Radar stattdessen als `radar_asterix`-Eintrag in
 > `FIREFLY_SOURCES` (Vertrag `docs/source-input-contract.md` v1.3.0, Felder
