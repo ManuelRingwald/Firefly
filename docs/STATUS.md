@@ -10,6 +10,28 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (REG.3 — Bias-Statistik auf den Draht; AP-REG komplett)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **REG.3 — CAT063-Bias-Items (FR-IO-008, ICD 3.3.0 additiv):** Bei aktiver
+  Registrierungs-Korrektur (REG.2b) trägt der CAT063-Sensor-Status je Radar
+  die **angewandte** Korrektur — **I063/080** (SRG=0 + SRB, LSB 1/128 NM ≈
+  14,47 m) und **I063/081** (SAB, LSB 360/2¹⁶ ° ≈ 0,0055°), Sättigung statt
+  Wrap. Sende-Regel: **nur bei in Kraft befindlicher Korrektur** (Absenz =
+  „keine Korrektur", keine Null-Behauptung); ohne Korrektur byte-identisch
+  zur alten Form, mit Korrektur FSPEC `0xBB 0x80` (16-Oktett-Record).
+  Datenfluss: LiveTracker-Tick → `Metrics.registration_applied_biases` →
+  Bias-Provider-Closure des `run_cat063_sender` (kein neuer geteilter
+  Zustand). I063/070/090–092 bewusst ungesendet (kein Zeit-/PSR-Bias
+  geschätzt). 5 neue Asterix-Tests (byte-genauer Referenz-Dump) + 1
+  UDP-End-to-End-Test. Gates grün. **⚠️ Offen: Wayfinder-Issue
+  (`from-firefly`) noch anzulegen** — GitHub-API war bei Abschluss nicht
+  erreichbar; Platzhalter-Zeile in `docs/cross-project/todo-for-wayfinder.md`
+  danach ersetzen. Roadmap-Stand: **41,5 %** — **AP-REG komplett**.
+- **Nächster Schritt:** **AP-FEP** beginnt — **FEP.1** ankündigen
+  (CAT034-Decoder: Nordmarke/Sektor/Servicemeldungen → dynamische
+  `scan_period`, Sensor-Liveness aus dem Datenstrom; S4).
+
 ## 🎯 Stand 2026-07-11 (REG.2b — Bias-Korrektur vor der Fusion; AP-REG-Kern komplett)
 
 - **Zuletzt aktualisiert:** 2026-07-11
