@@ -155,6 +155,7 @@ pub(crate) fn parse_aircraft(
         icao_address: icao,
         callsign,
         spi: false,
+        geometric_height_ft: None,
         daps: firefly_core::Daps::default(),
     };
 

@@ -179,6 +179,30 @@ pub struct SystemTrack {
     /// and [`SystemTrack::provenance`]. Defaults to all-`None` for back-compat.
     #[serde(default)]
     pub source_ages: SourceAges,
+    /// The **filtered** barometric altitude, feet (VERT.2). Pressure altitude
+    /// (1013.25 hPa) as produced by the tracker; the output side may replace
+    /// it with a QNH-corrected value and then sets
+    /// [`barometric_qnh_corrected`](Self::barometric_qnh_corrected). Absent
+    /// when the vertical filter has no fresh estimate. Encoded as CAT062
+    /// I062/135 when present.
+    #[serde(default)]
+    pub barometric_altitude_ft: Option<f64>,
+    /// Whether [`barometric_altitude_ft`](Self::barometric_altitude_ft) has
+    /// been corrected to a **regional QNH** (I062/135 QNH bit). `false` means
+    /// the value is an uncorrected pressure altitude — honest absence of a
+    /// correction, never a silent standard-atmosphere claim.
+    #[serde(default)]
+    pub barometric_qnh_corrected: bool,
+    /// The smoothed **geometric** (WGS-84) altitude, feet (VERT.2), from
+    /// genuinely geometric source heights only. Absent without a fresh
+    /// geometric contribution. Encoded as CAT062 I062/130 when present.
+    #[serde(default)]
+    pub geometric_altitude_ft: Option<f64>,
+    /// Rate of climb/descent, ft/min, positive = climb (VERT.2). From the
+    /// vertical filter; absent when it has no fresh estimate. Encoded as
+    /// CAT062 I062/220 when present.
+    #[serde(default)]
+    pub rocd_ft_min: Option<f64>,
 }
 
 impl SystemTrack {
@@ -264,6 +288,10 @@ mod tests {
             contributing_sensors: Vec::new(),
             adsb_age_s: None,
             source_ages: SourceAges::default(),
+            barometric_altitude_ft: None,
+            barometric_qnh_corrected: false,
+            geometric_altitude_ft: None,
+            rocd_ft_min: None,
         }
     }
 

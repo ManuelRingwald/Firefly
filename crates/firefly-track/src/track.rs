@@ -27,6 +27,10 @@ const REVISIT_EWMA: f64 = 0.5;
 /// Upper bound on remembered hit times — the confirmation window never needs
 /// more than a handful, so a small cap keeps the per-track state bounded.
 const MAX_RECENT_HITS: usize = 16;
+/// EWMA gain for the geometric-altitude smoother (VERT.2): geometric heights
+/// arrive already fairly clean (GNSS), so a light smoothing that follows
+/// climbs within a few reports beats a heavy filter.
+const GEOMETRIC_EWMA_ALPHA: f64 = 0.3;
 
 /// Lifecycle status of a track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,6 +161,21 @@ pub struct Track {
     /// for [`fresh_daps`](Self::fresh_daps).
     #[serde(default)]
     daps_time: Option<f64>,
+    /// The per-track vertical filter (VERT.2): barometric altitude + rate of
+    /// climb/descent, fed by every Mode-C/FL-carrying associated report.
+    /// `None` until the first such report.
+    #[serde(default)]
+    vertical: Option<crate::vertical::VerticalFilter>,
+    /// Smoothed **geometric** (WGS-84) altitude, feet — EWMA over the
+    /// genuinely geometric heights of associated reports (ADS-B I021/140,
+    /// MLAT I020/105). Kept strictly separate from the barometric chain:
+    /// the two use different references and must never be mixed.
+    #[serde(default)]
+    geometric_altitude_ft: Option<f64>,
+    /// Data time of the last geometric-height report — the freshness basis
+    /// for reporting [`geometric_altitude_ft`](Self::geometric_altitude_ft).
+    #[serde(default)]
+    geometric_time: Option<f64>,
 }
 
 impl Track {
@@ -181,6 +200,9 @@ impl Track {
             spi: false,
             daps: Daps::default(),
             daps_time: None,
+            vertical: None,
+            geometric_altitude_ft: None,
+            geometric_time: None,
         }
     }
 
@@ -317,6 +339,29 @@ impl Track {
         self.callsign
     }
 
+    /// The **filtered** vertical state (VERT.2), but only while fresh: the
+    /// filter's last accepted Mode-C measurement lies within `window`
+    /// seconds of `now`. Returns `(pressure altitude ft — predicted to
+    /// `now` —, rate of climb/descent ft/min)`; a vertical estimate coasted
+    /// beyond the window is withheld rather than reported as current
+    /// (absence over a stale claim, like the DAPs).
+    pub fn vertical_estimate(&self, now: f64, window: f64) -> Option<(f64, f64)> {
+        let filter = self.vertical.as_ref()?;
+        if now - filter.last_update_time() > window {
+            return None;
+        }
+        Some((filter.altitude_ft_at(now), filter.rate_ft_min()))
+    }
+
+    /// The smoothed **geometric** (WGS-84) altitude in feet (VERT.2), but
+    /// only while fresh (last geometric report within `window` of `now`).
+    pub fn geometric_altitude_ft(&self, now: f64, window: f64) -> Option<f64> {
+        match self.geometric_time {
+            Some(t) if now - t <= window => self.geometric_altitude_ft,
+            _ => None,
+        }
+    }
+
     /// Sensors that contributed a hit in the most recent scan.
     pub fn contributing_sensors(&self) -> &BTreeSet<SensorId> {
         &self.contributing_sensors
@@ -407,6 +452,27 @@ impl Track {
             self.daps.merge_from(&mode_ac.daps);
             self.daps_time = Some(self.daps_time.map_or(time, |prev| prev.max(time)));
         }
+        // Vertical chain (VERT.2): every Mode-C/FL report feeds the vertical
+        // filter (which gates its own outliers); a genuinely geometric height
+        // updates the separate geometric EWMA. Deliberately per-report, not
+        // sticky — freshness is judged at read time.
+        if let Some(level_ft) = mode_ac.flight_level_ft {
+            match &mut self.vertical {
+                Some(filter) => filter.update(level_ft, time),
+                None => {
+                    self.vertical = Some(crate::vertical::VerticalFilter::from_first_measurement(
+                        level_ft, time,
+                    ))
+                }
+            }
+        }
+        if let Some(geo_ft) = mode_ac.geometric_height_ft {
+            self.geometric_altitude_ft = Some(match self.geometric_altitude_ft {
+                Some(prev) => prev + GEOMETRIC_EWMA_ALPHA * (geo_ft - prev),
+                None => geo_ft,
+            });
+            self.geometric_time = Some(time);
+        }
     }
 
     /// The track's DAPs, but only while **fresh**: the most recent
@@ -459,6 +525,7 @@ mod tests {
                 icao_address: Some(0x0040_0123),
                 callsign: Some(Callsign::new("DLH123")),
                 spi: false,
+                geometric_height_ft: None,
                 daps: Daps::default(),
             },
             0.0,
@@ -504,6 +571,46 @@ mod tests {
         assert!(track.fresh_daps(200.0, 30.0).is_empty(), "stale → withheld");
     }
 
+    /// The vertical chain (VERT.2): Mode-C reports feed the filter (altitude
+    /// and rate reported while fresh, withheld when stale) and geometric
+    /// heights the separate EWMA, never mixed with the barometric value.
+    /// REQ: FR-TRK-042
+    #[test]
+    fn vertical_chain_reports_fresh_and_withholds_stale() {
+        let mut track = fresh_track();
+
+        // A steady climb at 50 ft/s across six Mode-C reports.
+        for i in 0..6 {
+            let t = i as f64 * 5.0;
+            let reply = ModeAC {
+                flight_level_ft: Some(10_000.0 + 50.0 * t),
+                ..ModeAC::default()
+            };
+            track.update_identity(&reply, t);
+        }
+        let (altitude_ft, rocd) = track.vertical_estimate(25.0, 30.0).expect("fresh");
+        assert!(
+            (altitude_ft - 11_250.0).abs() < 150.0,
+            "filtered altitude tracks the climb, got {altitude_ft}"
+        );
+        assert!(rocd > 1_000.0, "climb visible in the rate, got {rocd}");
+
+        // A genuinely geometric height feeds the separate EWMA…
+        let geo = ModeAC {
+            geometric_height_ft: Some(11_600.0),
+            ..ModeAC::default()
+        };
+        track.update_identity(&geo, 26.0);
+        assert_eq!(track.geometric_altitude_ft(27.0, 30.0), Some(11_600.0));
+        // …and does NOT disturb the barometric filter (different reference).
+        let (after_geo, _) = track.vertical_estimate(27.0, 30.0).unwrap();
+        assert!((after_geo - altitude_ft).abs() < 150.0);
+
+        // Staleness withholds both — absence over a stale claim.
+        assert!(track.vertical_estimate(100.0, 30.0).is_none());
+        assert!(track.geometric_altitude_ft(100.0, 30.0).is_none());
+    }
+
     /// A primary-only plot (no SSR reply) does not erase a previously known
     /// identity — losing one reply should not wipe out what we already know.
     /// REQ: FR-TRK-009
@@ -517,6 +624,7 @@ mod tests {
                 icao_address: Some(0x0040_0123),
                 callsign: Some(Callsign::new("DLH123")),
                 spi: false,
+                geometric_height_ft: None,
                 daps: Daps::default(),
             },
             0.0,
@@ -550,6 +658,7 @@ mod tests {
                 icao_address: Some(0x0040_0123),
                 callsign: None,
                 spi: false,
+                geometric_height_ft: None,
                 daps: Daps::default(),
             },
             0.0,
@@ -561,6 +670,7 @@ mod tests {
                 icao_address: Some(0x0040_0123),
                 callsign: None,
                 spi: false,
+                geometric_height_ft: None,
                 daps: Daps::default(),
             },
             0.0,
@@ -582,6 +692,7 @@ mod tests {
                 icao_address: None,
                 callsign: None,
                 spi: true,
+                geometric_height_ft: None,
                 daps: Daps::default(),
             },
             0.0,

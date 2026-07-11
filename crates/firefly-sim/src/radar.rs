@@ -148,6 +148,7 @@ impl Radar {
                     icao_address: target.icao_address,
                     callsign: target.callsign,
                     spi: false,
+                    geometric_height_ft: None,
                     daps: firefly_core::Daps::default(),
                 },
             )

@@ -177,6 +177,10 @@ mod tests {
             contributing_sensors: Vec::new(),
             adsb_age_s: None,
             source_ages: firefly_core::SourceAges::default(),
+            barometric_altitude_ft: None,
+            barometric_qnh_corrected: false,
+            geometric_altitude_ft: None,
+            rocd_ft_min: None,
         }
     }
 

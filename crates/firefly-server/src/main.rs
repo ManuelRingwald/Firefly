@@ -333,6 +333,11 @@ async fn build_live_state(
     // the fusion path is opted into explicitly, never implied.
     let apply = registration_enabled(std::env::var("FIREFLY_REGISTRATION_APPLY").ok().as_deref());
     let mut live = LiveTracker::new(tracker, recorder);
+    // VERT.2: attach the QNH service so published barometric altitudes are
+    // corrected where a regional QNH is observed (I062/135 QNH bit).
+    if !meteo.regions.is_empty() {
+        live = live.with_meteo(meteo.into_service());
+    }
     match (registration, apply) {
         (Some(monitor), true) => {
             tracing::info!(

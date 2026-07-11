@@ -33,6 +33,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use firefly_asterix::Cat062Encoder;
 use firefly_core::{Plot, SensorId, SystemTrack, Timestamp};
 use firefly_geo::{LocalFrame, Wgs84};
+use firefly_meteo::QnhService;
 use firefly_opensky::OpenSkyConfig;
 use firefly_track::{
     ProcessNoise, RegistrationApplier, RegistrationMonitor, SensorErrorModel, Tracker,
@@ -299,6 +300,24 @@ pub struct RegistrationTick {
     pub applied: Vec<(SensorId, f64, f64)>,
 }
 
+/// Correct a track's barometric altitude to the regional QNH at its position
+/// (VERT.2). Only an **observed** regional QNH corrects; the
+/// standard-atmosphere fallback leaves the pressure altitude untouched and
+/// the flag cleared — I062/135 then honestly reports an uncorrected value.
+fn apply_qnh(track: &mut SystemTrack, meteo: &QnhService) {
+    let Some(pressure_altitude_ft) = track.barometric_altitude_ft else {
+        return;
+    };
+    let qnh = meteo.lookup(track.position.lat_deg(), track.position.lon_deg());
+    if qnh.is_observed() {
+        track.barometric_altitude_ft = Some(firefly_meteo::pressure_altitude_to_qnh_altitude(
+            pressure_altitude_ft,
+            qnh.hpa,
+        ));
+        track.barometric_qnh_corrected = true;
+    }
+}
+
 /// A live tracker plus its input recorder: the synchronous core driven by the
 /// async [`run_live_tracker`] task. Kept free of any timing/IO scheduling so it
 /// is fully unit-testable.
@@ -314,6 +333,11 @@ pub struct LiveTracker {
     /// they reach the tracker, gated by its [`ApplyPolicy`](firefly_track::ApplyPolicy)
     /// and advanced once per monitor estimation run.
     applier: Option<RegistrationApplier>,
+    /// The regional QNH service (VERT.1/VERT.2): applied to each snapshot's
+    /// barometric altitudes at the track position. `None` (or an empty
+    /// service) leaves the pressure altitudes uncorrected — with the I062/135
+    /// QNH bit honestly cleared.
+    meteo: Option<QnhService>,
     /// The freshest plot data-time seen, the instant snapshots are projected to.
     latest_data_time: Option<f64>,
     /// Total plots handed to the tracker (for metrics, AP9.4c-4).
@@ -328,6 +352,7 @@ impl LiveTracker {
             recorder,
             registration: None,
             applier: None,
+            meteo: None,
             latest_data_time: None,
             plots_ingested: 0,
         }
@@ -338,6 +363,16 @@ impl LiveTracker {
     /// picture.
     pub fn with_registration(mut self, monitor: RegistrationMonitor) -> Self {
         self.registration = Some(monitor);
+        self
+    }
+
+    /// Attach the QNH service (VERT.2): each published snapshot's barometric
+    /// altitude is corrected to the regional QNH at the track position —
+    /// where one is **observed**; otherwise the pressure altitude passes
+    /// through with the QNH flag cleared (never a silent standard-atmosphere
+    /// claim).
+    pub fn with_meteo(mut self, service: QnhService) -> Self {
+        self.meteo = Some(service);
         self
     }
 
@@ -465,6 +500,11 @@ impl LiveTracker {
         };
         let mut tracks = self.tracker.snapshot_at(Timestamp(t));
         tracks.extend(self.tracker.take_ended_tracks());
+        if let Some(meteo) = &self.meteo {
+            for track in &mut tracks {
+                apply_qnh(track, meteo);
+            }
+        }
         tracks
     }
 
@@ -743,6 +783,7 @@ mod tests {
                 icao_address: Some(icao),
                 callsign: Some(Callsign::new("DLH123")),
                 spi: false,
+                geometric_height_ft: None,
                 daps: firefly_core::Daps::default(),
             },
         )
@@ -753,6 +794,71 @@ mod tests {
     fn snapshot_is_empty_before_any_plot() {
         let mut live = LiveTracker::new(build_live_tracker(&config()), None);
         assert!(live.snapshot().is_empty());
+    }
+
+    /// The QNH correction applies only where a regional QNH is **observed**;
+    /// outside every region (or without a barometric estimate) the track
+    /// passes through untouched with the flag honestly cleared (VERT.2).
+    /// REQ: FR-TRK-042
+    #[test]
+    fn apply_qnh_corrects_only_observed_regions() {
+        let service = firefly_meteo::MeteoConfig::from_json(
+            r#"[{"name":"EDDF","lat":50.03,"lon":8.57,"radius_nm":60,"qnh_hpa":983}]"#,
+        )
+        .unwrap()
+        .into_service();
+
+        let mut inside = sample_track_at(50.0, 8.6, Some(3_000.0));
+        apply_qnh(&mut inside, &service);
+        assert!(inside.barometric_qnh_corrected);
+        let corrected = inside.barometric_altitude_ft.unwrap();
+        assert!(
+            (2_050.0..=2_300.0).contains(&corrected),
+            "983 hPa lowers 3000 ft by ≈830 ft, got {corrected}"
+        );
+
+        // Munich lies outside the 60-NM radius: untouched, flag cleared.
+        let mut outside = sample_track_at(48.35, 11.79, Some(3_000.0));
+        apply_qnh(&mut outside, &service);
+        assert_eq!(outside.barometric_altitude_ft, Some(3_000.0));
+        assert!(!outside.barometric_qnh_corrected);
+
+        // No barometric estimate → nothing to correct, no claim made.
+        let mut no_baro = sample_track_at(50.0, 8.6, None);
+        apply_qnh(&mut no_baro, &service);
+        assert_eq!(no_baro.barometric_altitude_ft, None);
+        assert!(!no_baro.barometric_qnh_corrected);
+    }
+
+    fn sample_track_at(lat: f64, lon: f64, baro_ft: Option<f64>) -> SystemTrack {
+        use firefly_core::{SourceAges, TrackId};
+        SystemTrack {
+            id: TrackId(1),
+            track_number: 1,
+            time: Timestamp(0.0),
+            position: Wgs84::from_degrees(lat, lon, 0.0),
+            v_east: 0.0,
+            v_north: 0.0,
+            confirmed: true,
+            coasting: false,
+            monosensor: false,
+            spi: false,
+            daps: firefly_core::Daps::default(),
+            ended: false,
+            update_age: 0.0,
+            position_uncertainty: 100.0,
+            mode_3a: None,
+            icao_address: None,
+            flight_level_ft: None,
+            callsign: None,
+            contributing_sensors: Vec::new(),
+            adsb_age_s: None,
+            source_ages: SourceAges::default(),
+            barometric_altitude_ft: baro_ft,
+            barometric_qnh_corrected: false,
+            geometric_altitude_ft: None,
+            rocd_ft_min: None,
+        }
     }
 
     /// Repeated ADS-B hits for one aircraft yield one tracked, confirmed target
