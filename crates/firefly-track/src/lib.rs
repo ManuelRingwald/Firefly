@@ -38,8 +38,8 @@ pub use metrics::{Rmse, TrackContinuity};
 pub use motion::MotionModel;
 pub use pda::{association_probabilities, ClutterModel};
 pub use registration::{
-    correspondences_by_identity, estimate_biases, Correspondence, RegistrationConfig,
-    RegistrationMonitor, RegistrationSolution, SensorBias, Sighting,
+    correspondences_by_identity, estimate_biases, ApplyPolicy, Correspondence, RegistrationApplier,
+    RegistrationConfig, RegistrationMonitor, RegistrationSolution, SensorBias, Sighting,
 };
 pub use track::{Track, TrackStatus};
 pub use tracker::{SensorModel, Tracker, TrackerConfig};

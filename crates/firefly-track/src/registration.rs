@@ -452,6 +452,7 @@ pub struct RegistrationMonitor {
     last_estimate_at: Option<f64>,
     latest: Option<RegistrationSolution>,
     last_pair_count: usize,
+    runs_total: u64,
     estimates_total: u64,
 }
 
@@ -473,6 +474,7 @@ impl RegistrationMonitor {
             last_estimate_at: None,
             latest: None,
             last_pair_count: 0,
+            runs_total: 0,
             estimates_total: 0,
         }
     }
@@ -500,6 +502,7 @@ impl RegistrationMonitor {
             return None;
         }
         self.last_estimate_at = Some(now);
+        self.runs_total += 1;
 
         let pairs = correspondences_by_identity(
             &self.window,
@@ -530,6 +533,179 @@ impl RegistrationMonitor {
     /// How many estimates have been produced so far.
     pub fn estimates_total(&self) -> u64 {
         self.estimates_total
+    }
+
+    /// How many estimation **runs** have been attempted so far — due instants
+    /// that went through pairing, whether or not they produced an estimate.
+    /// Lets a caller drive per-run consumers (the REG.2b applier) exactly once
+    /// per run, including refused ones.
+    pub fn runs_total(&self) -> u64 {
+        self.runs_total
+    }
+}
+
+/// When is a registration estimate good enough to **apply** to the live
+/// measurements (REG.2b)? The gate is deliberately conservative — a correction
+/// feeds straight into the safety-relevant fusion path, so an estimate must
+/// prove itself on every criterion or nothing is applied:
+///
+/// - **Observable**: rank-deficient geometries yield minimum-norm solutions
+///   whose split between sensors is arbitrary — never applied.
+/// - **Explains the residuals**: the corrected RMS must be a real improvement
+///   over the raw RMS (`rms_after ≤ max_rms_ratio · rms_before`). An estimate
+///   that barely shrinks the residuals is fitting noise, not a bias — and when
+///   there *is* no bias, this criterion correctly keeps the correction at zero.
+/// - **Plausible magnitude**: real calibration errors are tens–hundreds of
+///   metres and tenths of a degree. A kilometre-scale "bias" is a data or
+///   geometry fault; applying it would be worse than the disease.
+///
+/// Transitions are **smoothed** (`smoothing_alpha` per estimation run): the
+/// applied correction is a low-pass of the accepted estimates, so a fresh
+/// estimate never steps the air picture. When runs stop passing the gate the
+/// correction is **held** for `hold_runs` runs (transient dropouts — a thin
+/// traffic minute — should not unwind a good calibration), then decays back
+/// toward zero at the same smoothing rate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ApplyPolicy {
+    /// Maximum plausible |range bias|, metres. Larger estimates are rejected.
+    pub max_range_bias_m: f64,
+    /// Maximum plausible |azimuth bias|, degrees. Larger estimates are rejected.
+    pub max_azimuth_bias_deg: f64,
+    /// Required residual improvement: accept only if
+    /// `rms_after ≤ max_rms_ratio · rms_before`.
+    pub max_rms_ratio: f64,
+    /// Exponential smoothing factor per estimation run, in (0, 1]: the applied
+    /// correction moves this fraction of the way toward the accepted estimate.
+    pub smoothing_alpha: f64,
+    /// Consecutive gate-failing runs tolerated before the applied correction
+    /// starts decaying toward zero.
+    pub hold_runs: u32,
+}
+
+impl Default for ApplyPolicy {
+    fn default() -> Self {
+        Self {
+            max_range_bias_m: 1_000.0,
+            max_azimuth_bias_deg: 1.0,
+            max_rms_ratio: 0.5,
+            smoothing_alpha: 0.3,
+            hold_runs: 3,
+        }
+    }
+}
+
+/// Applied-bias magnitudes below these are treated as zero and dropped — they
+/// are far beneath any sensor's noise floor, and dropping them lets
+/// [`RegistrationApplier::active`] report an honest "no correction in effect".
+const APPLIED_EPSILON_RANGE_M: f64 = 0.01;
+const APPLIED_EPSILON_AZIMUTH_RAD: f64 = 1e-8;
+
+/// **Applies** registration estimates to live measurements (REG.2b, ADR 0034):
+/// keeps a smoothed per-sensor correction governed by an [`ApplyPolicy`] and
+/// subtracts it from radar polar measurements before they reach the tracker.
+///
+/// Control-loop stability by construction: the estimator (the
+/// [`RegistrationMonitor`]) keeps observing the **raw** stream, so its estimate
+/// is the *full* bias, independent of what is currently applied. The applied
+/// correction is then a pure low-pass of that estimate — there is no
+/// integrator in the loop and nothing to oscillate. (Feeding the *corrected*
+/// stream back into the estimator would instead require integrating residual
+/// estimates, a genuinely feedback-coupled loop — deliberately avoided.)
+///
+/// Like the monitor this is pure and deterministic: state advances only via
+/// [`update`](Self::update) calls, driven by the data-time estimation cadence.
+///
+/// REQ: FR-TRK-039
+pub struct RegistrationApplier {
+    policy: ApplyPolicy,
+    applied: BTreeMap<SensorId, SensorBias>,
+    gate_failures: u32,
+}
+
+impl RegistrationApplier {
+    /// An applier with no correction in effect.
+    pub fn new(policy: ApplyPolicy) -> Self {
+        Self {
+            policy,
+            applied: BTreeMap::new(),
+            gate_failures: 0,
+        }
+    }
+
+    /// Would this solution pass the application gate?
+    fn gate_accepts(&self, solution: &RegistrationSolution) -> bool {
+        solution.observable
+            && solution.rms_after_m <= self.policy.max_rms_ratio * solution.rms_before_m
+            && solution.biases.values().all(|b| {
+                b.range_m.abs() <= self.policy.max_range_bias_m
+                    && b.azimuth_deg().abs() <= self.policy.max_azimuth_bias_deg
+            })
+    }
+
+    /// Advance the applied correction by **one estimation run**: `outcome` is
+    /// the run's fresh estimate, or `None` if the run was refused (thin
+    /// evidence) or produced nothing. Call exactly once per monitor run.
+    ///
+    /// An accepted estimate pulls each sensor's applied correction a
+    /// `smoothing_alpha` step toward it (sensors absent from the solution hold
+    /// their current value — no pairs this window is not evidence of zero
+    /// bias). A rejected/absent outcome counts toward `hold_runs`; beyond the
+    /// hold, all applied corrections decay toward zero at the same rate.
+    pub fn update(&mut self, outcome: Option<&RegistrationSolution>) {
+        let alpha = self.policy.smoothing_alpha;
+        match outcome.filter(|s| self.gate_accepts(s)) {
+            Some(solution) => {
+                self.gate_failures = 0;
+                for (sensor, target) in &solution.biases {
+                    let current = self.applied.entry(*sensor).or_default();
+                    current.range_m += alpha * (target.range_m - current.range_m);
+                    current.azimuth_rad += alpha * (target.azimuth_rad - current.azimuth_rad);
+                }
+            }
+            None => {
+                self.gate_failures = self.gate_failures.saturating_add(1);
+                if self.gate_failures > self.policy.hold_runs {
+                    for bias in self.applied.values_mut() {
+                        bias.range_m -= alpha * bias.range_m;
+                        bias.azimuth_rad -= alpha * bias.azimuth_rad;
+                    }
+                }
+            }
+        }
+        self.applied.retain(|_, b| {
+            b.range_m.abs() > APPLIED_EPSILON_RANGE_M
+                || b.azimuth_rad.abs() > APPLIED_EPSILON_AZIMUTH_RAD
+        });
+    }
+
+    /// The correction currently in effect, per sensor.
+    pub fn applied(&self) -> &BTreeMap<SensorId, SensorBias> {
+        &self.applied
+    }
+
+    /// Is any correction currently in effect?
+    pub fn active(&self) -> bool {
+        !self.applied.is_empty()
+    }
+
+    /// Subtract this sensor's applied bias from a radar plot's polar
+    /// measurement (`measured = true + bias` ⇒ `true = measured − bias`).
+    /// Plots from sensors without a correction, and geodetic plots, pass
+    /// through unchanged.
+    pub fn correct(&self, plot: &Plot) -> Plot {
+        let Some(bias) = self.applied.get(&plot.sensor) else {
+            return *plot;
+        };
+        let Measurement::Polar(m) = plot.measurement else {
+            return *plot;
+        };
+        let mut corrected = *plot;
+        corrected.measurement = Measurement::Polar(Polar::new(
+            m.range - bias.range_m,
+            (m.azimuth - bias.azimuth_rad).rem_euclid(std::f64::consts::TAU),
+            m.elevation,
+        ));
+        corrected
     }
 }
 
@@ -1039,5 +1215,233 @@ mod tests {
         assert!(none.is_none());
         assert_eq!(monitor.estimates_total(), runs, "refused, not run");
         assert_eq!(monitor.last_pair_count(), 1, "only the fresh pair remains");
+    }
+
+    // --- application policy (REG.2b) ---------------------------------------
+
+    /// A solution with the given bias for sensor 7 that comfortably passes the
+    /// residual-improvement criterion.
+    fn passing_solution(bias: SensorBias) -> RegistrationSolution {
+        RegistrationSolution {
+            biases: BTreeMap::from([(SensorId(7), bias)]),
+            rms_before_m: 500.0,
+            rms_after_m: 40.0,
+            observable: true,
+        }
+    }
+
+    /// The gate rejects unobservable solutions, insufficient residual
+    /// improvement, and implausible magnitudes — each alone keeps the applied
+    /// correction at zero. REQ: FR-TRK-039
+    #[test]
+    fn applier_gate_rejects_each_criterion_alone() {
+        let bias = SensorBias {
+            range_m: 150.0,
+            azimuth_rad: 0.3_f64.to_radians(),
+        };
+
+        let unobservable = RegistrationSolution {
+            observable: false,
+            ..passing_solution(bias)
+        };
+        let no_improvement = RegistrationSolution {
+            rms_before_m: 100.0,
+            rms_after_m: 90.0,
+            ..passing_solution(bias)
+        };
+        let implausible = passing_solution(SensorBias {
+            range_m: 5_000.0,
+            azimuth_rad: 0.0,
+        });
+
+        for rejected in [&unobservable, &no_improvement, &implausible] {
+            let mut applier = RegistrationApplier::new(ApplyPolicy::default());
+            applier.update(Some(rejected));
+            assert!(
+                !applier.active(),
+                "gate must reject: observable={}, rms {}→{}, biases {:?}",
+                rejected.observable,
+                rejected.rms_before_m,
+                rejected.rms_after_m,
+                rejected.biases
+            );
+        }
+
+        // Control: the passing solution engages a correction.
+        let mut applier = RegistrationApplier::new(ApplyPolicy::default());
+        applier.update(Some(&passing_solution(bias)));
+        assert!(applier.active(), "the clean solution engages");
+    }
+
+    /// The applied correction approaches an accepted estimate exponentially —
+    /// each run moves `alpha` of the remaining distance, so a fresh estimate
+    /// never steps the correction. REQ: FR-TRK-039
+    #[test]
+    fn applier_smooths_toward_the_accepted_estimate() {
+        let bias = SensorBias {
+            range_m: 200.0,
+            azimuth_rad: 0.2_f64.to_radians(),
+        };
+        let policy = ApplyPolicy::default();
+        let mut applier = RegistrationApplier::new(policy);
+
+        applier.update(Some(&passing_solution(bias)));
+        let first = applier.applied()[&SensorId(7)];
+        assert!(
+            (first.range_m - policy.smoothing_alpha * bias.range_m).abs() < 1e-9,
+            "first step is alpha of the target: {} m",
+            first.range_m
+        );
+
+        for _ in 0..30 {
+            applier.update(Some(&passing_solution(bias)));
+        }
+        let converged = applier.applied()[&SensorId(7)];
+        assert!(
+            (converged.range_m - bias.range_m).abs() < 0.1
+                && (converged.azimuth_rad - bias.azimuth_rad).abs() < 1e-6,
+            "converged to the estimate: {} m / {}°",
+            converged.range_m,
+            converged.azimuth_deg()
+        );
+    }
+
+    /// Gate-failing runs first HOLD the correction (transient dropouts must
+    /// not unwind a good calibration), then decay it toward zero — and the
+    /// applier reports inactive once it is numerically gone. REQ: FR-TRK-039
+    #[test]
+    fn applier_holds_then_decays_after_sustained_gate_failures() {
+        let bias = SensorBias {
+            range_m: 150.0,
+            azimuth_rad: 0.0,
+        };
+        let policy = ApplyPolicy::default();
+        let mut applier = RegistrationApplier::new(policy);
+        for _ in 0..30 {
+            applier.update(Some(&passing_solution(bias)));
+        }
+        let held = applier.applied()[&SensorId(7)].range_m;
+
+        // Within the hold budget: the correction stays put.
+        for _ in 0..policy.hold_runs {
+            applier.update(None);
+        }
+        assert_eq!(
+            applier.applied()[&SensorId(7)].range_m,
+            held,
+            "held through transient dropouts"
+        );
+
+        // Beyond the hold: decay sets in and eventually reaches zero/inactive.
+        for _ in 0..80 {
+            applier.update(None);
+        }
+        assert!(
+            !applier.active(),
+            "sustained gate failure decays the correction away"
+        );
+    }
+
+    /// `correct` subtracts the applied bias from a known radar's polar
+    /// measurement and leaves geodetic plots and unknown sensors untouched.
+    /// REQ: FR-TRK-039
+    #[test]
+    fn correct_subtracts_bias_only_for_known_radar_measurements() {
+        let bias = SensorBias {
+            range_m: 150.0,
+            azimuth_rad: 0.3_f64.to_radians(),
+        };
+        let mut applier = RegistrationApplier::new(ApplyPolicy {
+            smoothing_alpha: 1.0, // jump straight to the target for this test
+            ..ApplyPolicy::default()
+        });
+        applier.update(Some(&passing_solution(bias)));
+
+        let radar = radar_plot(7, 10.0, Some(0x3C_6589));
+        let corrected = applier.correct(&radar);
+        let (Measurement::Polar(raw), Measurement::Polar(cor)) =
+            (radar.measurement, corrected.measurement)
+        else {
+            panic!("polar in, polar out");
+        };
+        assert!((cor.range - (raw.range - bias.range_m)).abs() < 1e-9);
+        assert!((cor.azimuth - (raw.azimuth - bias.azimuth_rad)).abs() < 1e-9);
+        assert_eq!(cor.elevation, raw.elevation);
+
+        let other = radar_plot(8, 10.0, Some(0x3C_6589));
+        assert_eq!(applier.correct(&other), other, "unknown sensor untouched");
+        let truth = adsb_plot(10.0, 0x3C_6589);
+        assert_eq!(applier.correct(&truth), truth, "geodetic untouched");
+    }
+
+    /// Closed chain (monitor → gate → smoothing → correction) over the
+    /// synthetic live stream: the applied correction converges to the injected
+    /// bias without oscillating, and correcting a fresh biased measurement
+    /// lands it on the truth. REQ: FR-TRK-039
+    #[test]
+    fn closed_chain_converges_to_the_injected_bias() {
+        let common = common();
+        let site = site_at(&common, 30_000.0, 0.0);
+        let bias = SensorBias {
+            range_m: 150.0,
+            azimuth_rad: 0.3_f64.to_radians(),
+        };
+        let mut monitor = monitor_under_test(&common, site);
+        let mut applier = RegistrationApplier::new(ApplyPolicy::default());
+
+        // Drive the live loop exactly as the server does: observe raw plots,
+        // update the applier once per estimation run. Track the applied range
+        // bias to prove monotone (non-oscillating) convergence.
+        let ring = target_ring(48, 60_000.0);
+        let mut last_applied = 0.0_f64;
+        for i in 0..150 {
+            let t = i as f64;
+            let truth = ring[i % ring.len()];
+            let batch = stream_step(&common, &site, SensorId(7), t, truth, bias);
+            let runs_before = monitor.runs_total();
+            let fresh = monitor.observe(&batch, t).cloned();
+            if monitor.runs_total() > runs_before {
+                applier.update(fresh.as_ref());
+                let now_applied = applier
+                    .applied()
+                    .get(&SensorId(7))
+                    .map_or(0.0, |b| b.range_m);
+                assert!(
+                    now_applied >= last_applied - 1e-6,
+                    "no oscillation: applied fell from {last_applied} to {now_applied}"
+                );
+                last_applied = now_applied;
+            }
+        }
+
+        let applied = applier.applied()[&SensorId(7)];
+        assert!(
+            (applied.range_m - bias.range_m).abs() < 5.0
+                && (applied.azimuth_deg() - bias.azimuth_deg()).abs() < 0.01,
+            "converged: {} m / {}° vs injected {} m / {}°",
+            applied.range_m,
+            applied.azimuth_deg(),
+            bias.range_m,
+            bias.azimuth_deg()
+        );
+
+        // The proof of the pudding: a fresh biased measurement, corrected,
+        // lifts to (numerically) the true position.
+        let truth = ring[0];
+        let batch = stream_step(&common, &site, SensorId(7), 150.0, truth, bias);
+        let corrected = applier.correct(&batch[0]);
+        let lifted = lift(
+            &site,
+            &common,
+            &match corrected.measurement {
+                Measurement::Polar(m) => m,
+                _ => unreachable!(),
+            },
+        );
+        assert!(
+            (lifted - truth).norm() < 10.0,
+            "corrected measurement sits {} m from truth",
+            (lifted - truth).norm()
+        );
     }
 }

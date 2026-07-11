@@ -112,6 +112,15 @@ pub struct Metrics {
     /// (not atomics) because the map is small, updated once per output tick
     /// and read once per /metrics scrape.
     pub registration_biases: Mutex<BTreeMap<u16, (f64, f64)>>,
+    /// Whether a REG.2b registration correction is currently in effect (gauge,
+    /// 0/1). Stays 0 without `FIREFLY_REGISTRATION_APPLY` or while the apply
+    /// gate (observability, residual gain, plausibility) rejects every run.
+    pub registration_apply_active: AtomicBool,
+    /// The correction currently **applied** per radar (REG.2b): sensor id →
+    /// (range bias m, azimuth bias deg). Distinct from `registration_biases`
+    /// (the raw estimate) — this smoothed, gated value is what is actually
+    /// subtracted from measurements. Rendered as labelled gauges.
+    pub registration_applied_biases: Mutex<BTreeMap<u16, (f64, f64)>>,
 }
 
 /// A guard that increments `ws_clients_connected` (and `ws_clients_total`) on
@@ -318,31 +327,64 @@ pub fn render(metrics: &Metrics) -> String {
         "1 if the latest registration estimate was fully observable, else 0.",
         f64::from(metrics.registration_observable.load(Ordering::Relaxed)),
     );
-    // Per-sensor bias gauges need labels, which write_metric's fixed layout
-    // does not cover — render them by hand, only when estimates exist.
-    let biases = metrics
-        .registration_biases
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if !biases.is_empty() {
-        out.push_str(
-            "# HELP firefly_registration_bias_range_m Latest estimated range bias per radar sensor, metres (shadow, not applied).\n# TYPE firefly_registration_bias_range_m gauge\n",
-        );
-        for (sensor, (range_m, _)) in biases.iter() {
-            out.push_str(&format!(
-                "firefly_registration_bias_range_m{{sensor=\"{sensor}\"}} {range_m}\n"
-            ));
-        }
-        out.push_str(
-            "# HELP firefly_registration_bias_azimuth_deg Latest estimated azimuth bias per radar sensor, degrees (shadow, not applied).\n# TYPE firefly_registration_bias_azimuth_deg gauge\n",
-        );
-        for (sensor, (_, azimuth_deg)) in biases.iter() {
-            out.push_str(&format!(
-                "firefly_registration_bias_azimuth_deg{{sensor=\"{sensor}\"}} {azimuth_deg}\n"
-            ));
-        }
-    }
+    write_metric(
+        &mut out,
+        "firefly_registration_apply_active",
+        "gauge",
+        "1 if a REG.2b registration correction is currently applied to radar measurements, else 0.",
+        f64::from(metrics.registration_apply_active.load(Ordering::Relaxed)),
+    );
+    write_bias_gauges(
+        &mut out,
+        "firefly_registration_bias",
+        "estimated",
+        &metrics
+            .registration_biases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    write_bias_gauges(
+        &mut out,
+        "firefly_registration_applied_bias",
+        "applied (subtracted from measurements)",
+        &metrics
+            .registration_applied_biases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
     out
+}
+
+/// Render a pair of labelled per-sensor bias gauges (`<base>_range_m` and
+/// `<base>_azimuth_deg`) from a sensor → (range m, azimuth deg) map. Labels
+/// are outside [`write_metric`]'s fixed layout, so these are rendered by hand
+/// — and only when values exist: an absent series is clearer than a
+/// misleading 0-bias line.
+fn write_bias_gauges(
+    out: &mut String,
+    base: &str,
+    qualifier: &str,
+    biases: &BTreeMap<u16, (f64, f64)>,
+) {
+    if biases.is_empty() {
+        return;
+    }
+    out.push_str(&format!(
+        "# HELP {base}_range_m Latest {qualifier} range bias per radar sensor, metres.\n# TYPE {base}_range_m gauge\n"
+    ));
+    for (sensor, (range_m, _)) in biases.iter() {
+        out.push_str(&format!(
+            "{base}_range_m{{sensor=\"{sensor}\"}} {range_m}\n"
+        ));
+    }
+    out.push_str(&format!(
+        "# HELP {base}_azimuth_deg Latest {qualifier} azimuth bias per radar sensor, degrees.\n# TYPE {base}_azimuth_deg gauge\n"
+    ));
+    for (sensor, (_, azimuth_deg)) in biases.iter() {
+        out.push_str(&format!(
+            "{base}_azimuth_deg{{sensor=\"{sensor}\"}} {azimuth_deg}\n"
+        ));
+    }
 }
 
 fn write_metric(out: &mut String, name: &str, typ: &str, help: &str, value: f64) {
@@ -416,6 +458,14 @@ mod tests {
             .lock()
             .unwrap()
             .insert(301, (150.25, 0.3));
+        metrics
+            .registration_apply_active
+            .store(true, Ordering::Relaxed);
+        metrics
+            .registration_applied_biases
+            .lock()
+            .unwrap()
+            .insert(301, (148.5, 0.29));
 
         let text = render(&metrics);
 
@@ -455,18 +505,24 @@ mod tests {
         assert!(text.contains("firefly_registration_observable 1"));
         assert!(text.contains("firefly_registration_bias_range_m{sensor=\"301\"} 150.25"));
         assert!(text.contains("firefly_registration_bias_azimuth_deg{sensor=\"301\"} 0.3"));
+        assert!(text.contains("firefly_registration_apply_active 1"));
+        assert!(text.contains("firefly_registration_applied_bias_range_m{sensor=\"301\"} 148.5"));
+        assert!(text.contains("firefly_registration_applied_bias_azimuth_deg{sensor=\"301\"} 0.29"));
         assert!(text.contains("# TYPE firefly_registration_estimates_total counter"));
         assert!(text.contains("# TYPE firefly_registration_bias_range_m gauge"));
+        assert!(text.contains("# TYPE firefly_registration_applied_bias_range_m gauge"));
     }
 
     /// Without any registration estimate the labelled bias gauges are absent —
-    /// an empty series is clearer than a misleading 0-bias line. REG.2a.
+    /// an empty series is clearer than a misleading 0-bias line. REG.2a/2b.
     #[test]
     fn registration_bias_gauges_absent_without_estimates() {
         let text = render(&Metrics::default());
         assert!(text.contains("firefly_registration_estimates_total 0"));
+        assert!(text.contains("firefly_registration_apply_active 0"));
         assert!(!text.contains("firefly_registration_bias_range_m{"));
         assert!(!text.contains("firefly_registration_bias_azimuth_deg{"));
+        assert!(!text.contains("firefly_registration_applied_bias_range_m{"));
     }
 
     /// The connected-client guard increments on creation and decrements again
