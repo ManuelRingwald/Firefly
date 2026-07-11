@@ -32,6 +32,7 @@
 //!
 //! REQ: FR-IO-003, FR-TRK-008
 
+mod bds;
 mod cat034;
 mod cat048;
 mod cat062;

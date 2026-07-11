@@ -29,6 +29,7 @@ fn track(id: u32) -> SystemTrack {
         coasting: false,
         monosensor: false,
         spi: false,
+        daps: firefly_core::Daps::default(),
         ended: false,
         update_age: 0.0,
         position_uncertainty: 100.0,

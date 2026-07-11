@@ -41,6 +41,7 @@ pub fn target_report_to_plot(report: &DecodedTargetReport, sensor: SensorId) -> 
         icao_address: report.icao_address,
         callsign: report.callsign,
         spi: report.spi,
+        daps: report.daps,
     };
     Some(Plot {
         sensor,
@@ -71,6 +72,7 @@ mod tests {
             callsign: Some(Callsign::new("DLH123")),
             track_number: Some(42),
             spi: false,
+            daps: firefly_core::Daps::default(),
         }
     }
 

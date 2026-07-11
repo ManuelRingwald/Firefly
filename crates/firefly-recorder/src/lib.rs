@@ -326,6 +326,7 @@ mod tests {
                 icao_address: Some(0x3C_00_01),
                 callsign: Some(Callsign::new("DLH401")),
                 spi: false,
+                daps: firefly_core::Daps::default(),
             },
         )
     }

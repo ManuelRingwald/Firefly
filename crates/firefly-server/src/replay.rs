@@ -143,6 +143,7 @@ mod tests {
                 icao_address: Some(icao),
                 callsign: Some(Callsign::new("DLH001")),
                 spi: false,
+                daps: firefly_core::Daps::default(),
             },
         )
     }

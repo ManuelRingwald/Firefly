@@ -79,6 +79,7 @@ pub fn position_to_plot(
         icao_address,
         callsign: None,
         spi: false,
+        daps: firefly_core::Daps::default(),
     };
 
     // Data time = full Unix-epoch seconds, on the same clock OpenSky uses, so the

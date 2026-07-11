@@ -106,6 +106,31 @@ const MODE_3A_CODE_MASK: u16 = 0x0FFF;
 /// (Mode S address) subfield is present. Verified against
 /// SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.24.
 const ADR_TARGET_ADDRESS_PRESENT: u8 = 0x80;
+/// I062/380 subfield-spec octet 1, bit 6: **MHG** — Magnetic Heading
+/// (subfield #3, 2 octets, LSB 360/2¹⁶ °). FEP.2.
+const ADD_MHG_PRESENT: u8 = 0x20;
+/// I062/380 subfield-spec octet 1, bit 3: **SAL** — Selected Altitude
+/// (subfield #6, 2 octets: SAS + Source + 13-bit two's complement, LSB 25 ft).
+const ADD_SAL_PRESENT: u8 = 0x04;
+/// I062/380 subfield-spec octet 4, bit 4: **IAR** — Indicated Airspeed
+/// (subfield #26, 2 octets, LSB 1 kt).
+const ADD_IAR_PRESENT: u8 = 0x08;
+/// I062/380 subfield-spec octet 4, bit 3: **MAC** — Mach Number
+/// (subfield #27, 2 octets, LSB 0.008).
+const ADD_MAC_PRESENT: u8 = 0x04;
+/// I062/380 MHG LSB: 360/2¹⁶ degrees.
+const MHG_LSB_DEGREES: f64 = 360.0 / 65_536.0;
+/// I062/380 SAL altitude LSB: 25 ft (13-bit two's complement field).
+const SAL_LSB_FT: f64 = 25.0;
+/// I062/380 SAL octet 1: SAS = 1 (source information available) and
+/// Source = `10` (MCP/FCU selected altitude) — Firefly's SAL comes from
+/// BDS 4,0's MCP/FCU field.
+const SAL_SAS_AND_MCP_SOURCE: u16 = 0x8000 | (0b10 << 13);
+/// I062/380 MAC LSB: 0.008 Mach.
+const MAC_LSB: f64 = 0.008;
+/// Longest I062/380 subfield-spec chain we accept: 4 octets cover all 28
+/// defined subfields; a longer chain is malformed.
+const MAX_ADD_SPEC_OCTETS: usize = 4;
 /// I062/245 octet 1, bits 8/7 (STI, Source of Target Identification): `00`
 /// means "Downlinked Target Identification" (a Mode S downlink reply, passed
 /// through unchanged) — the honest characterisation for our pass-through
@@ -257,8 +282,16 @@ impl Cat062Encoder {
                 encode_target_identification(callsign),
             );
         }
-        if let Some(address) = track.icao_address {
-            builder = builder.item(uap::AIRCRAFT_DERIVED_DATA, encode_target_address(address));
+        if track.icao_address.is_some()
+            || track.daps.magnetic_heading_deg.is_some()
+            || track.daps.selected_altitude_ft.is_some()
+            || track.daps.ias_kt.is_some()
+            || track.daps.mach.is_some()
+        {
+            builder = builder.item(
+                uap::AIRCRAFT_DERIVED_DATA,
+                encode_aircraft_derived_data(track),
+            );
         }
         if let Some(flight_level_ft) = track.flight_level_ft {
             builder = builder.item(
@@ -377,13 +410,63 @@ fn ia5_encode(byte: u8) -> u8 {
     }
 }
 
-/// I062/380 — Aircraft Derived Data, here just the **Target Address** (ADR)
-/// subfield: a primary subfield announcing ADR, then the 24-bit Mode S address,
-/// big-endian. The address is the eventual correlation key for multi-radar
-/// fusion (FR-TRK-009); only its low 24 bits are meaningful.
-fn encode_target_address(address: u32) -> Vec<u8> {
-    let octets = address.to_be_bytes(); // [b3, b2, b1, b0]; b3 is always 0
-    vec![ADR_TARGET_ADDRESS_PRESENT, octets[1], octets[2], octets[3]]
+/// I062/380 — Aircraft Derived Data: the **ADR** (Target Address) subfield
+/// plus, since FEP.2 (ICD 3.4.0), the Mode S EHS DAP subfields **MHG**
+/// (Magnetic Heading, #3), **SAL** (Selected Altitude, #6), **IAR**
+/// (Indicated Airspeed, #26) and **MAC** (Mach, #27) — each emitted only when
+/// the track carries a *fresh* value (absence over a stale claim).
+///
+/// The subfield-spec chain stays a single octet in the common case (ADR/MHG/
+/// SAL live in octet 1); only when IAR/MAC are present does it extend — via
+/// FX — to four octets (octets 2/3 carry no subfields of ours). Data follows
+/// in ascending subfield order.
+fn encode_aircraft_derived_data(track: &SystemTrack) -> Vec<u8> {
+    let daps = &track.daps;
+    let mut spec1 = 0u8;
+    let mut spec4 = 0u8;
+    if track.icao_address.is_some() {
+        spec1 |= ADR_TARGET_ADDRESS_PRESENT;
+    }
+    if daps.magnetic_heading_deg.is_some() {
+        spec1 |= ADD_MHG_PRESENT;
+    }
+    if daps.selected_altitude_ft.is_some() {
+        spec1 |= ADD_SAL_PRESENT;
+    }
+    if daps.ias_kt.is_some() {
+        spec4 |= ADD_IAR_PRESENT;
+    }
+    if daps.mach.is_some() {
+        spec4 |= ADD_MAC_PRESENT;
+    }
+
+    let mut out = Vec::with_capacity(16);
+    if spec4 != 0 {
+        out.extend_from_slice(&[spec1 | FX, FX, FX, spec4]);
+    } else {
+        out.push(spec1);
+    }
+    if let Some(address) = track.icao_address {
+        let octets = address.to_be_bytes(); // [b3, b2, b1, b0]; b3 is always 0
+        out.extend_from_slice(&[octets[1], octets[2], octets[3]]);
+    }
+    if let Some(deg) = daps.magnetic_heading_deg {
+        let ticks = (deg.rem_euclid(360.0) / MHG_LSB_DEGREES).round() as u32;
+        out.extend_from_slice(&((ticks & 0xFFFF) as u16).to_be_bytes());
+    }
+    if let Some(ft) = daps.selected_altitude_ft {
+        let ticks = (ft / SAL_LSB_FT).round().clamp(-4096.0, 4095.0) as i16;
+        let value = SAL_SAS_AND_MCP_SOURCE | (ticks as u16 & 0x1FFF);
+        out.extend_from_slice(&value.to_be_bytes());
+    }
+    if let Some(kt) = daps.ias_kt {
+        out.extend_from_slice(&(kt.round().clamp(0.0, 65_535.0) as u16).to_be_bytes());
+    }
+    if let Some(mach) = daps.mach {
+        let ticks = (mach / MAC_LSB).round().clamp(0.0, 65_535.0) as u16;
+        out.extend_from_slice(&ticks.to_be_bytes());
+    }
+    out
 }
 
 /// I062/136 — Measured Flight Level: two octets, a signed 16-bit count of
@@ -592,6 +675,14 @@ pub struct DecodedRecord {
     pub icao_address: Option<u32>,
     /// I062/136 Measured Flight Level, in feet, if the track carries one.
     pub flight_level_ft: Option<f64>,
+    /// I062/380 MHG — magnetic heading, degrees [0, 360), if present (FEP.2).
+    pub magnetic_heading_deg: Option<f64>,
+    /// I062/380 SAL — MCP/FCU selected altitude, feet, if present (FEP.2).
+    pub selected_altitude_ft: Option<f64>,
+    /// I062/380 IAR — indicated airspeed, knots, if present (FEP.2).
+    pub ias_kt: Option<f64>,
+    /// I062/380 MAC — Mach number, if present (FEP.2).
+    pub mach: Option<f64>,
 }
 
 /// Errors that can occur while decoding a CAT062 data block.
@@ -678,6 +769,10 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
     let mut callsign = None;
     let mut icao_address = None;
     let mut flight_level_ft = None;
+    let mut magnetic_heading_deg = None;
+    let mut selected_altitude_ft = None;
+    let mut ias_kt = None;
+    let mut mach = None;
 
     for frn in frns {
         match frn {
@@ -691,7 +786,61 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
                 callsign = Some(decode_target_identification(cursor.take(7)?))
             }
             uap::AIRCRAFT_DERIVED_DATA => {
-                icao_address = Some(decode_target_address(cursor.take(4)?))
+                // I062/380 is compound: an FX-chained subfield-spec, then the
+                // present subfields in ascending order. We decode the five
+                // Firefly emits (ADR #1, MHG #3, SAL #6, IAR #26, MAC #27);
+                // any other present subfield cannot be safely skipped without
+                // its length and is rejected rather than mis-parsed.
+                let mut specs: Vec<u8> = Vec::new();
+                loop {
+                    let octet = cursor.take(1)?[0];
+                    specs.push(octet);
+                    if octet & FX == 0 {
+                        break;
+                    }
+                    if specs.len() >= MAX_ADD_SPEC_OCTETS {
+                        return Err(DecodeError::UnknownItem(frn));
+                    }
+                }
+                for (i, &spec) in specs.iter().enumerate() {
+                    for bit in 0..7u8 {
+                        if spec & (0x80 >> bit) == 0 {
+                            continue;
+                        }
+                        match i * 7 + bit as usize + 1 {
+                            1 => {
+                                let b = cursor.take(3)?;
+                                icao_address = Some(u32::from_be_bytes([0, b[0], b[1], b[2]]));
+                            }
+                            3 => {
+                                let b = cursor.take(2)?;
+                                magnetic_heading_deg =
+                                    Some(u16::from_be_bytes([b[0], b[1]]) as f64 * MHG_LSB_DEGREES);
+                            }
+                            6 => {
+                                let b = cursor.take(2)?;
+                                // 13-bit two's complement altitude in 25-ft steps
+                                // (SAS/Source bits masked off).
+                                let raw = u16::from_be_bytes([b[0], b[1]]) & 0x1FFF;
+                                let ticks = if raw & 0x1000 != 0 {
+                                    raw as i32 - 0x2000
+                                } else {
+                                    raw as i32
+                                };
+                                selected_altitude_ft = Some(ticks as f64 * SAL_LSB_FT);
+                            }
+                            26 => {
+                                let b = cursor.take(2)?;
+                                ias_kt = Some(u16::from_be_bytes([b[0], b[1]]) as f64);
+                            }
+                            27 => {
+                                let b = cursor.take(2)?;
+                                mach = Some(u16::from_be_bytes([b[0], b[1]]) as f64 * MAC_LSB);
+                            }
+                            _ => return Err(DecodeError::UnknownItem(frn)),
+                        }
+                    }
+                }
             }
             uap::TRACK_NUMBER => track_number = Some(decode_track_number(cursor.take(2)?)),
             uap::TRACK_STATUS => status = Some(decode_track_status(cursor.take_track_status()?)),
@@ -737,6 +886,10 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         callsign,
         icao_address,
         flight_level_ft,
+        magnetic_heading_deg,
+        selected_altitude_ft,
+        ias_kt,
+        mach,
     })
 }
 
@@ -848,13 +1001,6 @@ fn ia5_decode(code: u8) -> u8 {
         48..=57 => b'0' + (code - 48),
         _ => b' ',
     }
-}
-
-/// I062/380 — the inverse of [`encode_target_address`]. The leading
-/// subfield octet (always [`ADR_TARGET_ADDRESS_PRESENT`] for our encoder) is
-/// dropped.
-fn decode_target_address(bytes: &[u8]) -> u32 {
-    u32::from_be_bytes([0, bytes[1], bytes[2], bytes[3]])
 }
 
 /// I062/040 — the inverse of [`encode_track_number`].
@@ -1010,6 +1156,7 @@ mod tests {
             coasting: false,
             monosensor: false,
             spi: false,
+            daps: firefly_core::Daps::default(),
             ended: false,
             update_age: 0.0,
             position_uncertainty: 0.0,
@@ -1170,13 +1317,85 @@ mod tests {
 
     /// Target address: I062/380 with only the ADR subfield present (0x80) and
     /// the 24-bit Mode S address big-endian. 0x3C65AC → [0x80,0x3C,0x65,0xAC].
+    /// The pre-FEP.2 wire form stays byte-identical for a DAP-less track.
     /// REQ: FR-IO-003, FR-TRK-009
     #[test]
     fn target_address_uses_adr_subfield_with_24_bit_address() {
+        let mut t = track(1);
+        t.icao_address = Some(0x3C_65_AC);
         assert_eq!(
-            encode_target_address(0x3C_65_AC),
+            encode_aircraft_derived_data(&t),
             vec![0x80, 0x3C, 0x65, 0xAC]
         );
+    }
+
+    /// I062/380 with the full DAP garnish (FEP.2, ICD 3.4.0) encodes to the
+    /// exact reference bytes: a four-octet subfield spec (ADR+MHG+SAL in
+    /// octet 1, IAR+MAC in octet 4, FX-chained through empty octets 2/3),
+    /// then the data in ascending subfield order. Values chosen on exact
+    /// LSBs: MHG 270° = 49 152 ticks; SAL 35 000 ft = 1400 × 25 ft with
+    /// SAS=1/Source=MCP; IAR 250 kt; MAC 0.784 = 98 × 0.008.
+    /// REQ: FR-TRK-040
+    #[test]
+    fn aircraft_derived_data_encodes_dap_subfields_byte_exactly() {
+        let mut t = track(1);
+        t.icao_address = Some(0x3C_65_AC);
+        t.daps.magnetic_heading_deg = Some(270.0);
+        t.daps.selected_altitude_ft = Some(35_000.0);
+        t.daps.ias_kt = Some(250.0);
+        t.daps.mach = Some(0.784);
+        assert_eq!(
+            encode_aircraft_derived_data(&t),
+            vec![
+                0xA5, 0x01, 0x01, 0x0C, // spec: ADR+MHG+SAL+FX, FX, FX, IAR+MAC
+                0x3C, 0x65, 0xAC, // ADR
+                0xC0, 0x00, // MHG 270° (49 152 × 360/2¹⁶)
+                0xC5, 0x78, // SAL: SAS=1, Source=10 (MCP), 1400 × 25 ft
+                0x00, 0xFA, // IAR 250 kt
+                0x00, 0x62, // MAC 98 × 0.008
+            ]
+        );
+    }
+
+    /// DAP subfields round-trip through a full encode → decode of the block,
+    /// each independently (heading+SAL only → single spec octet; the wire
+    /// stays minimal without IAR/MAC). REQ: FR-TRK-040
+    #[test]
+    fn dap_subfields_round_trip() {
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+
+        let mut t = track(1);
+        t.icao_address = Some(0x3C_65_AC);
+        t.daps.magnetic_heading_deg = Some(270.0);
+        t.daps.selected_altitude_ft = Some(-1_000.0); // below datum: negative SAL
+        t.daps.ias_kt = Some(250.0);
+        t.daps.mach = Some(0.784);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
+        let records = decode_data_block(&block).expect("decodes");
+        let r = &records[0];
+        assert_eq!(r.icao_address, Some(0x3C_65_AC));
+        assert_eq!(r.magnetic_heading_deg, Some(270.0));
+        assert_eq!(r.selected_altitude_ft, Some(-1_000.0), "two's complement");
+        assert_eq!(r.ias_kt, Some(250.0));
+        assert!((r.mach.unwrap() - 0.784).abs() < 1e-9);
+
+        // Heading + SAL only: single spec octet, no IAR/MAC bytes on the wire.
+        let mut t2 = track(2);
+        t2.daps.magnetic_heading_deg = Some(90.0);
+        t2.daps.selected_altitude_ft = Some(4_000.0);
+        assert_eq!(
+            encode_aircraft_derived_data(&t2),
+            vec![0x24, 0x40, 0x00, 0xC0, 0xA0],
+            "MHG+SAL, FX clear: 90° = 16 384 ticks; 160 × 25 ft with SAS/MCP"
+        );
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t2));
+        let r = &decode_data_block(&block).expect("decodes")[0];
+        assert_eq!(r.magnetic_heading_deg, Some(90.0));
+        assert_eq!(r.selected_altitude_ft, Some(4_000.0));
+        assert_eq!(r.ias_kt, None);
+        assert_eq!(r.mach, None);
+        assert_eq!(r.icao_address, None, "no ADR without an address");
     }
 
     /// A track with an SSR identity adds I062/060 (FRN 9) and I062/380 (FRN 11);
@@ -1201,7 +1420,7 @@ mod tests {
         let mut t = track(1);
         t.mode_3a = Some(0o2613);
         t.icao_address = Some(0x3C_65_AC);
-        let block = encoder.encode(Timestamp(12.0), &[t]);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
         assert_eq!(block[3], 0x9F, "octet 1 still unchanged");
         assert_eq!(
             block[4],
@@ -1212,7 +1431,7 @@ mod tests {
         // The two payloads sit in UAP order: I062/060 right after velocity, and
         // I062/380 right after it (both before the track number 0x00,0x01).
         let mode_3a = encode_mode_3a(0o2613);
-        let address = encode_target_address(0x3C_65_AC);
+        let address = encode_aircraft_derived_data(&t);
         let velocity = [0x01, 0x90, 0xFF, 0x38];
         let needle: Vec<u8> = velocity
             .iter()
@@ -1321,7 +1540,7 @@ mod tests {
         let mut t = track(1);
         t.monosensor = true;
         t.spi = true;
-        let block = encoder.encode(Timestamp(12.0), &[t]);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
         let records = decode_data_block(&block).expect("decodes");
         assert!(records[0].monosensor, "MON recovered");
         assert!(records[0].spi, "SPI recovered");
@@ -1466,7 +1685,7 @@ mod tests {
             Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
         let mut t = track(1);
         t.flight_level_ft = Some(35_000.0);
-        let block = encoder.encode(Timestamp(12.0), &[t]);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
 
         let records = decode_data_block(&block).unwrap();
         assert_eq!(records.len(), 1);
@@ -1503,7 +1722,7 @@ mod tests {
             Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
         let mut t = track(1);
         t.callsign = Some(Callsign::new("DLH123"));
-        let block = encoder.encode(Timestamp(12.0), &[t]);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
 
         let records = decode_data_block(&block).unwrap();
         assert_eq!(records.len(), 1);
@@ -1580,7 +1799,7 @@ mod tests {
             Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
         let mut t = track(1);
         t.adsb_age_s = Some(3.0); // ES age: 3 s → 12 quarter-seconds (0x0C)
-        let block = encoder.encode(Timestamp(12.0), &[t]);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
 
         let expected = vec![
             0x3E, // CAT 62
@@ -1613,7 +1832,7 @@ mod tests {
 
         let mut t = track(1);
         t.adsb_age_s = Some(3.0);
-        let block = encoder.encode(Timestamp(12.0), &[t]);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
 
         let records = decode_data_block(&block).unwrap();
         assert_eq!(records.len(), 1);
@@ -1693,7 +1912,7 @@ mod tests {
         let mut t = track(1);
         t.mode_3a = Some(0o2613);
         t.icao_address = Some(0x3C_65_AC);
-        let block = encoder.encode(Timestamp(12.0), &[t]);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
 
         let records = decode_data_block(&block).unwrap();
         assert_eq!(records[0].mode_3a, Some(0o2613));
