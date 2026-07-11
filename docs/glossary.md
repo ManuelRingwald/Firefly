@@ -88,6 +88,12 @@ lokalen Luftdruck: Erst mit QNH wird aus der Druckhöhe die wahre Höhe
 Fireflys Meteo-Dienst (VERT.1, SDPS-003-Analogon) hält regionale QNH-Werte
 und kennzeichnet ehrlich, wenn nur die Standardatmosphäre verfügbar ist.
 
+**RoCD** (*Rate of Climb/Descent*)
+Die **Steig-/Sinkrate** eines Tracks (ft/min, positiv = steigen) — Grundlage
+der Climb-/Descend-Pfeile im ASD-Label und jeder Vertikal-Konfliktlogik.
+Firefly schätzt sie im per-Track-Vertikal-Filter aus den Mode-C-Meldungen
+(VERT.2) und sendet sie als CAT062 I062/220.
+
 **WAM / MLAT** (*Wide Area Multilateration*)
 Überwachung durch **Laufzeitdifferenz-Messung** (TDOA): mehrere
 Bodenstationen empfangen dasselbe Transponder-Signal; aus den

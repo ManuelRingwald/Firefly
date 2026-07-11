@@ -10,6 +10,35 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (VERT.2 — Höhen-Tracking + RoCD → I062/135/130/220)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **VERT.2 — Vertikal-Kette auf dem Draht (FR-TRK-042, ICD 3.5.0 additiv):**
+  Jeder Track führt jetzt einen **Vertikal-Filter** (`firefly-track::
+  vertical`, 2-Zustands-Kalman im Druckhöhen-Raum: Höhe + Rate; 5σ-Gating
+  gegen Mode-C-Garbling, **Reinit nach 3 konsekutiven Rejects** — echter
+  Level-Sprung statt Ausreißer) und eine strikt getrennte **geometrische
+  Höhe** (neues `ModeAC.geometric_height_ft`, nur von echt geometrischen
+  Quellen gesetzt: ADS-B I021/140, MLAT I020/105; EWMA α = 0,3;
+  barometrisch/geometrisch nie gemischt). **Frische-Disziplin:** Ausgabe
+  nur ≤ 30 s nach der letzten akzeptierten Vertikal-Messung. **QNH am
+  Ausgang** (`apply_qnh` im Live-Pfad): nur ein **beobachtetes** regionales
+  QNH (VERT.1) korrigiert (exakte ICAO-Barometrie) und setzt das
+  I062/135-QNH-Bit — Standardatmosphäre ⇒ Druckhöhe, Bit 0. **Draht:**
+  I062/130 (FRN 18, i16 × 6,25 ft), I062/135 (FRN 19, QNH-Bit + 15-Bit-ZK
+  × 25 ft), I062/220 (FRN 20, i16 × 6,25 ft/min); Absenz statt Null, Track
+  ohne Vertikal-Daten byte-identisch alt, I062/136 unverändert daneben;
+  byte-genaue Referenz-Vektoren in ICD §4.8. Ehrliche Grenzen: ein
+  Filter-Satz für alle Baro-Quellen; RoCD aus eigener Messung (BDS-6,0-
+  Fusion = Folge-Häppchen); keine Temperatur-Korrektur. **Wayfinder-Issue
+  folgt** (GitHub-MCP war beim Abschluss nicht erreichbar — nach
+  Wiederverbindung anlegen und hier + in todo-for-wayfinder.md eintragen).
+  8 neue Tests (Filter 4, Track 1, Encoder/Decoder 2, apply_qnh 1), Gates
+  grün, cat062-Fuzz-Smoke 5,5 M Läufe. Roadmap-Stand: **62,5 %**.
+- **Nächster Schritt:** **VERT.3** ankündigen — Mode of Movement +
+  Beschleunigung + IMM-Bank-Ausbau (CA-Modell) → I062/200/210 (S4–S5) —
+  und Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-11 (VERT.1 — Meteo/QNH-Dienst)
 
 - **Zuletzt aktualisiert:** 2026-07-11
