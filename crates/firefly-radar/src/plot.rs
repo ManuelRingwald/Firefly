@@ -41,6 +41,7 @@ pub fn target_report_to_plot(report: &DecodedTargetReport, sensor: SensorId) -> 
         icao_address: report.icao_address,
         callsign: report.callsign,
         spi: report.spi,
+        geometric_height_ft: None,
         daps: report.daps,
     };
     Some(Plot {

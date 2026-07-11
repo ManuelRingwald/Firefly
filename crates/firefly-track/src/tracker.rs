@@ -1019,6 +1019,18 @@ fn system_track_from(
         contributing_sensors: track.contributing_sensors().iter().copied().collect(),
         adsb_age_s: source_ages.adsb,
         source_ages,
+        // Vertical chain (VERT.2): filtered pressure altitude + RoCD, and the
+        // separate geometric altitude — each only while fresh (a coasted
+        // vertical estimate is withheld, like stale DAPs). QNH correction is
+        // the output side's job; the tracker stays in pressure-altitude space.
+        barometric_altitude_ft: track
+            .vertical_estimate(time, PROVENANCE_FRESH_S)
+            .map(|(altitude_ft, _)| altitude_ft),
+        barometric_qnh_corrected: false,
+        geometric_altitude_ft: track.geometric_altitude_ft(time, PROVENANCE_FRESH_S),
+        rocd_ft_min: track
+            .vertical_estimate(time, PROVENANCE_FRESH_S)
+            .map(|(_, rocd)| rocd),
     }
 }
 
@@ -1114,6 +1126,7 @@ mod tests {
                 icao_address: Some(icao),
                 callsign: None,
                 spi: false,
+                geometric_height_ft: None,
                 daps: firefly_core::Daps::default(),
             },
         }
@@ -2096,6 +2109,7 @@ mod tests {
                 icao_address: None,
                 callsign: None,
                 spi: false,
+                geometric_height_ft: None,
                 daps: firefly_core::Daps::default(),
             },
         };

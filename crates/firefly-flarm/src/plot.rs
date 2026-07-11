@@ -79,6 +79,7 @@ pub fn position_to_plot(
         icao_address,
         callsign: None,
         spi: false,
+        geometric_height_ft: None,
         daps: firefly_core::Daps::default(),
     };
 

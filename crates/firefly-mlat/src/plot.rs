@@ -58,6 +58,9 @@ pub fn mlat_report_to_plot(report: &DecodedMlatReport, sensor: SensorId) -> Opti
         icao_address: report.icao_address,
         callsign: report.callsign,
         spi: report.spi,
+        // I020/105 is a genuinely geometric (WGS-84) height — the vertical
+        // chain (VERT.2) keeps it strictly separate from the barometric level.
+        geometric_height_ft: report.geometric_height_ft,
         daps: Daps::default(),
     };
     Some(Plot::geodetic(

@@ -103,6 +103,7 @@ pub(crate) fn parse_state(
         icao_address: Some(icao),
         callsign,
         spi: false,
+        geometric_height_ft: None,
         daps: firefly_core::Daps::default(),
     };
 

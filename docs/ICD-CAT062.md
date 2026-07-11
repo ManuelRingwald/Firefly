@@ -21,7 +21,30 @@
 
 ## Version
 
-**3.4.0** (2026-07-11) — **Additiv (FR-TRK-040, ARTAS-Roadmap FEP.2):**
+**3.5.0** (2026-07-11) — **Additiv (FR-TRK-042, ARTAS-Roadmap VERT.2):**
+Die **Vertikal-Kette** kommt auf den Draht — drei neue optionale Items an
+ihren Standard-UAP-Positionen:
+
+- **I062/130** (FRN 18) — *Calculated Track Geometric Altitude*: die
+  geglättete **geometrische** (WGS-84-)Höhe aus echt-geometrischen
+  Quell-Höhen (ADS-B I021/140, MLAT I020/105). i16 BE, LSB 6,25 ft.
+- **I062/135** (FRN 19) — *Calculated Track Barometric Altitude*: die
+  **gefilterte** barometrische Höhe (2-Zustands-Kalman über Mode-C/FL).
+  Bit 16 = **QNH-Bit**: gesetzt nur, wenn der Wert auf ein **beobachtetes**
+  regionales QNH korrigiert ist (`FIREFLY_METEO_QNH`, VERT.1); ohne
+  beobachtete Region bleibt es die unkorrigierte Druckhöhe mit Bit 0 —
+  nie eine stille Schein-Korrektur. Bits 15–1: 15-Bit-Zweierkomplement,
+  LSB 1/4 FL = 25 ft.
+- **I062/220** (FRN 20) — *Calculated Rate of Climb/Descent*: die
+  Steig-/Sinkrate aus dem Vertikal-Filter, positiv = steigen. i16 BE,
+  LSB 6,25 ft/min.
+
+Jedes Item nur bei **frischem** Schätzwert (≤ 30 s; Absenz statt
+Stale-Behauptung). **Kein Wire-Bruch:** ein Track ohne Vertikal-Daten ist
+byte-identisch zur Vor-3.5.0-Form; I062/136 (gemessene Flugfläche) bleibt
+unverändert daneben bestehen. Details + Referenz-Bytes: Abschnitt 4.8.
+
+Vorgänger **3.4.0** (2026-07-11) — **Additiv (FR-TRK-040, ARTAS-Roadmap FEP.2):**
 **I062/380** trägt zusätzlich zur Target Address die **Mode-S-EHS-DAPs**
 (Downlink Aircraft Parameters, aus CAT048 I048/250 BDS 4,0/6,0): **MHG**
 (Magnetic Heading, Subfeld #3, LSB 360/2¹⁶ °), **SAL** (Selected Altitude —
@@ -90,6 +113,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 3.5.0 | 2026-07-11 | **Additiv (FR-TRK-042, VERT.2).** Vertikal-Kette auf dem Draht: **I062/130** (FRN 18, geometrische Höhe, i16 × 6,25 ft), **I062/135** (FRN 19, gefilterte barometrische Höhe; **QNH-Bit** nur bei Korrektur auf beobachtetes regionales QNH, sonst Druckhöhe mit Bit 0; 15-Bit-ZK × 25 ft), **I062/220** (FRN 20, Steig-/Sinkrate, i16 × 6,25 ft/min, positiv = steigen). Jedes Item nur bei frischem Schätzwert (≤ 30 s); Track ohne Vertikal-Daten byte-identisch alt; I062/136 bleibt daneben. Referenz-Bytes in 4.8. Konsument: drei feste 2-Oktett-Items an Standard-UAP-Positionen, kein Lockstep. |
 | 3.4.0 | 2026-07-11 | **Additiv (FR-TRK-040, FEP.2).** I062/380 um die Mode-S-EHS-DAPs erweitert: **MHG** (#3, LSB 360/2¹⁶ °), **SAL** (#6, SAS/Source=MCP + 13-Bit-Zweierkomplement, LSB 25 ft — die eingedrehte Autopilot-Höhe, Level-Bust-Basis), **IAR** (#26, LSB 1 kt), **MAC** (#27, LSB 0,008). Nur bei vorhandenem, frischem Wert (≤ 30 s) gesendet; DAP-loser Track byte-identisch zur alten Form; IAR/MAC verlängern die Subfeld-Spec via FX auf 4 Oktette. Byte-genauer Referenz-Dump in 4.7. Konsument: subfeld-getrieben lesen, kein Lockstep. |
 | 3.3.0 | 2026-07-11 | **Additiv (FR-IO-008, REG.3/ADR 0034).** CAT063 trägt bei aktiver Registrierungs-Korrektur (REG.2b) die **angewandte per-Sensor-Bias-Korrektur**: **I063/080** (FRN 7; SRG=0 + SRB, LSB 1/128 NM) und **I063/081** (FRN 8; SAB, LSB 360/2¹⁶ °). Nur bei in Kraft befindlicher Korrektur gesendet — Absenz = „keine Korrektur". FSPEC dann `0xBB 0x80`, Record 16 Oktette; byte-genauer Referenz-Dump in Abschnitt 9. **Kein Wire-Bruch** (FSPEC-getrieben, feste Längen, Standard-UAP). Konsument: optional auswerten (z. B. Bias-Anzeige im Sensor-Panel), kein Lockstep nötig. |
 | 3.2.0 | 2026-07-10 | **Additiv (FR-TRK-036, QW.3).** I062/080 um die ARTAS-Vertrauens-Flags erweitert: **MON** (Oktett 1, `0x80`, monosensor — höchstens ein Sensor im 30-s-Frische-Fenster; lange coastende Tracks ebenfalls MON) und **SPI** (Oktett 1, `0x40`, „Ident"-Puls der letzten Meldung; Quelle: CAT048 I048/020 via `radar_asterix`, transient). **SIM**-Slot (Oktett 2, `0x80`) dokumentiert, wird immer 0 gesendet. **Kein Wire-Bruch** — nur zuvor konstant 0 gesendete Bits werden bei Bedarf gesetzt; Multisensor-Track ohne SPI byte-identisch zu 3.1.x. Konsument: MON/SPI optional auswerten (z. B. Mono-Sensor-Kennzeichnung im Label), kein Lockstep nötig. Details: Abschnitt 4.1. |
@@ -179,14 +203,17 @@ zusätzlichen FSPEC-Bits — unbekannte Items werden anhand ihrer Längen-Regeln
 | 13 | I062/080 | Track Status | variabel mit FX | siehe 4.1 |
 | 14 | I062/290 | System Track Update Ages | variabel | siehe 4.2 |
 | 17 | I062/136 | Measured Flight Level (nur wenn vorhanden) | 2 Oktette | signed i16 BE, LSB = 1/4 FL = 25 ft; siehe 4.4 |
+| 18 | I062/130 | Calculated Track Geometric Altitude (nur wenn vorhanden, seit 3.5.0) | 2 Oktette | signed i16 BE, LSB = 6,25 ft; siehe 4.8 |
+| 19 | I062/135 | Calculated Track Barometric Altitude (nur wenn vorhanden, seit 3.5.0) | 2 Oktette | Bit 16 = QNH-Bit, Bits 15–1 = 15-Bit-Zweierkomplement, LSB = 1/4 FL = 25 ft; siehe 4.8 |
+| 20 | I062/220 | Calculated Rate of Climb/Descent (nur wenn vorhanden, seit 3.5.0) | 2 Oktette | signed i16 BE, LSB = 6,25 ft/min, positiv = steigen; siehe 4.8 |
 | 27 | I062/500 | Estimated Accuracies | variabel | siehe 4.3 |
 
 > **UAP-Standardtreue (ADR 0015).** Die FRNs folgen der echten EUROCONTROL-
 > CAT062-UAP (SUR.ET1.ST05.2000-STD-09-01). Die Lücken sind die nicht
 > emittierten Standard-Items: FRN 2 (Spare), 3 (I062/015), 8 (I062/210),
-> 15 (I062/200), **16 (I062/295 — reserviert, ungenutzt)**, 18–20
-> (I062/130/135/220). Ein konformer Fremd-Decoder liest den Strom ohne privates
-> Profil. Weil I062/500 auf FRN 27 (4. FSPEC-Oktett) liegt, hat ein Record
+> 15 (I062/200), **16 (I062/295 — reserviert, ungenutzt)**. Seit 3.5.0 sind
+> auch FRN 18–20 (I062/130/135/220) belegt. Ein konformer Fremd-Decoder liest
+> den Strom ohne privates Profil. Weil I062/500 auf FRN 27 (4. FSPEC-Oktett) liegt, hat ein Record
 > mindestens **4 FSPEC-Oktette**.
 
 Items werden **nur kodiert, wenn der Wert vorhanden ist** — I062/060, I062/245
@@ -365,6 +392,48 @@ Grundwahrheit: `firefly-asterix::cat062::tests::aircraft_derived_data_encodes_da
 Subfelder haben feste Standard-Längen und können übersprungen werden. Kein
 Lockstep: Ein Decoder, der nur ADR liest, muss lediglich die Spec-Kette und
 die Längen der neuen Subfelder respektieren.
+
+### 4.8 I062/130 / I062/135 / I062/220 — Vertikal-Kette (seit 3.5.0)
+
+Die drei Items tragen das Ergebnis des **Vertikal-Trackings** (VERT.2):
+
+- **I062/130 — Calculated Track Geometric Altitude** (FRN 18, 2 Oktette):
+  i16 BE, LSB 6,25 ft, Referenz WGS-84. Quelle: EWMA über **echt
+  geometrische** Quell-Höhen (ADS-B I021/140, MLAT I020/105) — nie ein
+  barometrischer Wert unter geometrischem Etikett.
+- **I062/135 — Calculated Track Barometric Altitude** (FRN 19, 2 Oktette):
+  Bit 16 = **QNH-Bit**, Bits 15–1 = 15-Bit-Zweierkomplement der Höhe in
+  1/4-FL-Schritten (25 ft). QNH-Bit gesetzt ⇔ der Wert ist auf ein
+  **beobachtetes** regionales QNH korrigiert; sonst ist er die gefilterte
+  **Druckhöhe** (1013,25 hPa). Quelle: 2-Zustands-Kalman (Höhe + Rate) über
+  die Mode-C-/FL-Meldungen des Tracks, mit Ausreißer-Gating gegen
+  Mode-C-Garbling.
+- **I062/220 — Calculated Rate of Climb/Descent** (FRN 20, 2 Oktette):
+  i16 BE, LSB 6,25 ft/min, **positiv = steigen**. Quelle: die Raten-Größe
+  desselben Vertikal-Filters.
+
+Jedes Item erscheint **nur bei frischem Schätzwert** (letzte akzeptierte
+Vertikal-Messung ≤ 30 s vor der Record-Zeit) — ein lange gecoasteter
+Vertikal-Zustand wird zurückgehalten statt als aktuell gemeldet. I062/136
+(die **gemessene** letzte Flugfläche) bleibt unverändert daneben bestehen:
+gemessen vs. gefiltert sind verschiedene Aussagen.
+
+**Referenz-Bytes** (byte-genau, `firefly-asterix`-Tests
+`vertical_items_encode_byte_exactly_and_absence_is_unchanged` /
+`decode_recovers_vertical_items`):
+
+| Wert | Item-Bytes |
+|------|-----------|
+| I062/130: 10 000 ft geometrisch (1600 Ticks) | `06 40` |
+| I062/130: −625 ft (−100 Ticks) | `FF 9C` |
+| I062/135: FL350 Druckhöhe, unkorrigiert (1400 Ticks, QNH=0) | `05 78` |
+| I062/135: 3 000 ft QNH-korrigiert (120 Ticks, QNH=1) | `80 78` |
+| I062/135: −400 ft QNH-korrigiert (−16 Ticks 15-Bit-ZK, QNH=1) | `FF F0` |
+| I062/220: +3 000 ft/min (480 Ticks) | `01 E0` |
+| I062/220: −1 200 ft/min (−192 Ticks) | `FF 40` |
+
+Im FSPEC liegen FRN 18/19/20 im **dritten** Oktett (Bits `0x10`/`0x08`/
+`0x04`); ein Track ohne Vertikal-Daten sendet exakt die Vor-3.5.0-Bytes.
 
 ## 5. Koordinaten
 

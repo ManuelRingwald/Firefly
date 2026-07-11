@@ -34,6 +34,7 @@ fn adsb(time_secs: f64, lat: f64, lon: f64, icao: u32, callsign: &str) -> Plot {
             icao_address: Some(icao),
             callsign: Some(Callsign::new(callsign)),
             spi: false,
+            geometric_height_ft: None,
             daps: firefly_core::Daps::default(),
         },
     )

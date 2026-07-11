@@ -278,6 +278,14 @@ ist VERT.2.
 > aktualisiert sie extern im Wetter-Zyklus. Ein Live-Provider (periodischer
 > METAR-Abruf) braucht eine Netz-Freigabe-Entscheidung des Deployments und
 > einen eigenen ADR (Folge-Häppchen).
+>
+> **Verwertung (VERT.2):** Jeder Track führt einen Vertikal-Filter (Höhe +
+> Steig-/Sinkrate aus den Mode-C-Meldungen, Ausreißer-Gating) und eine
+> getrennte geometrische Höhe (nur aus echt geometrischen Quellen: ADS-B
+> I021/140, MLAT I020/105). Auf dem Draht: **I062/135** (barometrisch,
+> QNH-Bit gesetzt nur bei Korrektur auf ein **beobachtetes** regionales
+> QNH), **I062/130** (geometrisch), **I062/220** (RoCD) — je nur bei
+> frischem Schätzwert (≤ 30 s), ICD 3.5.0 additiv.
 
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 

@@ -162,6 +162,14 @@ pub struct ModeAC {
     /// leave it `false`. `serde(default)` keeps pre-SPI `.ffplots` readable.
     #[serde(default)]
     pub spi: bool,
+    /// **Geometric** (WGS-84) height in feet, if the source genuinely
+    /// measured one (VERT.2): ADS-B I021/140, MLAT I020/105 — never a
+    /// barometric value smuggled in under a geometric label. Kept separate
+    /// from `flight_level_ft` because the two use different references and
+    /// must never be mixed in the vertical chain. `serde(default)` keeps
+    /// older `.ffplots` readable.
+    #[serde(default)]
+    pub geometric_height_ft: Option<f64>,
     /// Downlink Aircraft Parameters from Mode S EHS (FEP.2). Populated only
     /// by the CAT048 radar path (I048/250, BDS 4,0/5,0/6,0); empty from the
     /// ADS-B/FLARM adapters. `serde(default)` keeps older `.ffplots` readable.

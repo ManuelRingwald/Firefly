@@ -43,7 +43,6 @@ const CATEGORY: u8 = 62;
 /// - FRN 8 — I062/210 Calculated Acceleration.
 /// - FRN 15 — I062/200 Mode of Movement.
 /// - FRN 16 — I062/295 Track Data Ages (reserved, not emitted).
-/// - FRN 18/19/20 — I062/130/135/220 (geometric altitude, baro altitude, RoCD).
 ///
 /// Keeping the FRNs named and in one place documents the bit layout and stops
 /// magic numbers from drifting between the FSPEC and the payload order.
@@ -72,6 +71,12 @@ mod uap {
     pub const UPDATE_AGES: u8 = 14;
     /// I062/136 — Measured Flight Level.
     pub const MEASURED_FLIGHT_LEVEL: u8 = 17;
+    /// I062/130 — Calculated Track Geometric Altitude (VERT.2).
+    pub const GEOMETRIC_ALTITUDE: u8 = 18;
+    /// I062/135 — Calculated Track Barometric Altitude (VERT.2).
+    pub const BAROMETRIC_ALTITUDE: u8 = 19;
+    /// I062/220 — Calculated Rate of Climb/Descent (VERT.2).
+    pub const RATE_OF_CLIMB_DESCENT: u8 = 20;
     /// I062/500 — Estimated Accuracies.
     pub const ESTIMATED_ACCURACIES: u8 = 27;
 }
@@ -97,6 +102,19 @@ const AGE_LSB_SECONDS: f64 = 0.25;
 /// 1/4-FL steps. One FL is 100 ft, so the LSB is 25 ft. Verified against
 /// SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.13.
 const FLIGHT_LEVEL_LSB_FT: f64 = 25.0;
+/// I062/130 stores the geometric altitude as a signed 16-bit count of
+/// 6.25-ft steps; I062/220 stores the rate of climb/descent the same way
+/// (ft/min). Verified against SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10.
+const GEOMETRIC_ALTITUDE_LSB_FT: f64 = 6.25;
+const ROCD_LSB_FT_MIN: f64 = 6.25;
+/// I062/135 bit 16: the carried barometric altitude is corrected to a
+/// regional QNH (VERT.2). Cleared = uncorrected pressure altitude.
+const CBA_QNH_BIT: u16 = 0x8000;
+/// I062/135 carries the altitude in the low 15 bits (two's complement,
+/// LSB 1/4 FL = 25 ft).
+const CBA_ALTITUDE_MASK: u16 = 0x7FFF;
+const CBA_SIGN: i32 = 0x4000;
+const CBA_MODULUS: i32 = 0x8000;
 /// I062/500 APC stores each position-accuracy component in 0.5-metre steps.
 const ACCURACY_LSB_METRES: f64 = 0.5;
 /// I062/060 carries the Mode 3/A reply in its low 12 bits (4 octal digits); the
@@ -299,6 +317,23 @@ impl Cat062Encoder {
                 encode_measured_flight_level(flight_level_ft),
             );
         }
+        // Vertical chain (VERT.2, ICD 3.5.0): each item only when the tracker
+        // carries a fresh estimate — absence over a stale or invented value.
+        if let Some(geometric_ft) = track.geometric_altitude_ft {
+            builder = builder.item(
+                uap::GEOMETRIC_ALTITUDE,
+                encode_geometric_altitude(geometric_ft),
+            );
+        }
+        if let Some(barometric_ft) = track.barometric_altitude_ft {
+            builder = builder.item(
+                uap::BAROMETRIC_ALTITUDE,
+                encode_barometric_altitude(barometric_ft, track.barometric_qnh_corrected),
+            );
+        }
+        if let Some(rocd) = track.rocd_ft_min {
+            builder = builder.item(uap::RATE_OF_CLIMB_DESCENT, encode_rocd(rocd));
+        }
 
         builder.finish()
     }
@@ -476,6 +511,36 @@ fn encode_aircraft_derived_data(track: &SystemTrack) -> Vec<u8> {
 /// complement (`i16`).
 fn encode_measured_flight_level(flight_level_ft: f64) -> Vec<u8> {
     let ticks = (flight_level_ft / FLIGHT_LEVEL_LSB_FT).round() as i16;
+    ticks.to_be_bytes().to_vec()
+}
+
+/// I062/130 — Calculated Track Geometric Altitude: a signed 16-bit count of
+/// 6.25-ft steps (WGS-84 reference), big-endian.
+fn encode_geometric_altitude(geometric_ft: f64) -> Vec<u8> {
+    let ticks = (geometric_ft / GEOMETRIC_ALTITUDE_LSB_FT).round() as i16;
+    ticks.to_be_bytes().to_vec()
+}
+
+/// I062/135 — Calculated Track Barometric Altitude: bit 16 = QNH (the value
+/// is corrected to a regional QNH), bits 15–1 a 15-bit two's-complement count
+/// of 1/4-FL (25-ft) steps. The QNH bit is set **only** for a genuinely
+/// corrected value (VERT.2) — an uncorrected pressure altitude is carried
+/// with the bit cleared, never dressed up as corrected.
+fn encode_barometric_altitude(barometric_ft: f64, qnh_corrected: bool) -> Vec<u8> {
+    let ticks = (barometric_ft / FLIGHT_LEVEL_LSB_FT).round() as i32;
+    let raw = (ticks & CBA_ALTITUDE_MASK as i32) as u16;
+    let value = if qnh_corrected {
+        raw | CBA_QNH_BIT
+    } else {
+        raw
+    };
+    value.to_be_bytes().to_vec()
+}
+
+/// I062/220 — Calculated Rate of Climb/Descent: a signed 16-bit count of
+/// 6.25-ft/min steps, positive = climb, big-endian.
+fn encode_rocd(rocd_ft_min: f64) -> Vec<u8> {
+    let ticks = (rocd_ft_min / ROCD_LSB_FT_MIN).round() as i16;
     ticks.to_be_bytes().to_vec()
 }
 
@@ -683,6 +748,15 @@ pub struct DecodedRecord {
     pub ias_kt: Option<f64>,
     /// I062/380 MAC — Mach number, if present (FEP.2).
     pub mach: Option<f64>,
+    /// I062/130 Calculated Track Geometric Altitude, feet, if present (VERT.2).
+    pub geometric_altitude_ft: Option<f64>,
+    /// I062/135 Calculated Track Barometric Altitude, feet, if present (VERT.2).
+    pub barometric_altitude_ft: Option<f64>,
+    /// I062/135 QNH bit — whether the barometric altitude is corrected to a
+    /// regional QNH. `false` when I062/135 is absent or uncorrected.
+    pub barometric_qnh_corrected: bool,
+    /// I062/220 Calculated Rate of Climb/Descent, ft/min, if present (VERT.2).
+    pub rocd_ft_min: Option<f64>,
 }
 
 /// Errors that can occur while decoding a CAT062 data block.
@@ -769,6 +843,10 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
     let mut callsign = None;
     let mut icao_address = None;
     let mut flight_level_ft = None;
+    let mut geometric_altitude_ft = None;
+    let mut barometric_altitude_ft = None;
+    let mut barometric_qnh_corrected = false;
+    let mut rocd_ft_min = None;
     let mut magnetic_heading_deg = None;
     let mut selected_altitude_ft = None;
     let mut ias_kt = None;
@@ -853,6 +931,25 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
             uap::MEASURED_FLIGHT_LEVEL => {
                 flight_level_ft = Some(decode_measured_flight_level(cursor.take(2)?))
             }
+            uap::GEOMETRIC_ALTITUDE => {
+                let b = cursor.take(2)?;
+                geometric_altitude_ft =
+                    Some(i16::from_be_bytes([b[0], b[1]]) as f64 * GEOMETRIC_ALTITUDE_LSB_FT);
+            }
+            uap::BAROMETRIC_ALTITUDE => {
+                let b = cursor.take(2)?;
+                let raw = u16::from_be_bytes([b[0], b[1]]);
+                barometric_qnh_corrected = raw & CBA_QNH_BIT != 0;
+                let mut ticks = (raw & CBA_ALTITUDE_MASK) as i32;
+                if ticks & CBA_SIGN != 0 {
+                    ticks -= CBA_MODULUS;
+                }
+                barometric_altitude_ft = Some(ticks as f64 * FLIGHT_LEVEL_LSB_FT);
+            }
+            uap::RATE_OF_CLIMB_DESCENT => {
+                let b = cursor.take(2)?;
+                rocd_ft_min = Some(i16::from_be_bytes([b[0], b[1]]) as f64 * ROCD_LSB_FT_MIN);
+            }
             uap::ESTIMATED_ACCURACIES => {
                 position_uncertainty = Some(decode_accuracies(cursor.take(5)?))
             }
@@ -890,6 +987,10 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         selected_altitude_ft,
         ias_kt,
         mach,
+        geometric_altitude_ft,
+        barometric_altitude_ft,
+        barometric_qnh_corrected,
+        rocd_ft_min,
     })
 }
 
@@ -1167,6 +1268,10 @@ mod tests {
             contributing_sensors: Vec::new(),
             adsb_age_s: None,
             source_ages: SourceAges::default(),
+            barometric_altitude_ft: None,
+            barometric_qnh_corrected: false,
+            geometric_altitude_ft: None,
+            rocd_ft_min: None,
         }
     }
 
@@ -1693,6 +1798,70 @@ mod tests {
         // The other items still decode correctly alongside it.
         assert_eq!(records[0].track_number, 1);
         assert_eq!(records[0].position_uncertainty, 100.0);
+    }
+
+    /// The vertical items encode byte-exactly (VERT.2, ICD 3.5.0):
+    /// I062/130 = geo/6.25 ft as i16, I062/135 = QNH bit + 15-bit
+    /// two's-complement 25-ft count, I062/220 = RoCD/6.25 ft/min as i16 —
+    /// and a track without vertical data stays byte-identical to before
+    /// (no lockstep with Wayfinder). REQ: FR-TRK-042
+    #[test]
+    fn vertical_items_encode_byte_exactly_and_absence_is_unchanged() {
+        assert_eq!(encode_geometric_altitude(10_000.0), vec![0x06, 0x40]);
+        assert_eq!(encode_geometric_altitude(-625.0), vec![0xFF, 0x9C]);
+        // FL350 pressure altitude, uncorrected: 35 000/25 = 1400 = 0x0578.
+        assert_eq!(
+            encode_barometric_altitude(35_000.0, false),
+            vec![0x05, 0x78]
+        );
+        // QNH-corrected 3 000 ft: 120 ticks | QNH bit.
+        assert_eq!(encode_barometric_altitude(3_000.0, true), vec![0x80, 0x78]);
+        // Below the datum, corrected: -400 ft = -16 ticks, 15-bit two's
+        // complement 0x7FF0, plus the QNH bit.
+        assert_eq!(encode_barometric_altitude(-400.0, true), vec![0xFF, 0xF0]);
+        // 3 000 ft/min climb = 480 ticks; -1 200 ft/min descent = -192.
+        assert_eq!(encode_rocd(3_000.0), vec![0x01, 0xE0]);
+        assert_eq!(encode_rocd(-1_200.0), vec![0xFF, 0x40]);
+
+        // Absence: a track without vertical data emits the pre-3.5.0 bytes.
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let plain = encoder.encode(Timestamp(12.0), &[track(1)]);
+        let mut with = track(1);
+        with.geometric_altitude_ft = Some(10_000.0);
+        with.barometric_altitude_ft = Some(3_000.0);
+        with.barometric_qnh_corrected = true;
+        with.rocd_ft_min = Some(3_000.0);
+        let extended = encoder.encode(Timestamp(12.0), std::slice::from_ref(&with));
+        assert!(extended.len() > plain.len(), "items really were added");
+    }
+
+    /// The vertical items round-trip through the decoder, including the QNH
+    /// bit and negative values. REQ: FR-TRK-042
+    #[test]
+    fn decode_recovers_vertical_items() {
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let mut t = track(1);
+        t.geometric_altitude_ft = Some(10_000.0);
+        t.barometric_altitude_ft = Some(2_975.0);
+        t.barometric_qnh_corrected = true;
+        t.rocd_ft_min = Some(-1_200.0);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
+
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records[0].geometric_altitude_ft, Some(10_000.0));
+        assert_eq!(records[0].barometric_altitude_ft, Some(2_975.0));
+        assert!(records[0].barometric_qnh_corrected);
+        assert_eq!(records[0].rocd_ft_min, Some(-1_200.0));
+        // Uncorrected pressure altitude keeps the QNH bit cleared.
+        let mut u = track(2);
+        u.barometric_altitude_ft = Some(35_000.0);
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&u));
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records[0].barometric_altitude_ft, Some(35_000.0));
+        assert!(!records[0].barometric_qnh_corrected);
+        assert_eq!(records[0].rocd_ft_min, None);
     }
 
     /// I062/245 packs 8 characters as 8 × 6-bit IA-5 codes (48 bits = 6

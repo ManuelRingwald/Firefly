@@ -27,6 +27,7 @@ mod registration;
 mod track;
 mod track_number;
 mod tracker;
+mod vertical;
 
 pub use association::{associate, Association};
 pub use gating::Gate;
@@ -43,3 +44,4 @@ pub use registration::{
 };
 pub use track::{Track, TrackStatus};
 pub use tracker::{SensorModel, Tracker, TrackerConfig};
+pub use vertical::VerticalFilter;
