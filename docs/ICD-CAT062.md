@@ -21,7 +21,29 @@
 
 ## Version
 
-**3.5.0** (2026-07-11) — **Additiv (FR-TRK-042, ARTAS-Roadmap VERT.2):**
+**3.6.0** (2026-07-11) — **Additiv (FR-TRK-043, ARTAS-Roadmap VERT.3):**
+Die **Kinematik-Kette** kommt auf den Draht — zwei neue optionale Items an
+ihren Standard-UAP-Positionen:
+
+- **I062/210** (FRN 8) — *Calculated Acceleration*: die horizontale
+  Beschleunigung `(Ax, Ay)` (Ost/Nord), je i8, LSB 0,25 m/s² (Encoder
+  clampt auf den Feldbereich ±31,75 m/s²). Quelle: eigener per-Track-
+  Schätzer über der IMM-Ausgangsgeschwindigkeit.
+- **I062/200** (FRN 15) — *Mode of Movement*: **TRANS** (Bits 8–7:
+  0 = Konstantkurs, 1 = Rechtskurve, 2 = Linkskurve, 3 = unbestimmt, aus
+  den IMM-Kurvenmodell-Wahrscheinlichkeiten), **LONG** (Bits 6–5:
+  0 = konstante GS, 1 = zunehmend, 2 = abnehmend, 3 = unbestimmt, aus der
+  Längs-Komponente der Beschleunigung), **VERT** (Bits 4–3: 0 = Level,
+  1 = Steigen, 2 = Sinken, 3 = unbestimmt, aus der VERT.2-Rate;
+  Schwelle ±300 ft/min), **ADF** (Bit 2: immer 0 — kein
+  Höhen-Diskrepanz-Check), Spare (Bit 1).
+
+Jedes Item nur bei vorhandener Bestimmung (I062/200 entfällt, wenn alle
+drei Achsen unbestimmt sind; Beschleunigung nur bei frischem Schätzwert
+≤ 30 s). **Kein Wire-Bruch:** ein Track ohne Kinematik-Daten ist
+byte-identisch zur Vor-3.6.0-Form. Details + Referenz-Bytes: Abschnitt 4.9.
+
+Vorgänger **3.5.0** (2026-07-11) — **Additiv (FR-TRK-042, ARTAS-Roadmap VERT.2):**
 Die **Vertikal-Kette** kommt auf den Draht — drei neue optionale Items an
 ihren Standard-UAP-Positionen:
 
@@ -113,6 +135,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 3.6.0 | 2026-07-11 | **Additiv (FR-TRK-043, VERT.3).** Kinematik-Kette: **I062/210** (FRN 8, Ax/Ay je i8 × 0,25 m/s², geclampt) und **I062/200** (FRN 15, TRANS aus IMM-Kurvenmodellen \| LONG aus Längs-Beschleunigung \| VERT aus der RoCD; ADF immer 0). I062/200 entfällt bei komplett unbestimmter Lage, I062/210 bei fehlendem/stalem Schätzwert; Track ohne Kinematik byte-identisch alt. Referenz-Bytes in 4.9. Konsument: zwei feste Items an Standard-UAP-Positionen, kein Lockstep. |
 | 3.5.0 | 2026-07-11 | **Additiv (FR-TRK-042, VERT.2).** Vertikal-Kette auf dem Draht: **I062/130** (FRN 18, geometrische Höhe, i16 × 6,25 ft), **I062/135** (FRN 19, gefilterte barometrische Höhe; **QNH-Bit** nur bei Korrektur auf beobachtetes regionales QNH, sonst Druckhöhe mit Bit 0; 15-Bit-ZK × 25 ft), **I062/220** (FRN 20, Steig-/Sinkrate, i16 × 6,25 ft/min, positiv = steigen). Jedes Item nur bei frischem Schätzwert (≤ 30 s); Track ohne Vertikal-Daten byte-identisch alt; I062/136 bleibt daneben. Referenz-Bytes in 4.8. Konsument: drei feste 2-Oktett-Items an Standard-UAP-Positionen, kein Lockstep. |
 | 3.4.0 | 2026-07-11 | **Additiv (FR-TRK-040, FEP.2).** I062/380 um die Mode-S-EHS-DAPs erweitert: **MHG** (#3, LSB 360/2¹⁶ °), **SAL** (#6, SAS/Source=MCP + 13-Bit-Zweierkomplement, LSB 25 ft — die eingedrehte Autopilot-Höhe, Level-Bust-Basis), **IAR** (#26, LSB 1 kt), **MAC** (#27, LSB 0,008). Nur bei vorhandenem, frischem Wert (≤ 30 s) gesendet; DAP-loser Track byte-identisch zur alten Form; IAR/MAC verlängern die Subfeld-Spec via FX auf 4 Oktette. Byte-genauer Referenz-Dump in 4.7. Konsument: subfeld-getrieben lesen, kein Lockstep. |
 | 3.3.0 | 2026-07-11 | **Additiv (FR-IO-008, REG.3/ADR 0034).** CAT063 trägt bei aktiver Registrierungs-Korrektur (REG.2b) die **angewandte per-Sensor-Bias-Korrektur**: **I063/080** (FRN 7; SRG=0 + SRB, LSB 1/128 NM) und **I063/081** (FRN 8; SAB, LSB 360/2¹⁶ °). Nur bei in Kraft befindlicher Korrektur gesendet — Absenz = „keine Korrektur". FSPEC dann `0xBB 0x80`, Record 16 Oktette; byte-genauer Referenz-Dump in Abschnitt 9. **Kein Wire-Bruch** (FSPEC-getrieben, feste Längen, Standard-UAP). Konsument: optional auswerten (z. B. Bias-Anzeige im Sensor-Panel), kein Lockstep nötig. |
@@ -196,12 +219,14 @@ zusätzlichen FSPEC-Bits — unbekannte Items werden anhand ihrer Längen-Regeln
 | 5 | I062/105 | Calculated Track Position (WGS-84) | 8 Oktette | Lat, Lon je i32 BE, LSB = 180/2²⁵° |
 | 6 | I062/100 | Calculated Track Position (System-Stereografisch X/Y) | 6 Oktette | X, Y je i24 BE (Zweierkomplement), LSB = 0,5 m |
 | 7 | I062/185 | Calculated Track Velocity (Cartesian Vx/Vy) | 4 Oktette | Vx, Vy je i16 BE, LSB = 0,25 m/s |
+| 8 | I062/210 | Calculated Acceleration (nur wenn vorhanden, seit 3.6.0) | 2 Oktette | Ax, Ay je i8, LSB = 0,25 m/s²; siehe 4.9 |
 | 9 | I062/060 | Track Mode 3/A Code | 2 Oktette | 12-Bit-Antwort (4 Oktal-Ziffern) in den unteren 12 Bit |
 | 10 | I062/245 | Target Identification (Callsign, nur wenn vorhanden) | 7 Oktette | STI/spare-Oktett + 8 × 6-Bit-IA-5-Zeichen; siehe 4.5 |
 | 11 | I062/380 | Aircraft Derived Data: Target Address + seit 3.4.0 die Mode-S-EHS-DAPs MHG/SAL/IAR/MAC (je nur wenn vorhanden und frisch) | variabel (compound) | Subfeld-Spec (FX-verkettet) + Subfelder in aufsteigender Nummern-Reihenfolge; siehe 4.7 |
 | 12 | I062/040 | Track Number | 2 Oktette | u16 BE |
 | 13 | I062/080 | Track Status | variabel mit FX | siehe 4.1 |
 | 14 | I062/290 | System Track Update Ages | variabel | siehe 4.2 |
+| 15 | I062/200 | Mode of Movement (nur wenn bestimmbar, seit 3.6.0) | 1 Oktett | TRANS/LONG/VERT je 2 Bit + ADF; siehe 4.9 |
 | 17 | I062/136 | Measured Flight Level (nur wenn vorhanden) | 2 Oktette | signed i16 BE, LSB = 1/4 FL = 25 ft; siehe 4.4 |
 | 18 | I062/130 | Calculated Track Geometric Altitude (nur wenn vorhanden, seit 3.5.0) | 2 Oktette | signed i16 BE, LSB = 6,25 ft; siehe 4.8 |
 | 19 | I062/135 | Calculated Track Barometric Altitude (nur wenn vorhanden, seit 3.5.0) | 2 Oktette | Bit 16 = QNH-Bit, Bits 15–1 = 15-Bit-Zweierkomplement, LSB = 1/4 FL = 25 ft; siehe 4.8 |
@@ -210,10 +235,11 @@ zusätzlichen FSPEC-Bits — unbekannte Items werden anhand ihrer Längen-Regeln
 
 > **UAP-Standardtreue (ADR 0015).** Die FRNs folgen der echten EUROCONTROL-
 > CAT062-UAP (SUR.ET1.ST05.2000-STD-09-01). Die Lücken sind die nicht
-> emittierten Standard-Items: FRN 2 (Spare), 3 (I062/015), 8 (I062/210),
-> 15 (I062/200), **16 (I062/295 — reserviert, ungenutzt)**. Seit 3.5.0 sind
-> auch FRN 18–20 (I062/130/135/220) belegt. Ein konformer Fremd-Decoder liest
-> den Strom ohne privates Profil. Weil I062/500 auf FRN 27 (4. FSPEC-Oktett) liegt, hat ein Record
+> emittierten Standard-Items: FRN 2 (Spare), 3 (I062/015) und
+> **16 (I062/295 — reserviert, ungenutzt)**. Seit 3.5.0 sind FRN 18–20
+> (I062/130/135/220) belegt, seit 3.6.0 auch FRN 8 (I062/210) und 15
+> (I062/200). Ein konformer Fremd-Decoder liest den Strom ohne privates
+> Profil. Weil I062/500 auf FRN 27 (4. FSPEC-Oktett) liegt, hat ein Record
 > mindestens **4 FSPEC-Oktette**.
 
 Items werden **nur kodiert, wenn der Wert vorhanden ist** — I062/060, I062/245
@@ -434,6 +460,45 @@ gemessen vs. gefiltert sind verschiedene Aussagen.
 
 Im FSPEC liegen FRN 18/19/20 im **dritten** Oktett (Bits `0x10`/`0x08`/
 `0x04`); ein Track ohne Vertikal-Daten sendet exakt die Vor-3.5.0-Bytes.
+
+### 4.9 I062/200 / I062/210 — Kinematik-Kette (seit 3.6.0)
+
+- **I062/210 — Calculated Acceleration** (FRN 8, 2 Oktette): `Ax` (Ost),
+  `Ay` (Nord), je i8, LSB 0,25 m/s²; der Encoder clampt auf den Feldbereich
+  ±31,75 m/s². Quelle: ein eigener per-Track-Schätzer (geglättete Ableitung
+  der IMM-Ausgangsgeschwindigkeit, datenzeit-getrieben); nur bei frischem
+  Schätzwert (≤ 30 s) gesendet.
+- **I062/200 — Mode of Movement** (FRN 15, 1 Oktett):
+
+  | Bits | Feld | Werte |
+  |------|------|-------|
+  | 8–7 | TRANS | 0 = Konstantkurs, 1 = Rechtskurve, 2 = Linkskurve, 3 = unbestimmt |
+  | 6–5 | LONG | 0 = konstante Groundspeed, 1 = zunehmend, 2 = abnehmend, 3 = unbestimmt |
+  | 4–3 | VERT | 0 = Level, 1 = Steigen, 2 = Sinken, 3 = unbestimmt |
+  | 2 | ADF | immer 0 (kein Höhen-Diskrepanz-Check) |
+  | 1 | Spare | 0 |
+
+  TRANS kommt aus den **IMM-Kurvenmodell-Wahrscheinlichkeiten** (Kurve nur
+  bei dominantem Modellanteil > 0,5 — die Priors allein malen keinen
+  frischen Track als kurvend), LONG aus der Längs-Komponente der
+  Beschleunigung (Schwelle 0,2 m/s²; unbestimmt unter 5 m/s Groundspeed),
+  VERT aus der VERT.2-Rate (Schwelle ±300 ft/min). Das Item entfällt, wenn
+  **alle drei** Achsen unbestimmt sind — ein Nichts-Wissen kostet keine
+  Draht-Bytes.
+
+**Referenz-Bytes** (byte-genau, `firefly-asterix`-Test
+`kinematics_items_encode_byte_exactly_and_round_trip`):
+
+| Wert | Item-Bytes |
+|------|-----------|
+| I062/210: Ax = +1,0 m/s², Ay = −0,5 m/s² | `04 FE` |
+| I062/210: geclampt bei ±100 m/s² | `7F 80` |
+| I062/200: Rechtskurve + GS zunehmend + Steigen | `54` |
+| I062/200: Linkskurve + LONG unbestimmt + Level | `B0` |
+
+Im FSPEC liegt FRN 8 im **zweiten** Oktett (Bit `0x80`) und FRN 15 im
+**dritten** (Bit `0x80`); ein Track ohne Kinematik-Daten sendet exakt die
+Vor-3.6.0-Bytes.
 
 ## 5. Koordinaten
 

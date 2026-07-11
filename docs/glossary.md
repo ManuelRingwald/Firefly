@@ -88,6 +88,17 @@ lokalen Luftdruck: Erst mit QNH wird aus der Druckhöhe die wahre Höhe
 Fireflys Meteo-Dienst (VERT.1, SDPS-003-Analogon) hält regionale QNH-Werte
 und kennzeichnet ehrlich, wenn nur die Standardatmosphäre verfügbar ist.
 
+**Mode of Movement** (I062/200)
+Der **qualitative Bewegungszustand** eines Tracks in drei unabhängigen
+Achsen: **TRANS** (Kurs: konstant / Rechtskurve / Linkskurve), **LONG**
+(Grundgeschwindigkeit: konstant / zunehmend / abnehmend), **VERT**
+(Level / Steigen / Sinken) — jeweils mit ehrlichem `Undetermined`, wenn
+die Basis fehlt oder stale ist. Grundlage für Kurven-/Trend-Indikatoren
+im ASD-Label. Firefly leitet TRANS aus den IMM-Modellwahrscheinlichkeiten
+der Dreh-Modelle, LONG aus der geschätzten Along-Track-Beschleunigung und
+VERT aus der Vertikal-Filter-Rate ab (VERT.3) und sendet das Item nur,
+wenn mindestens eine Achse bestimmt ist.
+
 **RoCD** (*Rate of Climb/Descent*)
 Die **Steig-/Sinkrate** eines Tracks (ft/min, positiv = steigen) — Grundlage
 der Climb-/Descend-Pfeile im ASD-Label und jeder Vertikal-Konfliktlogik.

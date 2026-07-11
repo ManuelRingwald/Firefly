@@ -10,6 +10,37 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (VERT.3 — Mode of Movement + Beschleunigung → I062/200/210)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **VERT.3 — Kinematik-Trends auf dem Draht (FR-TRK-043, ICD 3.6.0 additiv):**
+  Jeder Track führt jetzt einen **Beschleunigungs-Schätzer**
+  (`firefly-track::acceleration`: EWMA α = 0,3 über den Differenzenquotienten
+  konsekutiver **IMM-Kombinationsgeschwindigkeiten**; Samples < 0,5 s Abstand
+  übersprungen — Multi-Sensor-Treffer verstärken sonst Jitter zu
+  Phantom-Beschleunigung) und leitet den **Mode of Movement** ab
+  (`Track::mode_of_movement`): **TRANS** aus den CT-Modellwahrscheinlichkeiten
+  der IMM-Bank (Σµ der Dreh-Modelle; Drehung erst bei µ > 0,5; Bank ohne
+  Dreh-Modelle → ehrlich `Undetermined`), **LONG** along-track (Schwelle
+  0,2 m/s², erst ab 5 m/s), **VERT** aus der Vertikal-Filter-Rate
+  (±300 ft/min, VERT.2). Frische-Disziplin 30 s je Achse. **Draht:**
+  I062/200 (FRN 15, 1 Oktett TRANS/LONG/VERT/ADF=0) **nur wenn mindestens
+  eine Achse bestimmt**; I062/210 (FRN 8, Ax/Ay i8 × 0,25 m/s², Sättigung);
+  Track ohne beides byte-identisch alt; byte-genaue Vektoren in ICD §4.9.
+  **⚠️ Abweichung von der Ankündigung:** das **CA-Modell in der IMM-Bank
+  wurde bewusst zurückgestellt** — ein 6-D-Zustand schneidet durch den
+  gesamten 4-D-Fusionskern (LinearKalman/Matrix4, Gating, JPDA,
+  Registrierung); Folge-Häppchen mit eigenem ADR (siehe Milestone-Doku).
+  Weitere ehrliche Grenzen: keine Trend-Hysterese (Glättung der Schätzer
+  entprellt), ADF immer 0. **Wayfinder-Nachzug: Issue #242**
+  (`from-firefly`; Decoder + WS-JSON + Kurven-/Trend-Indikator im Label).
+  5 neue Tests (Schätzer 2, Track 2, Encoder/Decoder 1), Gates grün,
+  cat062-Fuzz-Smoke 7,0 M Läufe. Roadmap-Stand: **66,5 %**.
+- **Nächster Schritt:** **SPEC.1** ankündigen — Duplikat-ICAO-Auflösung +
+  Split/Merge-Behandlung (JPDA-Koaleszenz aktiv korrigieren, S4; Vorarbeit:
+  `docs/design/korrelation-code-duplikate-weeze.md`) — und Freigabe
+  abwarten.
+
 ## 🎯 Stand 2026-07-11 (VERT.2 — Höhen-Tracking + RoCD → I062/135/130/220)
 
 - **Zuletzt aktualisiert:** 2026-07-11
