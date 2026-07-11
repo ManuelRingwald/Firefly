@@ -23,6 +23,7 @@ mod measurement;
 mod metrics;
 mod motion;
 mod pda;
+mod registration;
 mod track;
 mod track_number;
 mod tracker;
@@ -36,5 +37,9 @@ pub use measurement::{convert_plot, tracking_measurement, CartesianMeasurement, 
 pub use metrics::{Rmse, TrackContinuity};
 pub use motion::MotionModel;
 pub use pda::{association_probabilities, ClutterModel};
+pub use registration::{
+    correspondences_by_identity, estimate_biases, Correspondence, RegistrationSolution, SensorBias,
+    Sighting,
+};
 pub use track::{Track, TrackStatus};
 pub use tracker::{SensorModel, Tracker, TrackerConfig};
