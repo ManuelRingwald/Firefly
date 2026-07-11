@@ -10,6 +10,33 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (FEP.1 — CAT034: Nordmarke/Sektor, gemessene Scan-Periode)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **FEP.1 — CAT034-Servicemeldungen (FR-IO-009 + FR-NET-014):** Der
+  Radar-Eingang versteht jetzt **CAT034** (Dispatch am CAT-Oktett auf
+  demselben UDP-Socket wie CAT048). Neuer Decoder
+  `firefly-asterix::cat034` (Nordmarke/Sektor/ToD/Sektornummer/gemeldete
+  Umlaufzeit; Compound-Items I034/050/060 längen-korrekt übersprungen,
+  Spare-Bit = harter Fehler; Fuzz-Target `cat034_decode`, 13 M Läufe ohne
+  Befund). **`ScanPeriodEstimator`** (rein, datenzeit-getrieben): misst die
+  echte Antennen-Umlaufzeit aus Nordmarken-Intervallen — Plausibilitätsband
+  1–60 s, Mitternachts-Wrap korrigiert, verpasste Marke verworfen statt
+  eingemittelt, exponentiell geglättet (α = 0,25). **Wirkung:** gemessene
+  Periode ersetzt den Nominalwert als CAT063-Staleness-Basis
+  (`update_scan_period`, beidseitig wirksam); jede Servicemeldung =
+  Sensor-Aktivität (Liveness ohne Verkehr); Metriken
+  `firefly_radar_scan_period_seconds{sensor}` +
+  `firefly_radar_north_markers_total`. **Ehrliche Grenze:**
+  Tracker-Löschkadenz bleibt statisch (eigenes Folge-Häppchen). Kein
+  Wire-/ICD-Bezug. 18 neue Tests, Gates grün. Zusätzlich festgehalten:
+  Design-Notiz **Squawk-Duplikate/Korrelation** (Weeze-Lektion des
+  Betreibers) in `docs/design/korrelation-code-duplikate-weeze.md` — Vormerkung
+  fürs spätere Korrelations-AP. Roadmap-Stand: **45,5 %**.
+- **Nächster Schritt:** **FEP.2** ankündigen — Mode-S-DAPs: I048/250
+  (BDS 4,0/5,0/6,0) dekodieren → I062/380-Ausbau (Selected Altitude,
+  Heading, IAS/Mach; S4).
+
 ## 🎯 Stand 2026-07-11 (REG.3 — Bias-Statistik auf den Draht; AP-REG komplett)
 
 - **Zuletzt aktualisiert:** 2026-07-11

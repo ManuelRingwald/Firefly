@@ -81,6 +81,9 @@ zertifizierte Surveillance.
 Exchange*)
 Das europäische Standard-Datenformat, in dem Radare und Systeme ihre Meldungen
 austauschen. In „Kategorien" gegliedert:
+- **CAT034:** Einzelradar-**Servicemeldungen** — Nordmarke und Sektor-Meldungen
+  desselben Radar-Feeds wie CAT048; Firefly misst daraus die echte
+  Antennen-Umlaufzeit und Sensor-Liveness ohne Verkehr (FEP.1).
 - **CAT048:** Einzelradar-Zielmeldungen (Plots/Tracks eines Radars).
 - **CAT021:** ADS-B-Meldungen.
 - **CAT062:** fertige System-Tracks (die fusionierte Luftlage).
@@ -95,6 +98,18 @@ Empfänger dispatcht am führenden CAT-Oktett (`0x3E`/`0x3F`/`0x41`).
 ASTERIX ist **bit-genau und binär**: Ein Datenblock ist `[CAT][LEN][Record…]`
 (CAT = Kategorie-Nummer, LEN = Gesamtlänge), jeder Record beginnt mit einem
 *FSPEC* (s. u.), gefolgt von den vorhandenen *Data Items* in fester Reihenfolge.
+
+**Nordmarke** (*North Marker*, CAT034 Message Type 1)
+Die Servicemeldung, die ein Radar einmal **pro Antennenumdrehung** beim
+Überstreichen von Nord sendet. Der zeitliche Abstand zweier Nordmarken *ist*
+die echte Umlaufzeit der Antenne — Firefly misst daraus die Scan-Periode
+(FEP.1), statt dem konfigurierten Nominalwert zu vertrauen.
+
+**Sektor-Meldung** (*Sector Crossing*, CAT034 Message Type 2)
+Die Servicemeldung beim Überstreichen einer Sektorgrenze (typisch 32 Sektoren
+à 11,25°). Beweist die Lebendigkeit des Sensors viele Male pro Umdrehung —
+unabhängig davon, ob Verkehr da ist: „leerer Himmel" und „totes Radar" werden
+schon am Eingang unterscheidbar.
 
 **Data Item (Datenfeld) / I062/NNN**
 Ein einzelnes, genormtes Feld innerhalb einer Kategorie — z. B. `I062/070`
