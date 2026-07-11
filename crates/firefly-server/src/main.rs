@@ -115,6 +115,38 @@ async fn build_live_state(
     // fatal, so the orchestrator sees the container fail rather than run
     // mis-sourced.
     let resolved = resolve_live_sources();
+
+    // Meteo/QNH service (VERT.1, SDPS-003 analogue): parse and validate the
+    // regional QNH configuration at startup — a configured-but-broken value
+    // is fatal (the vertical chain must not silently degrade to standard
+    // atmosphere). The service itself is consumed by the vertical tracking
+    // (VERT.2); here it is resolved, surfaced as metrics and logged.
+    let meteo = firefly_meteo::MeteoConfig::from_env().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "FIREFLY_METEO_QNH invalid; aborting");
+        std::process::exit(1);
+    });
+    if meteo.regions.is_empty() {
+        tracing::info!(
+            "no QNH regions configured (FIREFLY_METEO_QNH unset); Mode-C altitudes will use the standard atmosphere"
+        );
+    } else {
+        tracing::info!(
+            regions = meteo.regions.len(),
+            "meteo/QNH service configured (VERT.1)"
+        );
+    }
+    metrics.meteo_qnh_regions.store(
+        meteo.regions.len() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    {
+        let mut gauges = metrics
+            .meteo_qnh
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gauges.clear();
+        gauges.extend(meteo.regions.iter().map(|r| (r.name.clone(), r.qnh_hpa)));
+    }
     let opensky = resolved.opensky;
     let adsbagg = resolved.adsbagg;
     let flarm = resolved.flarm;
