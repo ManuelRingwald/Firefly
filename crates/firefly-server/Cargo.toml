@@ -28,6 +28,7 @@ firefly-flarm = { workspace = true }
 firefly-radar = { workspace = true }
 firefly-adsbagg = { workspace = true }
 firefly-adsb021 = { workspace = true }
+firefly-mlat = { workspace = true }
 axum = { version = "0.8", features = ["ws"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -279,6 +279,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-mlat"
+version = "0.1.0"
+dependencies = [
+ "firefly-asterix",
+ "firefly-core",
+ "firefly-geo",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "firefly-multicast"
 version = "0.1.0"
 dependencies = [
@@ -348,6 +359,7 @@ dependencies = [
  "firefly-flarm",
  "firefly-geo",
  "firefly-io",
+ "firefly-mlat",
  "firefly-multicast",
  "firefly-opensky",
  "firefly-radar",

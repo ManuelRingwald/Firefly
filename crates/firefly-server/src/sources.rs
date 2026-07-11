@@ -19,6 +19,7 @@ use firefly_adsb021::Adsb021Config;
 use firefly_adsbagg::AdsbAggConfig;
 use firefly_core::SensorId;
 use firefly_flarm::FlarmConfig;
+use firefly_mlat::MlatConfig;
 use firefly_opensky::OpenSkyConfig;
 use firefly_radar::RadarConfig;
 use serde::Deserialize;
@@ -47,6 +48,10 @@ pub enum SourceType {
     /// contract v1.6.0) — the production ADS-B input, replacing internet
     /// REST for deployments with their own station.
     AdsbAsterix,
+    /// WAM/MLAT system emitting ASTERIX CAT020/CAT019 over UDP (FEP.5,
+    /// contract v1.7.0) — independent cooperative surveillance beside radar
+    /// and ADS-B.
+    MlatAsterix,
 }
 
 /// WGS84 bounding box. Field names match Wayfinder's `source_config` so the
@@ -132,6 +137,8 @@ pub enum SourceError {
     UnknownProvider { index: usize, provider: String },
     /// An `adsb_asterix` source has an invalid field (FEP.3, contract v1.6.0).
     InvalidAdsbStation { index: usize, reason: &'static str },
+    /// A `mlat_asterix` source has an invalid field (FEP.5, contract v1.7.0).
+    InvalidMlatSystem { index: usize, reason: &'static str },
 }
 
 impl fmt::Display for SourceError {
@@ -157,6 +164,9 @@ impl fmt::Display for SourceError {
             }
             SourceError::InvalidAdsbStation { index, reason } => {
                 write!(f, "FIREFLY_SOURCES[{index}]: invalid adsb_asterix source: {reason}")
+            }
+            SourceError::InvalidMlatSystem { index, reason } => {
+                write!(f, "FIREFLY_SOURCES[{index}]: invalid mlat_asterix source: {reason}")
             }
             SourceError::UnknownProvider { index, provider } => write!(
                 f,
@@ -438,6 +448,49 @@ pub fn adsb021_config_from_spec(
     Ok(cfg)
 }
 
+/// Build an [`MlatConfig`] from a `mlat_asterix` spec at list position
+/// `index` (FEP.5, contract v1.7.0). Shaped exactly like `adsb_asterix`:
+/// CAT020 positions are geodetic (computed by the MLAT system in WGS-84), so
+/// **no site position** is needed; no bbox, no credential (raw UDP; trust
+/// boundary is network isolation, ADR 0017). `listen` (`group:port`) selects
+/// the UDP endpoint (a multicast group is joined); absent →
+/// `0.0.0.0:<default port>`. `sac`/`sic` (0..255) and `sensor_id` come from
+/// the spec.
+///
+/// The caller guarantees `spec.source_type == SourceType::MlatAsterix`.
+pub fn mlat_config_from_spec(spec: &SourceSpec, index: usize) -> Result<MlatConfig, SourceError> {
+    let (listen_group, listen_port) = match &spec.listen {
+        Some(s) => parse_listen(s).ok_or(SourceError::InvalidMlatSystem {
+            index,
+            reason: "listen must be a group:port address",
+        })?,
+        None => (Ipv4Addr::UNSPECIFIED, firefly_mlat::DEFAULT_PORT),
+    };
+    let to_byte = |v: Option<u16>, what: &'static str| -> Result<u8, SourceError> {
+        match v {
+            None => Ok(0),
+            Some(x) if x <= u8::MAX as u16 => Ok(x as u8),
+            Some(_) => Err(SourceError::InvalidMlatSystem {
+                index,
+                reason: what,
+            }),
+        }
+    };
+
+    let mut cfg = MlatConfig {
+        enabled: true,
+        sac: to_byte(spec.sac, "sac must be 0..255")?,
+        sic: to_byte(spec.sic, "sic must be 0..255")?,
+        listen_group,
+        listen_port,
+        ..MlatConfig::default()
+    };
+    if let Some(sid) = spec.sensor_id {
+        cfg.sensor_id = SensorId(sid);
+    }
+    Ok(cfg)
+}
+
 /// Parse a `group:port` listen endpoint into its IPv4 address and port.
 fn parse_listen(s: &str) -> Option<(Ipv4Addr, u16)> {
     let sock: SocketAddrV4 = s.trim().parse().ok()?;
@@ -492,6 +545,9 @@ pub struct ResolvedSources {
     /// One [`Adsb021Config`] per `adsb_asterix` source, in list order (FEP.3,
     /// contract v1.6.0).
     pub adsb021: Vec<Adsb021Config>,
+    /// One [`MlatConfig`] per `mlat_asterix` source, in list order (FEP.5,
+    /// contract v1.7.0).
+    pub mlat: Vec<MlatConfig>,
     /// Reserved types present but without an adapter yet — the caller logs a WARN
     /// and skips them (availability over completeness, ADR 0023). Empty now that
     /// all three vocabulary types have adapters; kept for forward compatibility.
@@ -512,6 +568,7 @@ pub fn resolve_sources(
     let mut flarm = Vec::new();
     let mut radar = Vec::new();
     let mut adsb021 = Vec::new();
+    let mut mlat = Vec::new();
     let skipped = Vec::new();
     for (index, spec) in specs.iter().enumerate() {
         match spec.source_type {
@@ -522,6 +579,7 @@ pub fn resolve_sources(
             SourceType::FlarmAprs => flarm.push(flarm_config_from_spec(spec, index, &get_env)?),
             SourceType::RadarAsterix => radar.push(radar_config_from_spec(spec, index)?),
             SourceType::AdsbAsterix => adsb021.push(adsb021_config_from_spec(spec, index)?),
+            SourceType::MlatAsterix => mlat.push(mlat_config_from_spec(spec, index)?),
         }
     }
     Ok(ResolvedSources {
@@ -530,6 +588,7 @@ pub fn resolve_sources(
         flarm,
         radar,
         adsb021,
+        mlat,
         skipped,
     })
 }
@@ -1357,6 +1416,74 @@ mod tests {
         assert_eq!(resolved.adsb021[0].sensor_id, SensorId(231));
         assert_eq!(resolved.radar.len(), 1);
         assert!(resolved.opensky.is_empty());
+    }
+
+    // --- mlat_asterix (FEP.5, contract v1.7.0) ----------------------------
+
+    #[test]
+    fn mlat_config_maps_identity_and_listen() {
+        let spec = SourceSpec {
+            source_type: SourceType::MlatAsterix,
+            sac: Some(25),
+            sic: Some(40),
+            sensor_id: Some(241),
+            listen: Some("239.255.0.20:9020".into()),
+            ..SourceSpec::default()
+        };
+        let cfg = mlat_config_from_spec(&spec, 0).expect("valid");
+        assert!(cfg.enabled);
+        assert_eq!((cfg.sac, cfg.sic), (25, 40));
+        assert_eq!(cfg.sensor_id, SensorId(241));
+        assert_eq!(cfg.listen_group, std::net::Ipv4Addr::new(239, 255, 0, 20));
+        assert_eq!(cfg.listen_port, 9020);
+        assert!(cfg.is_multicast());
+    }
+
+    #[test]
+    fn mlat_minimal_spec_uses_defaults_and_bad_fields_are_errors() {
+        // A bare {"type":"mlat_asterix"} is valid — no bbox, no site.
+        let minimal = SourceSpec {
+            source_type: SourceType::MlatAsterix,
+            ..SourceSpec::default()
+        };
+        let cfg = mlat_config_from_spec(&minimal, 0).expect("valid");
+        assert!(cfg.enabled);
+        assert_eq!(cfg.listen_port, firefly_mlat::DEFAULT_PORT);
+        assert_eq!(cfg.sensor_id, MlatConfig::default().sensor_id);
+
+        let bad_listen = SourceSpec {
+            source_type: SourceType::MlatAsterix,
+            listen: Some("not-an-address".into()),
+            ..SourceSpec::default()
+        };
+        assert!(matches!(
+            mlat_config_from_spec(&bad_listen, 2),
+            Err(SourceError::InvalidMlatSystem { index: 2, .. })
+        ));
+        let bad_sac = SourceSpec {
+            source_type: SourceType::MlatAsterix,
+            sac: Some(300),
+            ..SourceSpec::default()
+        };
+        assert!(matches!(
+            mlat_config_from_spec(&bad_sac, 0),
+            Err(SourceError::InvalidMlatSystem { .. })
+        ));
+    }
+
+    #[test]
+    fn resolve_routes_mlat_sources() {
+        let json = r#"[
+            {"type":"mlat_asterix","sac":25,"sic":40,"sensor_id":241,
+             "listen":"239.255.0.20:8020"},
+            {"type":"adsb_asterix","sensor_id":231}
+        ]"#;
+        let specs = parse_sources(json).expect("valid");
+        let resolved = resolve_sources(&specs, no_env).expect("valid");
+        assert_eq!(resolved.mlat.len(), 1);
+        assert_eq!(resolved.mlat[0].sensor_id, SensorId(241));
+        assert_eq!(resolved.adsb021.len(), 1);
+        assert!(resolved.radar.is_empty());
     }
 
     // --- helpers ---------------------------------------------------------

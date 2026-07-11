@@ -1,0 +1,18 @@
+[package]
+name = "firefly-mlat"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "WAM/MLAT input adapter: decodes CAT020 target reports and CAT019 status over UDP into firefly-core Plots (FEP.5)."
+
+[dependencies]
+firefly-core = { workspace = true }
+firefly-geo = { workspace = true }
+firefly-asterix = { workspace = true }
+tokio = { version = "1", features = ["net", "time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

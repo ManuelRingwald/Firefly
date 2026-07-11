@@ -14,6 +14,7 @@ use firefly_asterix::{Cat062Encoder, SensorReason};
 use firefly_core::{Plot, SensorId};
 use firefly_flarm::FlarmConfig;
 use firefly_geo::{LocalFrame, Wgs84};
+use firefly_mlat::MlatConfig;
 use firefly_multicast::{MulticastConfig, SensorHealthMonitor};
 use firefly_opensky::{OpenSkyConfig, OpenSkyPoller};
 use firefly_radar::RadarConfig;
@@ -119,6 +120,7 @@ async fn build_live_state(
     let flarm = resolved.flarm;
     let radar = resolved.radar;
     let adsb021 = resolved.adsb021;
+    let mlat = resolved.mlat;
 
     // With no active source adapter the tracker idles and the instance serves a
     // deliberate EMPTY SKY (plus the CAT065 heartbeat). That is the complete
@@ -129,6 +131,7 @@ async fn build_live_state(
         && flarm.is_empty()
         && radar.is_empty()
         && adsb021.is_empty()
+        && mlat.is_empty()
     {
         metrics
             .live_ready
@@ -164,6 +167,10 @@ async fn build_live_state(
                 .iter()
                 .map(|c| (c.sensor_id, firefly_adsb021::NOMINAL_UPDATE_SECS)),
         )
+        .chain(
+            mlat.iter()
+                .map(|c| (c.sensor_id, firefly_mlat::NOMINAL_UPDATE_SECS)),
+        )
         .collect();
 
     // Radar (polar) sensors register with their **own** site frame and a real
@@ -193,6 +200,7 @@ async fn build_live_state(
         flarm_sources = flarm.len(),
         radar_sources = radar.len(),
         adsb021_sources = adsb021.len(),
+        mlat_sources = mlat.len(),
         lat_min = representative.lat_min,
         lat_max = representative.lat_max,
         lon_min = representative.lon_min,
@@ -220,6 +228,9 @@ async fn build_live_state(
     metrics
         .sources_adsb021
         .store(adsb021.len() as u64, Ordering::Relaxed);
+    metrics
+        .sources_mlat
+        .store(mlat.len() as u64, Ordering::Relaxed);
 
     // Channel: source adapters → live tracker (bounded; drop batches if the
     // tracker is busy rather than blocking a network callback). Each source clones
@@ -399,6 +410,14 @@ async fn build_live_state(
             Arc::clone(&sensor_monitor),
         );
     }
+    for cfg in mlat {
+        spawn_mlat_listener_live(
+            cfg,
+            plots_tx.clone(),
+            Arc::clone(&metrics),
+            Arc::clone(&sensor_monitor),
+        );
+    }
 
     // Spawn the live CAT062 feed, if enabled.
     spawn_cat062_live(Arc::clone(&metrics), reference, snapshot_rx.clone());
@@ -465,12 +484,19 @@ fn resolve_live_sources() -> sources::ResolvedSources {
             } else {
                 Vec::new()
             };
+            let mlat_cfg = MlatConfig::from_env();
+            let mlat = if mlat_cfg.enabled {
+                vec![mlat_cfg]
+            } else {
+                Vec::new()
+            };
             return sources::ResolvedSources {
                 opensky,
                 adsbagg,
                 flarm,
                 radar,
                 adsb021,
+                mlat,
                 skipped: Vec::new(),
             };
         }
@@ -495,6 +521,7 @@ fn resolve_live_sources() -> sources::ResolvedSources {
         && resolved.flarm.is_empty()
         && resolved.radar.is_empty()
         && resolved.adsb021.is_empty()
+        && resolved.mlat.is_empty()
     {
         tracing::warn!("FIREFLY_SOURCES: no live source adapter active (empty sky)");
     }
@@ -814,6 +841,59 @@ fn spawn_adsb021_listener_live(
                 tracing::warn!("plot channel full; dropping ADS-B CAT021 batch: {e}");
             }
         })
+        .await;
+    });
+}
+
+/// Spawn the WAM/MLAT (CAT020/019) UDP listener in Live mode (FEP.5): each
+/// decoded datagram's plots are sent into `plots_tx` so the tracker fuses
+/// them with the radar/ADS-B inputs. A full channel drops the batch with a
+/// warning (availability over back-pressure).
+///
+/// Sets `metrics.live_ready = true` on the first batch and counts reports in
+/// `mlat_reports_received_total`. Notifies `sensor_monitor` on plots **and**
+/// on CAT019 status messages — the MLAT system stays visibly alive under an
+/// empty sky (liveness without traffic, like a radar's service messages).
+fn spawn_mlat_listener_live(
+    config: MlatConfig,
+    plots_tx: mpsc::Sender<Vec<Plot>>,
+    metrics: Arc<Metrics>,
+    sensor_monitor: Arc<SensorHealthMonitor>,
+) {
+    let sensor_id = config.sensor_id;
+    tokio::spawn(async move {
+        let status_monitor = Arc::clone(&sensor_monitor);
+        firefly_mlat::run(
+            &config,
+            move |plots| {
+                metrics
+                    .live_ready
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                metrics
+                    .mlat_reports_received_total
+                    .fetch_add(plots.len() as u64, std::sync::atomic::Ordering::Relaxed);
+                sensor_monitor.record_activity(sensor_id, std::time::Instant::now());
+                if let Err(e) = plots_tx.try_send(plots) {
+                    metrics
+                        .live_plot_batches_dropped_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tracing::warn!("plot channel full; dropping WAM/MLAT batch: {e}");
+                }
+            },
+            move |messages| {
+                // Any status message proves the MLAT system alive — liveness
+                // independent of traffic. A NOGO/degraded self-report is
+                // surfaced in the log; the per-sensor staleness still keys
+                // off actual reception.
+                status_monitor.record_activity(sensor_id, std::time::Instant::now());
+                if messages.iter().any(|m| m.operational == Some(false)) {
+                    tracing::warn!(
+                        sensor_id = sensor_id.0,
+                        "WAM/MLAT system reports itself degraded/NOGO (CAT019)"
+                    );
+                }
+            },
+        )
         .await;
     });
 }

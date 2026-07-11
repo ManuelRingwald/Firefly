@@ -34,6 +34,20 @@ doc = false
 bench = false
 
 [[bin]]
+name = "cat019_decode"
+path = "fuzz_targets/cat019_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cat020_decode"
+path = "fuzz_targets/cat020_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "cat021_decode"
 path = "fuzz_targets/cat021_decode.rs"
 test = false
