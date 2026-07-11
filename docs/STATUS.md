@@ -24,10 +24,10 @@
   Bias-Provider-Closure des `run_cat063_sender` (kein neuer geteilter
   Zustand). I063/070/090–092 bewusst ungesendet (kein Zeit-/PSR-Bias
   geschätzt). 5 neue Asterix-Tests (byte-genauer Referenz-Dump) + 1
-  UDP-End-to-End-Test. Gates grün. **⚠️ Offen: Wayfinder-Issue
-  (`from-firefly`) noch anzulegen** — GitHub-API war bei Abschluss nicht
-  erreichbar; Platzhalter-Zeile in `docs/cross-project/todo-for-wayfinder.md`
-  danach ersetzen. Roadmap-Stand: **41,5 %** — **AP-REG komplett**.
+  UDP-End-to-End-Test. Gates grün. Wayfinder-Nachzug: **Issue #237**
+  (`from-firefly`, Decoder FRN 7/8 + Bias-Anzeige), referenziert in
+  `docs/cross-project/todo-for-wayfinder.md`. Roadmap-Stand: **41,5 %** —
+  **AP-REG komplett**.
 - **Nächster Schritt:** **AP-FEP** beginnt — **FEP.1** ankündigen
   (CAT034-Decoder: Nordmarke/Sektor/Servicemeldungen → dynamische
   `scan_period`, Sensor-Liveness aus dem Datenstrom; S4).
