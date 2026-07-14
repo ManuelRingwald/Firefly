@@ -156,7 +156,8 @@ impl TrackerConfig {
             sensors: BTreeMap::new(),
             process_noise: ProcessNoise::new(0.5),
             // A civil rate-one turn is ~3°/s ≈ 0.052 rad/s.
-            imm: ImmConfig::cv_and_turns(0.052),
+            // VERT.4b (ADR 0035): the default civil bank includes the CA model.
+            imm: ImmConfig::cv_turns_and_ca(0.052),
             gate: Gate::from_probability(0.99),
             // The initiation-suppression gate is deliberately wider than the
             // association gate: a plot up to this far from an existing track is
