@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 
 use firefly_core::{
-    Plot, SensorId, SourceAges, SystemTrack, Timestamp, TrackId, PROVENANCE_FRESH_S,
+    ModeOfMovement, Plot, SensorId, SourceAges, SystemTrack, Timestamp, TrackId, PROVENANCE_FRESH_S,
 };
 use firefly_geo::{Enu, LocalFrame};
 use serde::{Deserialize, Serialize};
@@ -1031,6 +1031,11 @@ fn system_track_from(
         rocd_ft_min: track
             .vertical_estimate(time, PROVENANCE_FRESH_S)
             .map(|(_, rocd)| rocd),
+        // Kinematics chain (VERT.3): fresh acceleration, and the mode of
+        // movement only when at least one axis carries a determination.
+        acceleration_mps2: track.acceleration_mps2(time, PROVENANCE_FRESH_S),
+        mode_of_movement: Some(track.mode_of_movement(time, PROVENANCE_FRESH_S))
+            .filter(ModeOfMovement::is_determined),
     }
 }
 

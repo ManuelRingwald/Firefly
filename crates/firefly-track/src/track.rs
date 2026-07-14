@@ -12,7 +12,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use firefly_core::{Callsign, Daps, ModeAC, SensorId, SourceKind, TrackId};
+use firefly_core::{
+    Callsign, CourseTrend, Daps, ModeAC, ModeOfMovement, SensorId, SourceKind, SpeedTrend, TrackId,
+    VerticalTrend,
+};
 use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +30,22 @@ const REVISIT_EWMA: f64 = 0.5;
 /// Upper bound on remembered hit times — the confirmation window never needs
 /// more than a handful, so a small cap keeps the per-track state bounded.
 const MAX_RECENT_HITS: usize = 16;
+/// Groundspeed-trend threshold (VERT.3): along-track accelerations below this
+/// magnitude (m/s²) read as "constant groundspeed". 0.2 m/s² ≈ 0.4 kt/s —
+/// well above the smoothed estimator's noise floor, well below any real
+/// speed change an ATCO cares about.
+const SPEED_TREND_THRESHOLD_MPS2: f64 = 0.2;
+/// Below this groundspeed (m/s) the along-track direction is too unstable
+/// for a speed-trend claim.
+const SPEED_TREND_MIN_SPEED_MPS: f64 = 5.0;
+/// Vertical-trend threshold (VERT.3): |RoCD| below this (ft/min) reads as
+/// level flight — the conventional label threshold.
+const VERTICAL_TREND_THRESHOLD_FT_MIN: f64 = 300.0;
+/// A turn model must carry this much probability mass before the track is
+/// called turning — below it, "constant course" is the honest default
+/// (the IMM priors alone must not paint every fresh track as turning).
+const TURN_PROBABILITY_THRESHOLD: f64 = 0.5;
+
 /// EWMA gain for the geometric-altitude smoother (VERT.2): geometric heights
 /// arrive already fairly clean (GNSS), so a light smoothing that follows
 /// climbs within a few reports beats a heavy filter.
@@ -176,6 +195,11 @@ pub struct Track {
     /// for reporting [`geometric_altitude_ft`](Self::geometric_altitude_ft).
     #[serde(default)]
     geometric_time: Option<f64>,
+    /// The per-track horizontal acceleration estimator (VERT.3), fed with the
+    /// IMM combined velocity on every associated report. `None` until the
+    /// first sample.
+    #[serde(default)]
+    acceleration: Option<crate::acceleration::AccelerationEstimator>,
 }
 
 impl Track {
@@ -203,6 +227,7 @@ impl Track {
             vertical: None,
             geometric_altitude_ft: None,
             geometric_time: None,
+            acceleration: None,
         }
     }
 
@@ -362,6 +387,99 @@ impl Track {
         }
     }
 
+    /// The estimated horizontal acceleration `(a_east, a_north)` in m/s²
+    /// (VERT.3), but only while fresh (last velocity sample within `window`
+    /// of `now`).
+    pub fn acceleration_mps2(&self, now: f64, window: f64) -> Option<(f64, f64)> {
+        let estimator = self.acceleration.as_ref()?;
+        if now - estimator.last_time() > window {
+            return None;
+        }
+        estimator.acceleration_mps2()
+    }
+
+    /// The course trend (VERT.3, I062/200 TRANS) from the IMM model
+    /// probabilities: a coordinated-turn model must carry a dominant share
+    /// ([`TURN_PROBABILITY_THRESHOLD`]) before the track is called turning.
+    /// A mathematically **positive** turn rate (anticlockwise in the
+    /// east/north plane) is a **left** turn. A bank without turn models can
+    /// determine nothing.
+    pub fn course_trend(&self) -> CourseTrend {
+        let mut left = 0.0;
+        let mut right = 0.0;
+        let mut has_turn_model = false;
+        for (model, mu) in self.imm.models().iter().zip(self.imm.probabilities()) {
+            if let crate::MotionModel::CoordinatedTurn { rate } = model {
+                if rate.abs() > f64::EPSILON {
+                    has_turn_model = true;
+                    if *rate > 0.0 {
+                        left += mu;
+                    } else {
+                        right += mu;
+                    }
+                }
+            }
+        }
+        if !has_turn_model {
+            return CourseTrend::Undetermined;
+        }
+        if left > TURN_PROBABILITY_THRESHOLD && left >= right {
+            CourseTrend::LeftTurn
+        } else if right > TURN_PROBABILITY_THRESHOLD {
+            CourseTrend::RightTurn
+        } else {
+            CourseTrend::Constant
+        }
+    }
+
+    /// The full mode of movement (VERT.3, I062/200) at `now`: course from
+    /// the IMM turn-model probabilities, groundspeed trend from the
+    /// along-track component of the acceleration estimate, vertical trend
+    /// from the vertical filter's rate — each axis `Undetermined` where the
+    /// tracker cannot honestly tell.
+    pub fn mode_of_movement(&self, now: f64, window: f64) -> ModeOfMovement {
+        let course = self.course_trend();
+
+        let speed = match self.acceleration_mps2(now, window) {
+            Some((ax, ay)) => {
+                let v = self.imm.combined_estimate().velocity();
+                let speed_mps = v[0].hypot(v[1]);
+                if speed_mps < SPEED_TREND_MIN_SPEED_MPS {
+                    SpeedTrend::Undetermined
+                } else {
+                    let along = (ax * v[0] + ay * v[1]) / speed_mps;
+                    if along > SPEED_TREND_THRESHOLD_MPS2 {
+                        SpeedTrend::Increasing
+                    } else if along < -SPEED_TREND_THRESHOLD_MPS2 {
+                        SpeedTrend::Decreasing
+                    } else {
+                        SpeedTrend::Constant
+                    }
+                }
+            }
+            None => SpeedTrend::Undetermined,
+        };
+
+        let vertical = match self.vertical_estimate(now, window) {
+            Some((_, rocd_ft_min)) => {
+                if rocd_ft_min > VERTICAL_TREND_THRESHOLD_FT_MIN {
+                    VerticalTrend::Climb
+                } else if rocd_ft_min < -VERTICAL_TREND_THRESHOLD_FT_MIN {
+                    VerticalTrend::Descent
+                } else {
+                    VerticalTrend::Level
+                }
+            }
+            None => VerticalTrend::Undetermined,
+        };
+
+        ModeOfMovement {
+            course,
+            speed,
+            vertical,
+        }
+    }
+
     /// Sensors that contributed a hit in the most recent scan.
     pub fn contributing_sensors(&self) -> &BTreeSet<SensorId> {
         &self.contributing_sensors
@@ -472,6 +590,17 @@ impl Track {
                 None => geo_ft,
             });
             self.geometric_time = Some(time);
+        }
+        // Acceleration chain (VERT.3): sample the IMM combined velocity on
+        // every associated report; the estimator differentiates and smooths.
+        let v = self.imm.combined_estimate().velocity();
+        match &mut self.acceleration {
+            Some(estimator) => estimator.update(v[0], v[1], time),
+            None => {
+                self.acceleration = Some(
+                    crate::acceleration::AccelerationEstimator::from_first_sample(v[0], v[1], time),
+                )
+            }
         }
     }
 
@@ -609,6 +738,44 @@ mod tests {
         // Staleness withholds both — absence over a stale claim.
         assert!(track.vertical_estimate(100.0, 30.0).is_none());
         assert!(track.geometric_altitude_ft(100.0, 30.0).is_none());
+    }
+
+    /// The mode of movement (VERT.3) reads honestly off the chains: a fresh
+    /// track with balanced IMM priors is "constant course", the vertical
+    /// trend follows the vertical filter, and axes without evidence stay
+    /// undetermined. REQ: FR-TRK-043
+    #[test]
+    fn mode_of_movement_derives_from_the_chains() {
+        let mut track = fresh_track();
+
+        // Balanced turn priors (µ_left = µ_right < 0.5) ⇒ constant course.
+        assert_eq!(track.course_trend(), CourseTrend::Constant);
+
+        // No acceleration samples, no Mode-C yet ⇒ both axes undetermined,
+        // and an all-undetermined course still yields a struct the caller
+        // can filter on.
+        let before = track.mode_of_movement(0.0, 30.0);
+        assert_eq!(before.speed, SpeedTrend::Undetermined);
+        assert_eq!(before.vertical, VerticalTrend::Undetermined);
+
+        // A steady climb in Mode-C makes the vertical trend read "climb"…
+        for i in 0..6 {
+            let t = i as f64 * 5.0;
+            let reply = ModeAC {
+                flight_level_ft: Some(10_000.0 + 50.0 * t),
+                ..ModeAC::default()
+            };
+            track.update_identity(&reply, t);
+        }
+        let mom = track.mode_of_movement(25.0, 30.0);
+        assert_eq!(mom.vertical, VerticalTrend::Climb);
+        assert!(mom.is_determined());
+
+        // …and staleness pulls it back to undetermined.
+        assert_eq!(
+            track.mode_of_movement(100.0, 30.0).vertical,
+            VerticalTrend::Undetermined
+        );
     }
 
     /// A primary-only plot (no SSR reply) does not erase a previously known

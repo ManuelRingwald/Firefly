@@ -14,6 +14,7 @@
 //! deterministic function of its inputs — no wall clock, no I/O — so it is
 //! replayable, testable and cloud-recoverable.
 
+mod acceleration;
 mod association;
 mod gating;
 mod imm;
@@ -29,6 +30,7 @@ mod track_number;
 mod tracker;
 mod vertical;
 
+pub use acceleration::AccelerationEstimator;
 pub use association::{associate, Association};
 pub use gating::Gate;
 pub use imm::{Imm, ImmConfig};

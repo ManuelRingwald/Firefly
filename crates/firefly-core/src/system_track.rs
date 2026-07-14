@@ -72,6 +72,68 @@ pub enum Provenance {
     Combined,
 }
 
+/// Transversal (course) trend of a track — I062/200 TRANS (VERT.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CourseTrend {
+    /// Constant course (straight flight).
+    Constant,
+    /// Turning right (clockwise over ground).
+    RightTurn,
+    /// Turning left (anticlockwise over ground).
+    LeftTurn,
+    /// No determination possible.
+    Undetermined,
+}
+
+/// Longitudinal (groundspeed) trend of a track — I062/200 LONG (VERT.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SpeedTrend {
+    /// Constant groundspeed.
+    Constant,
+    /// Increasing groundspeed.
+    Increasing,
+    /// Decreasing groundspeed.
+    Decreasing,
+    /// No determination possible.
+    Undetermined,
+}
+
+/// Vertical trend of a track — I062/200 VERT (VERT.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum VerticalTrend {
+    /// Level flight.
+    Level,
+    /// Climbing.
+    Climb,
+    /// Descending.
+    Descent,
+    /// No determination possible.
+    Undetermined,
+}
+
+/// The track's **mode of movement** (I062/200): what the aircraft is doing in
+/// each of the three axes, as far as the tracker can honestly tell —
+/// `Undetermined` where it cannot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ModeOfMovement {
+    /// Course trend (constant / right turn / left turn).
+    pub course: CourseTrend,
+    /// Groundspeed trend (constant / increasing / decreasing).
+    pub speed: SpeedTrend,
+    /// Vertical trend (level / climb / descent).
+    pub vertical: VerticalTrend,
+}
+
+impl ModeOfMovement {
+    /// Whether at least one axis carries a determination — an all-
+    /// undetermined mode says nothing and is not worth wire bytes.
+    pub fn is_determined(&self) -> bool {
+        self.course != CourseTrend::Undetermined
+            || self.speed != SpeedTrend::Undetermined
+            || self.vertical != VerticalTrend::Undetermined
+    }
+}
+
 /// One track as reported to the outside world, in geodetic coordinates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemTrack {
@@ -203,6 +265,15 @@ pub struct SystemTrack {
     /// CAT062 I062/220 when present.
     #[serde(default)]
     pub rocd_ft_min: Option<f64>,
+    /// Estimated horizontal acceleration `(a_east, a_north)`, m/s² (VERT.3).
+    /// Absent without a fresh estimate. Encoded as CAT062 I062/210 when
+    /// present.
+    #[serde(default)]
+    pub acceleration_mps2: Option<(f64, f64)>,
+    /// The mode of movement (VERT.3), absent when nothing can be determined.
+    /// Encoded as CAT062 I062/200 when present.
+    #[serde(default)]
+    pub mode_of_movement: Option<ModeOfMovement>,
 }
 
 impl SystemTrack {
@@ -292,6 +363,8 @@ mod tests {
             barometric_qnh_corrected: false,
             geometric_altitude_ft: None,
             rocd_ft_min: None,
+            acceleration_mps2: None,
+            mode_of_movement: None,
         }
     }
 

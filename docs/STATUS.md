@@ -10,6 +10,46 @@
 
 ---
 
+## 🎯 Stand 2026-07-11 (VERT.3 — Mode of Movement + Beschleunigung → I062/200/210)
+
+- **Zuletzt aktualisiert:** 2026-07-11
+- **VERT.3 — Kinematik-Trends auf dem Draht (FR-TRK-043, ICD 3.6.0 additiv):**
+  Jeder Track führt jetzt einen **Beschleunigungs-Schätzer**
+  (`firefly-track::acceleration`: EWMA α = 0,3 über den Differenzenquotienten
+  konsekutiver **IMM-Kombinationsgeschwindigkeiten**; Samples < 0,5 s Abstand
+  übersprungen — Multi-Sensor-Treffer verstärken sonst Jitter zu
+  Phantom-Beschleunigung) und leitet den **Mode of Movement** ab
+  (`Track::mode_of_movement`): **TRANS** aus den CT-Modellwahrscheinlichkeiten
+  der IMM-Bank (Σµ der Dreh-Modelle; Drehung erst bei µ > 0,5; Bank ohne
+  Dreh-Modelle → ehrlich `Undetermined`), **LONG** along-track (Schwelle
+  0,2 m/s², erst ab 5 m/s), **VERT** aus der Vertikal-Filter-Rate
+  (±300 ft/min, VERT.2). Frische-Disziplin 30 s je Achse. **Draht:**
+  I062/200 (FRN 15, 1 Oktett TRANS/LONG/VERT/ADF=0) **nur wenn mindestens
+  eine Achse bestimmt**; I062/210 (FRN 8, Ax/Ay i8 × 0,25 m/s², Sättigung);
+  Track ohne beides byte-identisch alt; byte-genaue Vektoren in ICD §4.9.
+  **⚠️ Abweichung von der Ankündigung — Scope-Split:** das **CA-Modell in
+  der IMM-Bank wurde bewusst zurückgestellt** — ein 6-D-Zustand schneidet
+  durch den gesamten 4-D-Fusionskern (LinearKalman/Matrix4/Vector4, Gating,
+  JPDA, Registrierung; verifiziert). VERT.3 liefert damit die
+  **Anzeige-Hälfte** (Trends + Beschleunigung auf dem Draht, aus der
+  Ableitung); die **Tracking-Hälfte** (CA-Modell → bessere Prädiktion in
+  Beschleunigungs-Phasen, Filterzustand statt Ableitung) ist als eigenes
+  Häppchen **VERT.4** (S5, Kern-Refactor mit eigenem ADR) in der Roadmap
+  ausgewiesen. Betreiber-Entscheidung 2026-07-11: Weg (A) — VERT.3 gilt als
+  fertig, VERT.4 trägt die Differenz. Weitere ehrliche Grenzen: keine
+  Trend-Hysterese (Glättung der Schätzer entprellt), ADF immer 0.
+  **Wayfinder-Nachzug: Issue #242** (`from-firefly`; Decoder + WS-JSON +
+  Kurven-/Trend-Indikator im Label). 5 neue Tests (Schätzer 2, Track 2,
+  Encoder/Decoder 1), Gates grün, cat062-Fuzz-Smoke 7,0 M Läufe.
+  Roadmap-Stand: **65 %** (VERT.3); AP-VERT voll bei 66,5 % nach VERT.4.
+- **Nächster Schritt:** offen zwischen **VERT.4** (CA-Modell in die
+  IMM-Bank, S5-Kern-Refactor mit eigenem ADR — neu ausgewiesen) und
+  **SPEC.1** (Duplikat-ICAO-Auflösung + Split/Merge, S4; Vorarbeit
+  `docs/design/korrelation-code-duplikate-weeze.md`). VERT.4 ist der
+  schwerere Umbau (berührt den Fusionskern); SPEC.1 ist unabhängig davon
+  ziehbar. Reihenfolge mit dem Betreiber abstimmen, dann das gewählte
+  Häppchen per Charter ankündigen und Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-11 (VERT.2 — Höhen-Tracking + RoCD → I062/135/130/220)
 
 - **Zuletzt aktualisiert:** 2026-07-11
