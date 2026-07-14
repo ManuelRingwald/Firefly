@@ -10,6 +10,34 @@
 
 ---
 
+## 🎯 Stand 2026-07-14 (VERT.4a — 6-D-Fundament fürs CA-Modell)
+
+- **Zuletzt aktualisiert:** 2026-07-14
+- **VERT.4a — 6-D-Zustandsfundament (FR-TRK-044, ADR 0035 Weg A):**
+  Erstes von zwei freigegebenen Häppchen der VERT.4-Tracking-Hälfte
+  (Betreiber-Go 2026-07-14: „Weg A, 2 Häppchen"). Die Code-Inspektion vor
+  ADR 0035 ergab: die IMM-Bank reicht nach außen **nur ihre kombinierte
+  4-D-Schätzung** — der 6-D-Zustand `[E, N, vE, vN, aE, aN]` kann in der
+  Bank **gekapselt** bleiben, der Fusionskern (Gating/JPDA/Registrierung)
+  bleibt unverändert; **kein Kern-Umbau** nötig (Korrektur der VERT.3-
+  Worst-Case-Annahme). Geliefert, bewusst **noch nicht verdrahtet**:
+  `firefly-track::kalman6` — `LinearKalman6` (Numerik-Spiegel: Joseph-Form,
+  `2π·√|S|`-Likelihood), 6-D-Transitionen mit ehrlicher Beschleunigungs-
+  Aussage je Hypothese (CA voll gekoppelt; CV **Null-Zeilen**; CT
+  **Zentripetal-Zeilen** `a' = ω·J·v'` — sonst ginge I062/210 in
+  stationären Kurven fälschlich gegen 0), White-Noise-**Jerk**-Q
+  (CWNA eine Ableitung höher), Rand-Abbildungen `from_kalman4`/`to_kalman4`
+  (Einbettung/exakte Marginale, Identität auf (p, v)). Kernnachweis:
+  0,5 m/s² aus reinen Positionsmessungen als **Filterzustand** geschätzt.
+  7 neue Tests, Gates grün. Kein Wire-/ICD-/Verhaltens-Bezug.
+  Roadmap-Stand: **65,5 %**.
+- **Nächster Schritt:** **VERT.4b** umsetzen (bereits freigegeben, Teil
+  desselben Go): Bank auf `LinearKalman6`, CA-Modell in `ImmConfig`
+  (Tuning: Transition/Prior, Jerk-PSD), 4-D-Projektion am Bank-Rand,
+  I062/210 aus dem Filterzustand, End-to-End-Tests; Snapshot-Layout-
+  Wechsel (vor HA.1 billig). Start nach Merge des VERT.4a-PRs (Branch
+  frisch von `origin/main`).
+
 ## 🎯 Stand 2026-07-11 (VERT.3 — Mode of Movement + Beschleunigung → I062/200/210)
 
 - **Zuletzt aktualisiert:** 2026-07-11
