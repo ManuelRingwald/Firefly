@@ -422,6 +422,16 @@ Modelle), **modellbedingtes Filtern** (jedes Modell prädiziert + aktualisiert),
 **Modellwahrscheinlichkeits-Update** (die Likelihoods justieren `μ` neu),
 **Kombination** (gewichtetes Zusammenführen zur Ausgabe).
 
+**Track-Koaleszenz (JPDA)**
+Die bekannte strukturelle Schwäche probabilistischer Assoziation: teilen
+sich zwei dauerhaft unauflösbare Tracks jeden Plot anteilig (β), driften
+beide Schätzungen auf den gemeinsamen Mittelpunkt — das Lagebild verliert
+die Trennung genau dort, wo sie operativ zählt. Fireflys Gegenmittel
+(SPEC.1, ADR 0036) ist ein **Koaleszenz-Wächter**: statistisch
+unauflösbare Paare (2σ) bekommen geteilte Mess-Hypothesen exklusiv dem
+stärkeren Anwärter zugeschlagen — chirurgisches Hypothesen-Pruning, im
+Normalverkehr ein No-op.
+
 **Mischung / Interaktion (IMM-Mixing)**
 Die erste IMM-Stufe und das, was die Filter überhaupt koppelt: Bevor ein Modell
 für sich filtert, startet es nicht aus seiner *eigenen* letzten Schätzung,
