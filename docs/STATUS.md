@@ -27,11 +27,14 @@
   kann „wenig Evidenz" nicht von „sauber" trennen ⇒ **Floor = Default**,
   nur Hotspot-Anhebung (Deckel 100×). 11 neue Tests, Gates grün
   (53 Suiten). Kein Wire-/ICD-Bezug. Roadmap: **71 %**.
-- **Nächster Schritt:** **FPL.0** ankündigen — ADR „Korrelation im SDPS
-  vs. CWP", Architektur-Abstimmung mit Wayfinder (**vor** deren EFS-1;
-  S3, 72 %) — und Freigabe abwarten. (Die SPEC.2-Verfeinerung ist als
-  **SPEC.2b** sichtbar in der Roadmap ausgewiesen — Expositions-
-  Buchführung + Metriken, ohne Prozent-Zuwachs, jederzeit ziehbar.)
+- **Nächster Schritt:** **SPEC.2b** umsetzen (Betreiber-Entscheidung
+  2026-07-14: „Wir lassen nichts liegen, sondern arbeiten es sauber ab" —
+  **bereits freigegeben**, keine neue Ankündigungsrunde): Expositions-
+  Buchführung für die Clutter-Karte (Zellen zählen auch die Scan-
+  Exposition, damit λ in belegbar sauberen Regionen ehrlich **unter**
+  den Default sinken darf) + Metrik-Ausleitung. S3, ohne Prozent-Zuwachs
+  (71 % bleibt). Danach **FPL.0** ankündigen (72 %) und Freigabe
+  abwarten.
 
 ## 🎯 Stand 2026-07-14 (SPEC.1 — Duplikat-Identitäten + Koaleszenz)
 
