@@ -370,6 +370,15 @@ zappelt dem Rauschen hinterher. Eine zentrale Stellschraube der Track-Güte.
 (Faustregel `q ≳ a²·Δt`). Für *starke* Manöver ist die saubere Antwort kein
 einzelnes `Q`, sondern **IMM** (mehrere Modelle parallel, Meilenstein M5).
 
+**Jerk (Ruck)**
+Die zeitliche Ableitung der Beschleunigung (m/s³) — eine Ableitung über dem
+Manöver-Budget des CWNA-Modells. Das **White-Noise-Jerk-Modell** ist das
+Prozessrauschen des CA-Bewegungsmodells (VERT.4, ADR 0035): es lässt die
+geschätzte *Beschleunigung* selbst wandern, parametriert über die Jerk-PSD
+(m²/s⁵). Zu klein: der Filter verschläft den Übergang Reiseflug → Anflug-
+Abbremsung; zu groß: die Beschleunigungsschätzung zappelt dem Rauschen
+hinterher — dieselbe Abwägung wie bei `Q`, eine Etage höher.
+
 **Innovation**
 Die „Überraschung" eines neuen Plots: die Differenz zwischen dem, was gemessen
 wurde, und dem, was der Filter vorhergesagt hatte (`y = Messung − Vorhersage`).
@@ -387,7 +396,9 @@ positiv definit) — wichtig für verlässliche, prüfbare Numerik.
 **Bewegungsmodell**
 Die Annahme darüber, *wie* ein Ziel sich bewegt:
 - **CV** (*Constant Velocity*): gleichförmig geradeaus.
-- **CA** (*Constant Acceleration*): gleichmäßig beschleunigend.
+- **CA** (*Constant Acceleration*): gleichmäßig beschleunigend — braucht den
+  auf `[…, a_Ost, a_Nord]` erweiterten **6-D-Zustand** (VERT.4, ADR 0035);
+  sein Manöver-Budget ist der **Jerk** (s. u.).
 - **CT** (*Coordinated Turn*): saubere Kurve mit konstanter Drehrate `ω` (rad/s).
   Im Tracker (`MotionModel::CoordinatedTurn`) dreht die Übergangsmatrix den
   Geschwindigkeitsvektor pro Schritt um `ω·dt` und integriert den entstehenden
