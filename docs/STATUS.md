@@ -10,6 +10,26 @@
 
 ---
 
+## 🎯 Stand 2026-07-14 (VERT.4b — CA-Modell in der IMM-Bank)
+
+- **Zuletzt aktualisiert:** 2026-07-14
+- **VERT.4b — Integration (FR-TRK-044 verifiziert, ADR 0035 Weg A):**
+  Bank vollständig auf `LinearKalman6` (Mischung/Kombination/PDA in 6-D),
+  nach außen exakte 4-D-Marginale (Kern unberührt — Weg-A-Versprechen
+  eingehalten). **Default-Bank `cv_turns_and_ca`**; nach anfänglichem
+  RMSE-Riss (40,3 > 40,0 m) per Tuning gehalten (CV 0,94 klebrig,
+  CA-Einstieg 0,02–0,03) statt Schwelle aufzuweichen. **I062/210 aus dem
+  Filterzustand** (`combined_acceleration`: CT-zentripetal/CA-längs/CV-0);
+  VERT.3-Ableiter nur noch Frische-Zeuge. Nachweise: Startlauf 2,5 m/s² ⇒
+  µ_CA > 0,7 + Zustand ±0,3; stationäre Kurve meldet ω·v (±15 %).
+  Ehrlich: MMSE-Schrumpfung bei mehrdeutiger Evidenz dokumentiert;
+  Snapshot-Layout gebrochen (vor HA.1 billig). 2 neue IMM-Tests, Gates
+  grün (53 Suiten). Roadmap: **66,5 %** — AP-VERT abgeschlossen,
+  Track-Inhalt ARTAS-vergleichbar (Meilenstein-Schwelle erreicht).
+- **Nächster Schritt:** **SPEC.1** ankündigen — Duplikat-ICAO-Auflösung +
+  Split/Merge (S4; Vorarbeit `korrelation-code-duplikate-weeze.md`) —
+  und Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-14 (VERT.4a — 6-D-Fundament fürs CA-Modell)
 
 - **Zuletzt aktualisiert:** 2026-07-14

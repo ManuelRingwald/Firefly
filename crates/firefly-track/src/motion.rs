@@ -39,6 +39,11 @@ pub enum MotionModel {
     /// positive = anticlockwise (to the left, mathematically positive in the
     /// east/north plane).
     CoordinatedTurn { rate: f64 },
+    /// Uniform acceleration (VERT.4, ADR 0035) — only meaningful on the 6-D
+    /// state ([`transition6`](Self::transition6)); restricted to the 4-D
+    /// state it degenerates to constant velocity (there is no acceleration
+    /// state to couple).
+    ConstantAcceleration,
 }
 
 impl MotionModel {
@@ -68,6 +73,24 @@ impl MotionModel {
                 } else {
                     coordinated_turn_transition(*rate, dt)
                 }
+            }
+            // On a 4-D state CA has no acceleration to couple — it IS CV.
+            MotionModel::ConstantAcceleration => constant_velocity_transition(dt),
+        }
+    }
+
+    /// The state-transition matrix `F` advancing the 6-D state
+    /// `x = [E, N, vE, vN, aE, aN]` by `dt` seconds under this model
+    /// (VERT.4b, ADR 0035 Weg A — the bank runs every model on 6-D).
+    /// See [`crate::kalman6`] for the per-hypothesis acceleration semantics.
+    pub fn transition6(&self, dt: f64) -> nalgebra::Matrix6<f64> {
+        match self {
+            MotionModel::ConstantVelocity => crate::kalman6::constant_velocity_transition6(dt),
+            MotionModel::CoordinatedTurn { rate } => {
+                crate::kalman6::coordinated_turn_transition6(*rate, dt)
+            }
+            MotionModel::ConstantAcceleration => {
+                crate::kalman6::constant_acceleration_transition(dt)
             }
         }
     }

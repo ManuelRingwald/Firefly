@@ -30,10 +30,11 @@
 //! Determinism (ADR 0003): every stage is a pure function of the bank state and
 //! the inputs — no wall clock, no hidden state.
 
-use nalgebra::{Matrix4, Vector4};
+use nalgebra::{Matrix6, Vector6};
 use serde::{Deserialize, Serialize};
 
 use crate::kalman::{LinearKalman, ProcessNoise};
+use crate::kalman6::{JerkNoise, LinearKalman6};
 use crate::measurement::CartesianMeasurement;
 use crate::motion::MotionModel;
 
@@ -42,6 +43,27 @@ use crate::motion::MotionModel;
 /// normaliser. (A model probability is only ever this small if every path into
 /// it has near-zero probability, in which case its mixed state is irrelevant.)
 const MIN_MODEL_PROBABILITY: f64 = 1e-12;
+
+/// Prior standard deviation (m/s²) for the acceleration state when a bank is
+/// seeded from a 4-D estimate (ADR 0035): generous enough to cover the civil
+/// longitudinal *and* centripetal envelope, so the CA model is not starved at
+/// birth.
+const ACCEL_PRIOR_STD: f64 = 5.0;
+
+/// Tiny PSD floor (m²/s⁵) on the acceleration diagonal of the CV/CT process
+/// noise — pure numerical hygiene: CV's zero acceleration rows would
+/// otherwise collapse that covariance block to exactly 0.
+const ACCEL_Q_FLOOR_PSD: f64 = 1e-6;
+
+/// Default jerk PSD (m²/s⁵) for the CA model. Sized for civil transitions of
+/// ~1 m/s² acceleration change over ~10 s (`q ≈ Δa²/Δt`): brisk enough to
+/// catch the onset of a take-off roll or approach deceleration, calm enough
+/// not to chase measurement noise.
+const DEFAULT_JERK_PSD: f64 = 0.1;
+
+fn default_jerk_psd() -> f64 {
+    DEFAULT_JERK_PSD
+}
 
 /// A bank of Kalman filters under different motion models, with the Markov
 /// switching model that couples them — the state an IMM carries between scans.
@@ -53,13 +75,16 @@ const MIN_MODEL_PROBABILITY: f64 = 1e-12;
 pub struct Imm {
     /// The motion model each filter in the bank assumes.
     models: Vec<MotionModel>,
-    /// Per-model Kalman state `(x_i, P_i)`.
-    filters: Vec<LinearKalman>,
+    /// Per-model Kalman state `(x_i, P_i)` on the 6-D state (ADR 0035).
+    filters: Vec<LinearKalman6>,
     /// Model probabilities `μ_i`, summing to 1.
     probabilities: Vec<f64>,
     /// Row-stochastic Markov transition matrix: `transition[i][j]` is the
     /// probability of switching from model `i` to model `j`.
     transition: Vec<Vec<f64>>,
+    /// Jerk PSD (m²/s⁵) driving the CA model's process noise (ADR 0035).
+    #[serde(default = "default_jerk_psd")]
+    jerk_psd: f64,
 }
 
 /// The recipe for building a track's IMM bank: which motion models, how they
@@ -74,6 +99,10 @@ pub struct ImmConfig {
     pub transition: Vec<Vec<f64>>,
     /// Prior model probabilities for a freshly born track (sum to 1).
     pub initial_probabilities: Vec<f64>,
+    /// Jerk PSD (m²/s⁵) for the CA model's process noise (ADR 0035);
+    /// irrelevant for banks without a CA model.
+    #[serde(default = "default_jerk_psd")]
+    pub jerk_psd: f64,
 }
 
 impl ImmConfig {
@@ -101,6 +130,39 @@ impl ImmConfig {
             models,
             transition,
             initial_probabilities,
+            jerk_psd: DEFAULT_JERK_PSD,
+        }
+    }
+
+    /// The VERT.4b civil bank: CV, a symmetric pair of coordinated turns and
+    /// a **constant-acceleration** model (ADR 0035) — covering straight
+    /// flight, both turns and the longitudinal-acceleration phases (take-off
+    /// roll, climb acceleration, approach deceleration) that CV+CT can only
+    /// absorb as process noise, lagging.
+    ///
+    /// Tuning: CV is the stickiest model (aircraft cruise most of the time)
+    /// and the manoeuvre hypotheses are entered sparingly — a fourth model
+    /// otherwise taxes the straight-flight accuracy (the classic IMM trade),
+    /// measurably in the single-target RMSE scenario test.
+    pub fn cv_turns_and_ca(turn_rate: f64) -> Self {
+        let models = vec![
+            MotionModel::ConstantVelocity,
+            MotionModel::CoordinatedTurn { rate: turn_rate },
+            MotionModel::CoordinatedTurn { rate: -turn_rate },
+            MotionModel::ConstantAcceleration,
+        ];
+        let transition = vec![
+            vec![0.94, 0.02, 0.02, 0.02],
+            vec![0.03, 0.91, 0.03, 0.03],
+            vec![0.03, 0.03, 0.91, 0.03],
+            vec![0.05, 0.02, 0.02, 0.91],
+        ];
+        let initial_probabilities = vec![0.88, 0.045, 0.045, 0.03];
+        Self {
+            models,
+            transition,
+            initial_probabilities,
+            jerk_psd: DEFAULT_JERK_PSD,
         }
     }
 
@@ -109,12 +171,14 @@ impl ImmConfig {
     /// [`LinearKalman::from_first_measurement`]).
     pub fn seed(&self, seed: LinearKalman) -> Imm {
         let n = self.models.len();
-        Imm::new(
+        let mut imm = Imm::new(
             self.models.clone(),
             vec![seed; n],
             self.initial_probabilities.clone(),
             self.transition.clone(),
-        )
+        );
+        imm.jerk_psd = self.jerk_psd;
+        imm
     }
 }
 
@@ -150,9 +214,15 @@ impl Imm {
         }
         Self {
             models,
-            filters,
+            // ADR 0035 (Weg A): the bank runs on the 6-D state internally;
+            // 4-D seeds are embedded with a zero-mean acceleration prior.
+            filters: filters
+                .iter()
+                .map(|f| LinearKalman6::from_kalman4(f, ACCEL_PRIOR_STD))
+                .collect(),
             probabilities,
             transition,
+            jerk_psd: DEFAULT_JERK_PSD,
         }
     }
 
@@ -172,9 +242,30 @@ impl Imm {
         &self.probabilities
     }
 
-    /// The per-model filter states.
-    pub fn filters(&self) -> &[LinearKalman] {
+    /// The per-model filter states (6-D since VERT.4b, ADR 0035).
+    pub fn filters(&self) -> &[LinearKalman6] {
         &self.filters
+    }
+
+    /// The per-model process noise on the 6-D state: CV/CT keep the CWNA
+    /// manoeuvre budget on the (p, v) block (plus a tiny floor on the
+    /// acceleration diagonal for conditioning); CA runs on white-noise jerk.
+    fn model_noise(&self, model: &MotionModel, dt: f64, process: &ProcessNoise) -> Matrix6<f64> {
+        match model {
+            MotionModel::ConstantAcceleration => JerkNoise::new(self.jerk_psd).covariance(dt),
+            _ => {
+                let q4 = process.covariance(dt);
+                let mut q = Matrix6::zeros();
+                for i in 0..4 {
+                    for j in 0..4 {
+                        q[(i, j)] = q4[(i, j)];
+                    }
+                }
+                q[(4, 4)] = ACCEL_Q_FLOOR_PSD * dt;
+                q[(5, 5)] = ACCEL_Q_FLOOR_PSD * dt;
+                q
+            }
+        }
     }
 
     /// The motion model assumed by each filter.
@@ -231,7 +322,7 @@ impl Imm {
     /// models disagree on the state, the mixed start is more uncertain, exactly
     /// as it should be. This is the step that couples the otherwise independent
     /// filters (M5.2).
-    pub fn mixed_initial_conditions(&self) -> Vec<LinearKalman> {
+    pub fn mixed_initial_conditions(&self) -> Vec<LinearKalman6> {
         let r = self.len();
         let weights = self.mixing_probabilities();
         (0..r)
@@ -239,19 +330,19 @@ impl Imm {
                 let w = &weights[j];
 
                 // Mixed mean.
-                let mut x0 = Vector4::zeros();
+                let mut x0 = Vector6::zeros();
                 for (&wi, f) in w.iter().zip(&self.filters) {
                     x0 += wi * f.x;
                 }
 
                 // Mixed covariance with the spread-of-the-means correction.
-                let mut p0 = Matrix4::zeros();
+                let mut p0 = Matrix6::zeros();
                 for (&wi, f) in w.iter().zip(&self.filters) {
                     let d = f.x - x0;
                     p0 += wi * (f.p + d * d.transpose());
                 }
 
-                LinearKalman { x: x0, p: p0 }
+                LinearKalman6 { x: x0, p: p0 }
             })
             .collect()
     }
@@ -266,16 +357,33 @@ impl Imm {
     /// uncertainty. This is what the tracker hands on as the track's position
     /// and velocity (Häppchen M5.4).
     pub fn combined_estimate(&self) -> LinearKalman {
-        let mut x = Vector4::zeros();
+        // ADR 0035 (Weg A): combine on 6-D, hand downstream the exact
+        // Gaussian marginal over (position, velocity) — the fusion core's
+        // 4-D contract is untouched.
+        self.combined_estimate6().to_kalman4()
+    }
+
+    /// The combined estimate on the full 6-D state (VERT.4b) — same
+    /// probability-weighted blend with the spread-of-the-means term.
+    pub fn combined_estimate6(&self) -> LinearKalman6 {
+        let mut x = Vector6::zeros();
         for (&mu, f) in self.probabilities.iter().zip(&self.filters) {
             x += mu * f.x;
         }
-        let mut p = Matrix4::zeros();
+        let mut p = Matrix6::zeros();
         for (&mu, f) in self.probabilities.iter().zip(&self.filters) {
             let d = f.x - x;
             p += mu * (f.p + d * d.transpose());
         }
-        LinearKalman { x, p }
+        LinearKalman6 { x, p }
+    }
+
+    /// The bank's combined acceleration `(a_east, a_north)` in m/s² — the
+    /// filter *state* that feeds I062/210 since VERT.4b: centripetal in a
+    /// turn (from CT), longitudinal while accelerating (from CA), zero in
+    /// cruise (from CV).
+    pub fn combined_acceleration(&self) -> (f64, f64) {
+        self.combined_estimate6().acceleration()
     }
 
     /// **Predict** stage of the IMM cycle (mixing + per-model prediction).
@@ -293,10 +401,16 @@ impl Imm {
     ///
     /// REQ: FR-TRK-013
     pub fn predict(&mut self, dt: f64, process: &ProcessNoise) -> LinearKalman {
+        debug_assert!(
+            dt >= 0.0,
+            "backward prediction dt={dt:.6} s — caller must guard dt > 0"
+        );
         let predicted = self.predicted_model_probabilities();
         let mixed = self.mixed_initial_conditions();
         for (j, mut f) in mixed.into_iter().enumerate() {
-            f.predict_with(&self.models[j], dt, process);
+            let transition = self.models[j].transition6(dt);
+            let noise = self.model_noise(&self.models[j], dt, process);
+            f.predict(&transition, &noise);
             self.filters[j] = f;
         }
         self.probabilities = predicted;
@@ -371,7 +485,8 @@ impl Imm {
         let r = self.len();
 
         // Branch 0: no detection — the bank stays exactly as predicted.
-        let mut branch_filters: Vec<Vec<LinearKalman>> = Vec::with_capacity(measurements.len() + 1);
+        let mut branch_filters: Vec<Vec<LinearKalman6>> =
+            Vec::with_capacity(measurements.len() + 1);
         let mut branch_probs: Vec<Vec<f64>> = Vec::with_capacity(measurements.len() + 1);
         branch_filters.push(self.filters.clone());
         branch_probs.push(self.probabilities.clone());
@@ -387,16 +502,16 @@ impl Imm {
         // Blend per-model states across branches (spread-of-the-means).
         let mut new_filters = Vec::with_capacity(r);
         for j in 0..r {
-            let mut x = Vector4::zeros();
+            let mut x = Vector6::zeros();
             for (&beta, bf) in betas.iter().zip(&branch_filters) {
                 x += beta * bf[j].x;
             }
-            let mut p = Matrix4::zeros();
+            let mut p = Matrix6::zeros();
             for (&beta, bf) in betas.iter().zip(&branch_filters) {
                 let d = bf[j].x - x;
                 p += beta * (bf[j].p + d * d.transpose());
             }
-            new_filters.push(LinearKalman { x, p });
+            new_filters.push(LinearKalman6 { x, p });
         }
 
         // Blend model probabilities across branches and renormalise.
@@ -441,7 +556,103 @@ impl Imm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nalgebra::Matrix4;
+    use crate::measurement::CartesianMeasurement;
+    use nalgebra::{Matrix2, Matrix4, Vector2, Vector4};
+
+    fn position_measurement(east: f64, north: f64, std: f64) -> CartesianMeasurement {
+        CartesianMeasurement {
+            z: Vector2::new(east, north),
+            r: Matrix2::identity() * std * std,
+        }
+    }
+
+    /// The VERT.4b core claim: on a take-off-strength acceleration the CA
+    /// model takes over and the bank's combined acceleration *state* — the
+    /// quantity I062/210 now reports — carries the manoeuvre.
+    ///
+    /// Honest calibration note: the combined state is the MMSE blend, so its
+    /// magnitude is shrunk by the CV/CT share of the model probability while
+    /// the evidence is ambiguous. At 4-s scans with σ = 30 m a gentle
+    /// 1 m/s² produces only ~8 m of per-scan CV lag (0.27σ) — the posterior
+    /// genuinely stays mixed. A real take-off roll (~2.5 m/s²) separates.
+    /// REQ: FR-TRK-044
+    #[test]
+    fn ca_model_wins_on_an_accelerating_target_and_reports_the_state() {
+        let accel = 2.5; // m/s² eastward — a jet's take-off roll
+        let v0 = 10.0;
+        let dt = 4.0;
+        let process = ProcessNoise::new(0.5);
+
+        let seed =
+            LinearKalman::from_first_measurement(&position_measurement(0.0, 0.0, 30.0), 100.0);
+        let mut bank = ImmConfig::cv_turns_and_ca(0.052).seed(seed);
+
+        let ca_index = 3;
+        for k in 1..=25 {
+            let t = k as f64 * dt;
+            let truth_east = v0 * t + 0.5 * accel * t * t;
+            bank.predict(dt, &process);
+            bank.update(&position_measurement(truth_east, 0.0, 30.0));
+        }
+
+        assert!(
+            bank.probabilities()[ca_index] > 0.7,
+            "CA dominates on sustained acceleration, mu = {:?}",
+            bank.probabilities()
+        );
+        // The mode-matched CA filter itself nails the truth…
+        let (ca_east, _) = bank.filters()[ca_index].acceleration();
+        assert!(
+            (ca_east - accel).abs() < 0.3,
+            "CA filter state near {accel} m/s², got {ca_east}"
+        );
+        // …and the reported MMSE blend carries most of it.
+        let (a_east, a_north) = bank.combined_acceleration();
+        assert!(
+            (a_east - accel).abs() < 0.25 * accel,
+            "combined acceleration within 25 % of {accel} m/s², got {a_east}"
+        );
+        assert!(
+            a_north.abs() < 0.3,
+            "no phantom cross-track component, got {a_north}"
+        );
+    }
+
+    /// In a steady coordinated turn the bank's combined acceleration is the
+    /// **centripetal** value (from the CT hypothesis' acceleration rows) —
+    /// not a spurious zero. REQ: FR-TRK-044
+    #[test]
+    fn steady_turn_reports_centripetal_acceleration() {
+        let rate = 0.052; // rad/s, left turn
+        let speed = 150.0;
+        let dt = 4.0;
+        let process = ProcessNoise::new(0.5);
+
+        let seed =
+            LinearKalman::from_first_measurement(&position_measurement(0.0, 0.0, 30.0), 100.0);
+        let mut bank = ImmConfig::cv_turns_and_ca(rate).seed(seed);
+
+        // Truth: a circle of radius v/ω around (0, R), starting east-bound…
+        // parameterise position directly: p(t) = R·(sin ωt, 1 − cos ωt).
+        let radius = speed / rate;
+        for k in 1..=40 {
+            let theta = rate * k as f64 * dt;
+            bank.predict(dt, &process);
+            bank.update(&position_measurement(
+                radius * theta.sin(),
+                radius * (1.0 - theta.cos()),
+                30.0,
+            ));
+        }
+
+        let (a_east, a_north) = bank.combined_acceleration();
+        let a_norm = (a_east * a_east + a_north * a_north).sqrt();
+        let centripetal = rate * speed; // ≈ 7.8 m/s²
+        assert!(
+            (a_norm - centripetal).abs() < 0.15 * centripetal,
+            "|a| ≈ ω·v = {centripetal:.2} m/s² in a steady turn, got {a_norm:.2}"
+        );
+    }
 
     /// Two distinct filter states for a two-model bank.
     fn filter(east: f64, north: f64, var: f64) -> LinearKalman {
@@ -542,9 +753,6 @@ mod tests {
             assert!((m.p[(0, 0)] - 200.0).abs() < 1e-9);
         }
     }
-
-    use crate::measurement::CartesianMeasurement;
-    use nalgebra::{Matrix2, Vector2};
 
     /// A position measurement at `(east, north)` with isotropic 1σ = 10 m.
     fn measurement(east: f64, north: f64) -> CartesianMeasurement {

@@ -395,7 +395,15 @@ impl Track {
         if now - estimator.last_time() > window {
             return None;
         }
-        estimator.acceleration_mps2()
+        // VERT.4b (ADR 0035): report the IMM bank's acceleration *state* —
+        // less noise and lag than the derived estimate, and honest in every
+        // phase (centripetal in turns via CT, longitudinal via CA, zero in
+        // cruise via CV). The VERT.3 estimator stays as the deterministic
+        // freshness witness for the velocity-sample chain; require it to
+        // have produced at least one estimate so a newborn track does not
+        // report its acceleration *prior* as a claim.
+        estimator.acceleration_mps2()?;
+        Some(self.imm.combined_acceleration())
     }
 
     /// The course trend (VERT.3, I062/200 TRANS) from the IMM model

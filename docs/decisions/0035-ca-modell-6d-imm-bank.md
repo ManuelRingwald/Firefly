@@ -93,9 +93,10 @@ ist Tuning und fällt in VERT.4b.
 - **Snapshot-Format:** Das IMM-Snapshot-Layout ändert sich mit 4b (6-D-
   Zustände). Es gibt noch kein produktives Restore-Format (HA.1 offen) —
   der Bruch ist jetzt billig, später teuer; genau deshalb VERT.4 vor HA.1.
-- **VERT.3-Ableiter bleibt** als Quelle des LONG-Trends erhalten; ob er nach
-  4b auch für I062/210 als Fallback dient oder vollständig abgelöst wird,
-  entscheidet 4b anhand der Testbilder.
+- **VERT.3-Ableiter — Entscheidung aus 4b:** sein Glättungswert ist
+  vollständig abgelöst (I062/210 **und** LONG-Trend projizieren den
+  Filterzustand); er bleibt als deterministischer Frische-Zeuge der
+  Geschwindigkeits-Sample-Kette und als Erst-Schätzungs-Gate erhalten.
 - **Ehrliche Grenze:** Weg A rechnet CV/CT auf 6-D mit — zwei zusätzliche
   Zustandsdimensionen je Filter sind bei drei bis vier Modellen pro Track
   vernachlässigbar; sollte die Bank je auf viele Modelle wachsen, wäre
