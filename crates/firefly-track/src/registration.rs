@@ -211,6 +211,12 @@ fn sighting_position(
     }
 }
 
+/// A correspondence whose two sightings are further apart than this (metres)
+/// is identity contamination (duplicate ICAO/squawk pairing two different
+/// airframes), not bias evidence — real registration errors are orders of
+/// magnitude smaller (SPEC.1, FR-TRK-045).
+const MAX_CORRESPONDENCE_SEPARATION_M: f64 = 5_000.0;
+
 /// Estimate per-sensor range/azimuth biases from identity-paired
 /// correspondences by linearized least squares (see module docs).
 ///
@@ -235,6 +241,22 @@ pub fn estimate_biases(
                 Sighting::Geodetic { .. } => true,
             };
             liftable(&c.a) && liftable(&c.b)
+        })
+        .collect();
+    // SPEC.1 (FR-TRK-045): duplicate-identity guard, kinematic and at the
+    // right layer. Squawks are not globally unique and even ICAO addresses
+    // duplicate in the field (transponder misconfiguration; ORCAM reuse at
+    // borders — the Weeze case): an identity pairing can then join sightings
+    // of two *different* airframes. A genuine registration error is metres
+    // to a few hundred metres — a correspondence whose lifted positions lie
+    // kilometres apart is identity contamination, not bias evidence, and is
+    // discarded before it can poison the least squares.
+    let usable: Vec<&Correspondence> = usable
+        .into_iter()
+        .filter(|c| {
+            let pos_a = sighting_position(&c.a, sites, common).expect("filtered liftable");
+            let pos_b = sighting_position(&c.b, sites, common).expect("filtered liftable");
+            (pos_a - pos_b).norm() <= MAX_CORRESPONDENCE_SEPARATION_M
         })
         .collect();
     for c in &usable {

@@ -10,6 +10,26 @@
 
 ---
 
+## 🎯 Stand 2026-07-14 (SPEC.1 — Duplikat-Identitäten + Koaleszenz)
+
+- **Zuletzt aktualisiert:** 2026-07-14
+- **SPEC.1 (FR-TRK-045, ADR 0036):** Identität ist jetzt ein **weicher
+  Schlüssel** — der ICAO-Fastpath assoziiert nur noch im kinematischen
+  Gate hart (Kern-Befund: vorher teleportierte ein Duplikat-ICAO den
+  Träger-Track zwischen beiden Maschinen); Duplikat-Scan flaggt alle
+  Träger gleicher ICAO/gleichen Squawks (`identity_conflict`, WARN, nie
+  Merge; ORCAM/Weeze-Lektion). **Koaleszenz-Wächter** gegen die
+  strukturelle JPDA-Schwäche: 2σ-unauflösbare Paare bekommen geteilte
+  Hypothesen exklusiv zugeteilt — gemessen hält ein 150-m-Parallel-Paar
+  148–150 m statt auf ≤ 113 m zusammenzudriften (Negativ-Check: Test
+  beißt). **Registrierungs-Deckel:** > 5-km-Korrespondenzen verworfen
+  (Duplikat vergiftet sonst die Bias-Schätzung); zeitfenster-basierte
+  Erst-Idee verworfen (kann Duplikat nicht von Scan-Wiederbesuch
+  unterscheiden). 5 neue/2 revidierte Tests, Gates grün (53 Suiten).
+  Kein Wire-/ICD-Bezug. Roadmap: **69 %**.
+- **Nächster Schritt:** **SPEC.2** ankündigen — räumliche Clutter-Karte
+  + Reflexions-/Mehrwege-Heuristik (S4, 71 %) — und Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-14 (VERT.4b — CA-Modell in der IMM-Bank)
 
 - **Zuletzt aktualisiert:** 2026-07-14

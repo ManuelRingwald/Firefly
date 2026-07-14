@@ -200,6 +200,13 @@ pub struct Track {
     /// first sample.
     #[serde(default)]
     acceleration: Option<crate::acceleration::AccelerationEstimator>,
+    /// Set while another live track carries the same ICAO address or Mode 3/A
+    /// code (SPEC.1): duplicate identities are real (transponder
+    /// misconfiguration; ORCAM squawk reuse across borders — the Weeze case)
+    /// and mark this track's identity as **untrustworthy for correlation**,
+    /// not as a merge candidate. Recomputed every fusion opportunity.
+    #[serde(default)]
+    identity_conflict: bool,
 }
 
 impl Track {
@@ -228,6 +235,7 @@ impl Track {
             geometric_altitude_ft: None,
             geometric_time: None,
             acceleration: None,
+            identity_conflict: false,
         }
     }
 
@@ -352,6 +360,18 @@ impl Track {
     /// Most recently reported Mode S 24-bit ICAO address, if known.
     pub fn icao_address(&self) -> Option<u32> {
         self.icao_address
+    }
+
+    /// Whether another live track currently carries the same identity
+    /// (SPEC.1) — see the field for semantics.
+    pub fn identity_conflict(&self) -> bool {
+        self.identity_conflict
+    }
+
+    /// Mark or clear the duplicate-identity condition (tracker-owned,
+    /// recomputed every fusion opportunity).
+    pub fn set_identity_conflict(&mut self, conflict: bool) {
+        self.identity_conflict = conflict;
     }
 
     /// Most recently reported barometric flight level (feet), if known.

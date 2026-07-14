@@ -847,6 +847,16 @@ impl Tracker {
                     // and let JPDA sort it out kinematically.
                     continue;
                 };
+                // SPEC.1 (FR-TRK-045): identity is a *soft* key — an ICAO
+                // match far outside the track's kinematic gate is evidence of
+                // a **duplicate identity** (two airframes emitting the same
+                // address), not an authoritative association. Hard-wiring it
+                // would teleport the track between both aircraft (the
+                // "jumping blended track"). Let the plot fall through to
+                // JPDA/initiation instead, where it can seed its own track.
+                if !gate.accepts_measurement(&reference[ti], cm) {
+                    continue;
+                }
                 // Certain association: β_0 = 0 (no-detection), β_1 = 1.0.
                 self.tracks[ti].imm.update_pda(&[*cm], &[0.0, 1.0]);
                 self.tracks[ti].mark_hit(t);
@@ -875,7 +885,12 @@ impl Tracker {
                 continue;
             }
 
-            let betas = joint_association_probabilities(&reference, &measurements, &gate, &clutter);
+            let mut betas =
+                joint_association_probabilities(&reference, &measurements, &gate, &clutter);
+            // SPEC.1 (FR-TRK-045): prune the shared-plot hypotheses of
+            // statistically unresolvable track pairs before folding — the
+            // guard against JPDA track coalescence.
+            crate::jpda::decouple_coalescing_pairs(&reference, &mut betas);
 
             for (ti, track_betas) in betas.iter().enumerate() {
                 if track_betas[0] >= 1.0 - NO_DETECTION_EPSILON {
@@ -959,6 +974,46 @@ impl Tracker {
                 self.tracks.push(track);
             }
             reference.extend(newborn);
+        }
+
+        self.rescan_identity_conflicts();
+    }
+
+    /// Recompute the duplicate-identity condition across all live tracks
+    /// (SPEC.1, FR-TRK-045): two or more tracks carrying the same ICAO
+    /// address — or the same Mode 3/A code — are each flagged. Squawks are
+    /// **not globally unique** (ORCAM assigns code blocks regionally; at a
+    /// border like Weeze the same code is legitimately airborne twice, and
+    /// Mode-S conspicuity code 1000 is ambiguous by design), and even the
+    /// "unique" ICAO address duplicates in the field through transponder
+    /// misconfiguration. The honest reaction is **separate tracks with a
+    /// conflict flag** — never a merge, and no hard identity association
+    /// while the conflict stands. Cleared automatically when one of the
+    /// carriers disappears. Deterministic full rescan per opportunity.
+    fn rescan_identity_conflicts(&mut self) {
+        let mut by_icao: BTreeMap<u32, u32> = BTreeMap::new();
+        let mut by_squawk: BTreeMap<u16, u32> = BTreeMap::new();
+        for tr in &self.tracks {
+            if let Some(icao) = tr.icao_address() {
+                *by_icao.entry(icao).or_insert(0) += 1;
+            }
+            if let Some(code) = tr.mode_3a() {
+                *by_squawk.entry(code).or_insert(0) += 1;
+            }
+        }
+        for tr in &mut self.tracks {
+            let dup_icao = tr.icao_address().is_some_and(|icao| by_icao[&icao] > 1);
+            let dup_squawk = tr.mode_3a().is_some_and(|code| by_squawk[&code] > 1);
+            let conflict = dup_icao || dup_squawk;
+            if conflict && !tr.identity_conflict() {
+                tracing::warn!(
+                    track = tr.id().0,
+                    icao = tr.icao_address(),
+                    squawk = tr.mode_3a(),
+                    "duplicate identity: another live track carries the same                      ICAO address or Mode 3/A code — identity treated as soft"
+                );
+            }
+            tr.set_identity_conflict(conflict);
         }
     }
 }
@@ -1136,6 +1191,45 @@ mod tests {
                 daps: firefly_core::Daps::default(),
             },
         }
+    }
+
+    /// Two statistically unresolvable parallel targets do **not** coalesce
+    /// onto a common midpoint (SPEC.1): the coalescence guard prunes the
+    /// shared-plot hypotheses, so each track keeps riding its own target.
+    /// 150 m apart at 50 km with sigma_az 0.08 deg, both plots sit in both
+    /// gates every scan — the classic JPDA coalescence setup.
+    /// REQ: FR-TRK-045
+    #[test]
+    fn unresolvable_parallel_targets_do_not_coalesce() {
+        let mut tracker = Tracker::new(config());
+        let range = 50_000.0;
+        let az_a = 0.0;
+        let az_b = 150.0 / range; // ≈150 m cross-range separation
+
+        // Judge the settled regime (after confirmation) by its *worst*
+        // moment: without the guard the shared-plot blending drags the pair
+        // in oscillating swings down to ~113 m; with it the pair never
+        // leaves ~148-150 m. The minimum separates the regimes decisively
+        // where a single end-of-run sample would not.
+        let mut min_separation = f64::INFINITY;
+        for k in 0..40 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(Timestamp(t), &[plot(t, range, az_a), plot(t, range, az_b)]);
+            if k >= 16 {
+                let c: Vec<_> = tracker.confirmed_tracks().collect();
+                if c.len() == 2 {
+                    min_separation = min_separation.min((c[0].position() - c[1].position()).norm());
+                }
+            }
+        }
+
+        let confirmed: Vec<_> = tracker.confirmed_tracks().collect();
+        assert_eq!(confirmed.len(), 2, "two targets, two confirmed tracks");
+        assert!(
+            min_separation > 140.0,
+            "tracks stay on their targets instead of swinging toward the midpoint \
+             (worst settled separation {min_separation:.0} m, truth 150 m)"
+        );
     }
 
     /// A new track is born tentative, then confirmed once M-of-N hits accrue.
@@ -2354,7 +2448,7 @@ mod tests {
     /// is authoritative, bypassing the Mahalanobis distance check.
     /// REQ: FR-TRK-031
     #[test]
-    fn icao_match_bypasses_kinematic_gate() {
+    fn icao_match_is_gated_and_duplicates_stay_separate() {
         let mut tracker = Tracker::new(config());
         let icao: u32 = 0x3C_65_AC;
 
@@ -2368,28 +2462,66 @@ mod tests {
         }
         assert_eq!(tracker.confirmed_count(), 1);
         let track_id = tracker.tracks()[0].id();
+        let pos_before = tracker.tracks()[0].position();
 
-        // Send a plot ~111 km away (far outside the kinematic gate) but carrying
-        // the matching ICAO address. Using range=100 km due east (az = π/2).
+        // SPEC.1 (FR-TRK-045): a plot ~111 km away carrying the *same* ICAO
+        // address is evidence of a duplicate identity (two airframes emitting
+        // one address), not an authoritative association — hard-wiring it
+        // used to teleport the track. It must now fall through the gate and
+        // seed its own track; both carriers get the conflict flag.
         let far_plot =
             plot_with_identity(12.0, 100_000.0, std::f64::consts::PI / 2.0, 0o1234, icao);
         tracker.process_scan(Timestamp(12.0), &[far_plot]);
 
-        // The ICAO pre-sort must have associated the far plot directly:
-        // track still alive, same id, not coasting.
         assert_eq!(
             tracker.tracks().len(),
-            1,
-            "no ghost should appear from the ICAO-handled plot"
+            2,
+            "the far duplicate seeds its own track instead of teleporting the original"
         );
         assert_eq!(
             tracker.tracks()[0].id(),
             track_id,
-            "original track survives"
+            "original track survives under its id"
         );
+        let moved = (tracker.tracks()[0].position() - pos_before).norm();
+        assert!(
+            moved < 5_000.0,
+            "original track is not dragged toward the duplicate ({moved:.0} m)"
+        );
+
+        // One more revisit of the duplicate confirms the identity conflict on
+        // every carrier of the shared squawk/address.
+        let far_plot2 =
+            plot_with_identity(16.0, 100_000.0, std::f64::consts::PI / 2.0, 0o1234, icao);
+        tracker.process_scan(Timestamp(16.0), &[far_plot2]);
+        assert!(
+            tracker.tracks().iter().all(Track::identity_conflict),
+            "all carriers of a duplicated identity are flagged"
+        );
+    }
+
+    /// An ICAO-matched plot *inside* the kinematic gate is still associated
+    /// directly (the fast path survives SPEC.1 for the healthy case), and a
+    /// lone identity carries no conflict flag. REQ: FR-TRK-031, FR-TRK-045
+    #[test]
+    fn icao_match_inside_the_gate_still_associates_directly() {
+        let mut tracker = Tracker::new(config());
+        let icao: u32 = 0x3C_65_AC;
+        for k in 0..4 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[plot_with_identity(t, 50_000.0, 0.0, 0o1234, icao)],
+            );
+        }
+        assert_eq!(tracker.tracks().len(), 1, "one aircraft, one track");
         assert!(
             !tracker.tracks()[0].is_coasting(),
-            "ICAO-matched plot counts as a hit"
+            "in-gate ICAO plots keep hitting the track"
+        );
+        assert!(
+            !tracker.tracks()[0].identity_conflict(),
+            "a unique identity carries no conflict flag"
         );
     }
 
