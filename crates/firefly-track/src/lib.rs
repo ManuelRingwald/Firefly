@@ -16,6 +16,7 @@
 
 mod acceleration;
 mod association;
+mod clutter_map;
 mod gating;
 mod imm;
 mod jpda;
@@ -33,9 +34,10 @@ mod vertical;
 
 pub use acceleration::AccelerationEstimator;
 pub use association::{associate, Association};
+pub use clutter_map::ClutterMap;
 pub use gating::Gate;
 pub use imm::{Imm, ImmConfig};
-pub use jpda::joint_association_probabilities;
+pub use jpda::{joint_association_probabilities, joint_association_probabilities_local};
 pub use kalman::{LinearKalman, ProcessNoise};
 pub use kalman6::{
     constant_acceleration_transition, constant_velocity_transition6, coordinated_turn_transition6,

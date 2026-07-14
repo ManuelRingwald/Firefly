@@ -10,6 +10,32 @@
 
 ---
 
+## 🎯 Stand 2026-07-14 (SPEC.2 — Clutter-Karte + Reflexionen)
+
+- **Zuletzt aktualisiert:** 2026-07-14
+- **SPEC.2 (FR-TRK-046, ADR 0037):** Je Radar eine **räumliche
+  Clutter-Karte** (Polar-Raster 5 km × 64 Sektoren, exponentiell
+  vergessene Ereignisrate τ = 600 s, gelernt aus unassoziierten Plots,
+  snapshot-fähig); JPDA assoziiert jeden Track unter dem **lokalen λ**
+  seiner Zelle (`joint_association_probabilities_local` — Clutter-Term
+  hängt im Joint-Event am Track). **Reflexions-Heuristik:** Primary-only-
+  Neugeburt ±2° / ≥ 500 m hinter bestätigtem Track ⇒ Verdacht, nur
+  Bestätigungs-Schwelle +2 (verzögert, nie exekutiert; SSR löscht).
+  **Design-Korrektur unterwegs:** Erst-Entwurf ließ λ unter den Default
+  sinken — Regressions-Test riss (Gründungs-Plots echter Ziele kippten
+  eine knappe Assoziation); Wurzel: Event-only-Schätzer ohne Exposition
+  kann „wenig Evidenz" nicht von „sauber" trennen ⇒ **Floor = Default**,
+  nur Hotspot-Anhebung (Deckel 100×). 11 neue Tests, Gates grün
+  (53 Suiten). Kein Wire-/ICD-Bezug. Roadmap: **71 %**.
+- **Nächster Schritt:** **SPEC.2b** umsetzen (Betreiber-Entscheidung
+  2026-07-14: „Wir lassen nichts liegen, sondern arbeiten es sauber ab" —
+  **bereits freigegeben**, keine neue Ankündigungsrunde): Expositions-
+  Buchführung für die Clutter-Karte (Zellen zählen auch die Scan-
+  Exposition, damit λ in belegbar sauberen Regionen ehrlich **unter**
+  den Default sinken darf) + Metrik-Ausleitung. S3, ohne Prozent-Zuwachs
+  (71 % bleibt). Danach **FPL.0** ankündigen (72 %) und Freigabe
+  abwarten.
+
 ## 🎯 Stand 2026-07-14 (SPEC.1 — Duplikat-Identitäten + Koaleszenz)
 
 - **Zuletzt aktualisiert:** 2026-07-14

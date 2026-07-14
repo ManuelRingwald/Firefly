@@ -22,14 +22,50 @@
 use std::collections::BTreeMap;
 
 use firefly_core::{
-    ModeOfMovement, Plot, SensorId, SourceAges, SystemTrack, Timestamp, TrackId, PROVENANCE_FRESH_S,
+    DetectionKind, Measurement, ModeOfMovement, Plot, SensorId, SourceAges, SystemTrack, Timestamp,
+    TrackId, PROVENANCE_FRESH_S,
 };
 use firefly_geo::{Enu, LocalFrame};
+
+/// Azimuth tolerance (rad, ≈2°) for the multipath-reflection heuristic
+/// (SPEC.2, ADR 0037): a ghost echo appears near the true target's bearing.
+const REFLECTION_AZ_TOL_RAD: f64 = 0.035;
+/// A reflection sits *behind* the true target: require at least this much
+/// extra slant range before suspecting one (metres).
+const REFLECTION_MIN_RANGE_GAP_M: f64 = 500.0;
+/// Extra confirmation hits a reflection suspect must collect on top of
+/// `confirm_m` — suspicion slows a ghost down without executing a real
+/// aircraft that genuinely flies behind another.
+const REFLECTION_EXTRA_HITS: usize = 2;
+
+/// A track position (common tracking frame) as slant range / azimuth seen
+/// from a sensor site — the geometry both SPEC.2 heuristics reason in.
+/// Azimuth is clockwise from true north in [0, 2π), matching [`firefly_geo::Polar`].
+fn sensor_polar(
+    tracking_frame: &LocalFrame,
+    site: &LocalFrame,
+    east: f64,
+    north: f64,
+) -> (f64, f64) {
+    let geo = tracking_frame.enu_to_geodetic(&Enu::new(east, north, 0.0));
+    let local = site.geodetic_to_enu(&geo);
+    let range = (local.east * local.east + local.north * local.north).sqrt();
+    let az = local
+        .east
+        .atan2(local.north)
+        .rem_euclid(std::f64::consts::TAU);
+    (range, az)
+}
+
+/// Shortest angular distance between two azimuths in radians.
+fn azimuth_distance(a: f64, b: f64) -> f64 {
+    let d = (a - b).rem_euclid(std::f64::consts::TAU);
+    d.min(std::f64::consts::TAU - d)
+}
 use serde::{Deserialize, Serialize};
 
 use crate::gating::Gate;
 use crate::imm::ImmConfig;
-use crate::jpda::joint_association_probabilities;
 use crate::kalman::{LinearKalman, ProcessNoise};
 use crate::measurement::{tracking_measurement, CartesianMeasurement, SensorErrorModel};
 use crate::pda::ClutterModel;
@@ -243,6 +279,11 @@ pub struct Tracker {
     /// only after the quarantine — so the wire number space never silently
     /// collides the way a truncated `next_id` would after 65 536 births.
     track_numbers: TrackNumberPool,
+    /// Per-sensor spatial clutter maps (SPEC.2, ADR 0037), learned from the
+    /// plots that associate with nothing. Feeds the per-track local clutter
+    /// density into JPDA in place of the global constant.
+    #[serde(default)]
+    clutter_maps: BTreeMap<SensorId, crate::clutter_map::ClutterMap>,
     /// Data time of the previous scan, for the inter-scan gap (ADR 0012).
     prev_scan_time: Option<f64>,
     /// Last data time each sensor delivered plots, to estimate its scan period.
@@ -274,6 +315,7 @@ impl Tracker {
             tracks: Vec::new(),
             next_id: 1,
             track_numbers: TrackNumberPool::new(),
+            clutter_maps: BTreeMap::new(),
             prev_scan_time: None,
             sensor_last_scan: BTreeMap::new(),
             sensor_period: BTreeMap::new(),
@@ -296,6 +338,12 @@ impl Tracker {
     /// Only the confirmed tracks — the air picture worth reporting.
     pub fn confirmed_tracks(&self) -> impl Iterator<Item = &Track> {
         self.tracks.iter().filter(|t| t.is_confirmed())
+    }
+
+    /// Total learned clutter-map cells across all sensors (SPEC.2) —
+    /// observability hook for tests and future metrics.
+    pub fn clutter_cells_total(&self) -> usize {
+        self.clutter_maps.values().map(|m| m.cells_total()).sum()
     }
 
     /// Number of confirmed tracks.
@@ -574,7 +622,14 @@ impl Tracker {
         for track in &mut self.tracks {
             if track.status() == TrackStatus::Tentative {
                 let window = confirm_n as f64 * track.coast_reference(cadence);
-                if track.hits_within(window, t) >= confirm_m {
+                // SPEC.2: a reflection suspect needs extra evidence.
+                let required = confirm_m
+                    + if track.reflection_suspect() {
+                        REFLECTION_EXTRA_HITS
+                    } else {
+                        0
+                    };
+                if track.hits_within(window, t) >= required {
                     track.confirm();
                 }
             }
@@ -739,7 +794,14 @@ impl Tracker {
                 if track.status() == TrackStatus::Tentative {
                     let window =
                         confirm_n as f64 * track.expected_revisit(NOMINAL_REVISIT_INTERVAL);
-                    if track.hits_within(window, t) >= confirm_m {
+                    // SPEC.2: a reflection suspect needs extra evidence.
+                    let required = confirm_m
+                        + if track.reflection_suspect() {
+                            REFLECTION_EXTRA_HITS
+                        } else {
+                            0
+                        };
+                    if track.hits_within(window, t) >= required {
                         track.confirm();
                     }
                 }
@@ -885,8 +947,30 @@ impl Tracker {
                 continue;
             }
 
-            let mut betas =
-                joint_association_probabilities(&reference, &measurements, &gate, &clutter);
+            // SPEC.2 (FR-TRK-046): each track associates under the clutter
+            // density of the map cell it currently flies through, as seen
+            // from *this* sensor — hotspots make an unexplained plot
+            // probably-clutter, clean cells keep taking it seriously.
+            let sensor_model = self.config.sensors.get(&sensor);
+            let local_b: Vec<f64> = reference
+                .iter()
+                .map(|f| match (self.clutter_maps.get(&sensor), sensor_model) {
+                    (Some(map), Some(model)) => {
+                        let pos = f.position();
+                        let (range, az) =
+                            sensor_polar(&self.config.tracking_frame, &model.frame, pos[0], pos[1]);
+                        map.density(range, az, t, model.scan_period, clutter.density)
+                    }
+                    _ => clutter.density,
+                })
+                .collect();
+            let mut betas = crate::jpda::joint_association_probabilities_local(
+                &reference,
+                &measurements,
+                &gate,
+                &clutter,
+                &local_b,
+            );
             // SPEC.1 (FR-TRK-045): prune the shared-plot hypotheses of
             // statistically unresolvable track pairs before folding — the
             // guard against JPDA track coalescence.
@@ -952,6 +1036,18 @@ impl Tracker {
                 // whole 16-bit space in use or quarantined there is no honest
                 // number to report this track under, so initiation is declined
                 // rather than emitting a colliding I062/040.
+                // SPEC.2 (FR-TRK-046): a plot that fell in no track's gate is
+                // clutter *evidence* — feed the sensor's spatial map. A real
+                // aircraft contributes at most its founding plot before its
+                // track exists; the map's slow time constant washes that out
+                // while persistent hotspots accumulate.
+                if let Measurement::Polar(polar) = items[orig_mi].0.measurement {
+                    self.clutter_maps.entry(sensor).or_default().observe(
+                        polar.range,
+                        polar.azimuth,
+                        t,
+                    );
+                }
                 let Some(number) = self.track_numbers.allocate(t) else {
                     tracing::warn!(
                         time = t,
@@ -965,6 +1061,40 @@ impl Tracker {
                 self.next_id += 1;
                 let mut track = Track::new(id, number, imm, t);
                 let founding = &items[orig_mi].0;
+                // SPEC.2 (FR-TRK-046): multipath-reflection heuristic. A
+                // primary-only newborn near a confirmed track's bearing but
+                // at greater range from the same radar is a classic ghost
+                // echo. It is not discarded — suspicion only raises its
+                // confirmation bar; a real aircraft behind another still
+                // confirms, just more slowly.
+                if founding.kind == DetectionKind::Primary {
+                    if let (Measurement::Polar(polar), Some(model)) =
+                        (founding.measurement, self.config.sensors.get(&sensor))
+                    {
+                        let suspect = self.tracks.iter().any(|existing| {
+                            if !existing.is_confirmed() {
+                                return false;
+                            }
+                            let pos = existing.position();
+                            let (range, az) = sensor_polar(
+                                &self.config.tracking_frame,
+                                &model.frame,
+                                pos[0],
+                                pos[1],
+                            );
+                            range + REFLECTION_MIN_RANGE_GAP_M < polar.range
+                                && azimuth_distance(az, polar.azimuth) < REFLECTION_AZ_TOL_RAD
+                        });
+                        if suspect {
+                            track.set_reflection_suspect(true);
+                            tracing::debug!(
+                                track = id.0,
+                                "primary-only newborn behind a confirmed track on the same \
+                                 bearing: multipath-reflection suspect, confirmation bar raised"
+                            );
+                        }
+                    }
+                }
                 track.update_identity(&founding.mode_ac, t);
                 track.record_hit_from(sensor, t);
                 // Per-technology provenance bookkeeping (ADR 0027): the founding
@@ -1230,6 +1360,103 @@ mod tests {
             "tracks stay on their targets instead of swinging toward the midpoint \
              (worst settled separation {min_separation:.0} m, truth 150 m)"
         );
+    }
+
+    /// Unassociated plots feed the sensor's spatial clutter map; associated
+    /// plots of a tracked target do not keep feeding it. REQ: FR-TRK-046
+    #[test]
+    fn clutter_map_learns_from_unassociated_plots() {
+        let mut tracker = Tracker::new(config());
+        assert_eq!(tracker.clutter_cells_total(), 0);
+        // Alternating far-apart positions: each seeds a tentative that dies,
+        // none associates — pure clutter evidence.
+        for k in 0..8 {
+            let t = k as f64 * 4.0;
+            let az = if k % 2 == 0 { 0.0 } else { 1.5 };
+            tracker.process_scan(Timestamp(t), &[plot(t, 30_000.0, az)]);
+        }
+        assert!(
+            tracker.clutter_cells_total() >= 2,
+            "both hotspot cells learned, got {}",
+            tracker.clutter_cells_total()
+        );
+    }
+
+    /// A primary-only newborn behind a confirmed track on the same bearing
+    /// is a reflection suspect: it still confirms — but only after the
+    /// raised evidence bar (confirm_m + 2 instead of confirm_m).
+    /// REQ: FR-TRK-046
+    #[test]
+    fn reflection_suspect_confirms_late_but_is_not_executed() {
+        let mut tracker = Tracker::new(config());
+        // A confirmed SSR carrier at 50 km due north.
+        for k in 0..4 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[plot_with_identity(t, 50_000.0, 0.0, 0o1234, 0xAB_CD_EF)],
+            );
+        }
+        assert_eq!(tracker.confirmed_count(), 1);
+
+        // A primary-only echo appears 3 km behind it on the same bearing.
+        for k in 4..12 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[
+                    plot_with_identity(t, 50_000.0, 0.0, 0o1234, 0xAB_CD_EF),
+                    plot(t, 53_000.0, 0.0005),
+                ],
+            );
+            let ghost = tracker
+                .tracks()
+                .iter()
+                .find(|tr| tr.icao_address().is_none())
+                .expect("ghost track exists");
+            assert!(ghost.reflection_suspect(), "suspect from birth");
+            // With confirm 3-of-5 a normal track confirms on its 3rd hit
+            // (k = 6); the suspect must still be tentative there…
+            if k == 6 {
+                assert_eq!(
+                    ghost.status(),
+                    TrackStatus::Tentative,
+                    "suspicion raises the confirmation bar"
+                );
+            }
+        }
+        // …but persistent evidence still confirms it: a real aircraft that
+        // genuinely flies behind another is delayed, not executed.
+        assert_eq!(tracker.confirmed_count(), 2, "confirmed after extra hits");
+    }
+
+    /// The same geometry with an SSR identity on the second target is no
+    /// reflection suspect — the heuristic only models primary-only ghosts.
+    /// REQ: FR-TRK-046
+    #[test]
+    fn ssr_target_behind_another_is_no_suspect() {
+        let mut tracker = Tracker::new(config());
+        for k in 0..4 {
+            let t = k as f64 * 4.0;
+            tracker.process_scan(
+                Timestamp(t),
+                &[plot_with_identity(t, 50_000.0, 0.0, 0o1234, 0xAB_CD_EF)],
+            );
+        }
+        let t = 16.0;
+        tracker.process_scan(
+            Timestamp(t),
+            &[
+                plot_with_identity(t, 50_000.0, 0.0, 0o1234, 0xAB_CD_EF),
+                plot_with_identity(t, 53_000.0, 0.0005, 0o4321, 0x12_34_56),
+            ],
+        );
+        let second = tracker
+            .tracks()
+            .iter()
+            .find(|tr| tr.icao_address() == Some(0x12_34_56))
+            .expect("second track exists");
+        assert!(!second.reflection_suspect(), "SSR target is no suspect");
     }
 
     /// A new track is born tentative, then confirmed once M-of-N hits accrue.

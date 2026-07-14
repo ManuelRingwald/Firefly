@@ -207,6 +207,13 @@ pub struct Track {
     /// not as a merge candidate. Recomputed every fusion opportunity.
     #[serde(default)]
     identity_conflict: bool,
+    /// Set at birth when this track looks like a **multipath reflection** of
+    /// an existing confirmed track (SPEC.2): similar azimuth from the same
+    /// radar, greater range, primary-only. A suspect is not discarded — it
+    /// faces a stricter confirmation threshold; gaining an SSR identity
+    /// clears the suspicion (this heuristic only models PSR-only ghosts).
+    #[serde(default)]
+    reflection_suspect: bool,
 }
 
 impl Track {
@@ -236,6 +243,7 @@ impl Track {
             geometric_time: None,
             acceleration: None,
             identity_conflict: false,
+            reflection_suspect: false,
         }
     }
 
@@ -372,6 +380,16 @@ impl Track {
     /// recomputed every fusion opportunity).
     pub fn set_identity_conflict(&mut self, conflict: bool) {
         self.identity_conflict = conflict;
+    }
+
+    /// Whether this track is under multipath-reflection suspicion (SPEC.2).
+    pub fn reflection_suspect(&self) -> bool {
+        self.reflection_suspect
+    }
+
+    /// Mark the track as a reflection suspect at birth (tracker-owned).
+    pub fn set_reflection_suspect(&mut self, suspect: bool) {
+        self.reflection_suspect = suspect;
     }
 
     /// Most recently reported barometric flight level (feet), if known.
@@ -579,6 +597,11 @@ impl Track {
         // last reply only, so every associated plot overwrites it — set and
         // cleared alike (FR-TRK-036).
         self.spi = mode_ac.spi;
+        if mode_ac.mode_3a.is_some() || mode_ac.icao_address.is_some() {
+            // An SSR/Mode-S identity clears reflection suspicion: the SPEC.2
+            // heuristic only models primary-only multipath ghosts.
+            self.reflection_suspect = false;
+        }
         if mode_ac.mode_3a.is_some() {
             self.mode_3a = mode_ac.mode_3a;
         }

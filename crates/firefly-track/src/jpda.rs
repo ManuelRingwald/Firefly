@@ -71,8 +71,30 @@ pub fn joint_association_probabilities(
     gate: &Gate,
     clutter: &ClutterModel,
 ) -> Vec<Vec<f64>> {
+    let densities = vec![clutter.density; tracks.len()];
+    joint_association_probabilities_local(tracks, measurements, gate, clutter, &densities)
+}
+
+/// [`joint_association_probabilities`] with a **per-track local clutter
+/// density** (SPEC.2, ADR 0037): `local_density[i]` replaces the global
+/// `clutter.density` in track `i`'s no-detection factor. The clutter term
+/// enters the joint-event weights per *track* (the factor of an unassigned
+/// track), so the track's own neighbourhood — the cell of the spatial
+/// clutter map it currently flies through — is the honest granularity: a
+/// track in a hotspot treats an unexplained plot as probably-clutter, a
+/// track in a clean cell takes the same plot seriously.
+///
+/// REQ: FR-TRK-046
+pub fn joint_association_probabilities_local(
+    tracks: &[LinearKalman],
+    measurements: &[CartesianMeasurement],
+    gate: &Gate,
+    clutter: &ClutterModel,
+    local_density: &[f64],
+) -> Vec<Vec<f64>> {
     let t = tracks.len();
     let m = measurements.len();
+    assert_eq!(local_density.len(), t, "one local density per track");
 
     if t == 0 {
         return Vec::new();
@@ -82,8 +104,12 @@ pub fn joint_association_probabilities(
     }
 
     let p_gate = 1.0 - (-gate.threshold / 2.0).exp();
-    let b = clutter.density * (1.0 - clutter.detection_probability * p_gate)
-        / clutter.detection_probability;
+    let b: Vec<f64> = local_density
+        .iter()
+        .map(|&density| {
+            density * (1.0 - clutter.detection_probability * p_gate) / clutter.detection_probability
+        })
+        .collect();
 
     // Validation matrix and per-pair likelihoods.
     let mut valid = vec![vec![false; m]; t];
@@ -140,7 +166,7 @@ pub fn joint_association_probabilities(
             meas_idxs: &meas_idxs,
             valid: &valid,
             lambda: &lambda,
-            b,
+            b: &b,
             weights: vec![vec![0.0; meas_idxs.len() + 1]; track_idxs.len()],
             total: 0.0,
         };
@@ -175,7 +201,8 @@ struct ClusterEnumerator<'a> {
     meas_idxs: &'a [usize],
     valid: &'a [Vec<bool>],
     lambda: &'a [Vec<f64>],
-    b: f64,
+    /// Per-track no-detection factor, indexed by the *global* track index.
+    b: &'a [f64],
     /// `weights[local_track][0]` = accumulated "no detection" weight;
     /// `weights[local_track][1 + local_plot]` = accumulated weight of that pairing.
     weights: Vec<Vec<f64>>,
@@ -213,7 +240,7 @@ impl ClusterEnumerator<'_> {
         let mut weight = 1.0;
         for (li, &i) in self.track_idxs.iter().enumerate() {
             weight *= match assignment[li] {
-                usize::MAX => self.b,
+                usize::MAX => self.b[i],
                 lj => self.lambda[i][self.meas_idxs[lj]],
             };
         }
@@ -447,6 +474,38 @@ mod coalescence_tests {
         for row in &betas {
             assert!((row.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         }
+    }
+
+    /// The per-track local density steers the no-detection weight: the same
+    /// geometry under a 100× hotter local λ yields a clearly higher β₀ —
+    /// an unexplained plot in a hotspot is probably clutter. REQ: FR-TRK-046
+    #[test]
+    fn local_density_raises_beta0_in_hotspots() {
+        let reference = vec![track_at(0.0, 10_000.0)];
+        let gate = crate::Gate::from_probability(0.9999);
+        let clutter = ClutterModel::new(1e-9, 0.95);
+        let measurements = vec![measurement(50.0)];
+        let clean = joint_association_probabilities_local(
+            &reference,
+            &measurements,
+            &gate,
+            &clutter,
+            &[1e-9],
+        );
+        let hot = joint_association_probabilities_local(
+            &reference,
+            &measurements,
+            &gate,
+            &clutter,
+            &[1e-7],
+        );
+        assert!(
+            hot[0][0] > 10.0 * clean[0][0],
+            "hotspot raises beta0: {} vs {}",
+            hot[0][0],
+            clean[0][0]
+        );
+        assert!((hot[0].iter().sum::<f64>() - 1.0).abs() < 1e-12);
     }
 
     /// A well-separated pair is untouched — the guard is a no-op in

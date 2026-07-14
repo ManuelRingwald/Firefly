@@ -422,6 +422,21 @@ Modelle), **modellbedingtes Filtern** (jedes Modell prädiziert + aktualisiert),
 **Modellwahrscheinlichkeits-Update** (die Likelihoods justieren `μ` neu),
 **Kombination** (gewichtetes Zusammenführen zur Ausgabe).
 
+**Clutter-Karte (räumlich)**
+Ein per-Radar gelerntes polares Raster der lokalen Falschplot-Dichte λ
+(SPEC.2, ADR 0037): Zellen, in denen sich unassoziierte Plots häufen
+(Windpark, Straße, Wetter), melden der Assoziation ein höheres λ — ein
+unerklärter Plot dort ist wahrscheinlich Clutter. Ehrlichkeits-Grenze:
+ohne Expositions-Buchführung hebt die Karte λ nur **an** (Deckel 100×),
+nie unter den Default — Ereignis-Abwesenheit beweist keine Sauberkeit.
+
+**Multipath-Reflexion (Radar-Geist)**
+Ein starkes Ziel nahe einer Reflektorfläche (Gebäude, Gelände) erzeugt ein
+Echo über den Umweg — im Lagebild ein Geisterziel auf ähnlichem Azimut
+**hinter** dem echten Ziel, typisch ohne SSR-Antwort. Fireflys Heuristik
+(SPEC.2) markiert solche Neugeburten als Verdacht und hebt nur ihre
+Bestätigungs-Schwelle — verzögern statt exekutieren.
+
 **Track-Koaleszenz (JPDA)**
 Die bekannte strukturelle Schwäche probabilistischer Assoziation: teilen
 sich zwei dauerhaft unauflösbare Tracks jeden Plot anteilig (β), driften
