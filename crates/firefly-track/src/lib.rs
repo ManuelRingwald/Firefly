@@ -20,6 +20,7 @@ mod gating;
 mod imm;
 mod jpda;
 mod kalman;
+mod kalman6;
 mod measurement;
 mod metrics;
 mod motion;
@@ -36,6 +37,10 @@ pub use gating::Gate;
 pub use imm::{Imm, ImmConfig};
 pub use jpda::joint_association_probabilities;
 pub use kalman::{LinearKalman, ProcessNoise};
+pub use kalman6::{
+    constant_acceleration_transition, constant_velocity_transition6, coordinated_turn_transition6,
+    JerkNoise, LinearKalman6,
+};
 pub use measurement::{convert_plot, tracking_measurement, CartesianMeasurement, SensorErrorModel};
 pub use metrics::{Rmse, TrackContinuity};
 pub use motion::MotionModel;
