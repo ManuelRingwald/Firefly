@@ -227,6 +227,61 @@ impl ClusterEnumerator<'_> {
     }
 }
 
+/// Statistical-resolvability threshold for the coalescence guard, as a
+/// squared Mahalanobis distance between two tracks' positions under their
+/// combined position covariance. Pairs closer than this are at risk of
+/// **track coalescence** — the known structural JPDA weakness where two
+/// unresolved tracks share every plot probabilistically and drift onto a
+/// common midpoint (SPEC.1, ADR 0036).
+const COALESCENCE_D2: f64 = 4.0; // 2σ combined
+
+/// **Coalescence guard** (SPEC.1): decouple track pairs that are too close
+/// to be statistically resolved.
+///
+/// JPDA's probability-weighted sharing is exactly right for an *occasional*
+/// ambiguous plot, but for a persistently unresolved pair it mixes both
+/// targets' plots into both tracks every scan, and the two estimates
+/// collapse onto their midpoint. The standard remedy family is hypothesis
+/// pruning; this guard implements its simplest deterministic member: for
+/// every pair of tracks whose predicted positions lie within
+/// [`COALESCENCE_D2`] of each other (combined covariance), each **shared**
+/// measurement is kept only by the track that claims it more strongly — the
+/// other track's β for that measurement is moved to its no-detection weight
+/// `β_0`. Rows keep summing to 1; unshared measurements and distant track
+/// pairs are untouched, so the guard is a no-op in ordinary traffic.
+///
+/// Ties (equal β) resolve to the lower track index — deterministic
+/// (ADR 0003).
+///
+/// REQ: FR-TRK-045
+pub fn decouple_coalescing_pairs(reference: &[LinearKalman], betas: &mut [Vec<f64>]) {
+    let n = reference.len().min(betas.len());
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = reference[i].position() - reference[j].position();
+            let s = reference[i].position_covariance() + reference[j].position_covariance();
+            let Some(s_inv) = s.try_inverse() else {
+                continue; // degenerate covariance: leave the pair alone
+            };
+            let d2 = (d.transpose() * s_inv * d)[(0, 0)];
+            if d2 >= COALESCENCE_D2 {
+                continue; // statistically resolved — JPDA sharing is fine
+            }
+            // Unresolvable pair: every shared measurement goes exclusively
+            // to the stronger claimant.
+            let m_count = betas[i].len().min(betas[j].len());
+            for m in 1..m_count {
+                if betas[i][m] > 0.0 && betas[j][m] > 0.0 {
+                    let loser = if betas[j][m] > betas[i][m] { i } else { j };
+                    let moved = betas[loser][m];
+                    betas[loser][m] = 0.0;
+                    betas[loser][0] += moved;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,5 +402,65 @@ mod tests {
 
         let betas = joint_association_probabilities(&tracks, &[], &gate, &clutter);
         assert_eq!(betas, vec![vec![1.0], vec![1.0]]);
+    }
+}
+
+#[cfg(test)]
+mod coalescence_tests {
+    use super::*;
+    use nalgebra::{Matrix2, Matrix4, Vector2, Vector4};
+
+    fn track_at(east: f64, pos_var: f64) -> LinearKalman {
+        LinearKalman {
+            x: Vector4::new(east, 0.0, 0.0, 0.0),
+            p: Matrix4::identity() * pos_var,
+        }
+    }
+
+    fn measurement(east: f64) -> CartesianMeasurement {
+        CartesianMeasurement {
+            z: Vector2::new(east, 0.0),
+            r: Matrix2::identity() * 100.0,
+        }
+    }
+
+    /// An unresolvable pair sharing two plots is decoupled: each track keeps
+    /// exclusively the plot it claims more strongly, the surrendered mass
+    /// moves to β₀, rows still sum to 1. REQ: FR-TRK-045
+    #[test]
+    fn unresolvable_pair_gets_exclusive_assignments() {
+        // 100 m apart with σ_pos = 300 m each → d² ≈ 0.056 ≪ 4.
+        let reference = vec![track_at(0.0, 90_000.0), track_at(100.0, 90_000.0)];
+        let gate = crate::Gate::from_probability(0.9999);
+        let clutter = ClutterModel::new(1e-9, 0.95);
+        let measurements = vec![measurement(0.0), measurement(100.0)];
+        let mut betas = joint_association_probabilities(&reference, &measurements, &gate, &clutter);
+        // Before: both tracks share both plots.
+        assert!(betas[0][1] > 0.0 && betas[0][2] > 0.0);
+        assert!(betas[1][1] > 0.0 && betas[1][2] > 0.0);
+
+        decouple_coalescing_pairs(&reference, &mut betas);
+
+        // After: plot 1 belongs to track 0, plot 2 to track 1, exclusively.
+        assert!(betas[0][1] > 0.0 && betas[1][1] == 0.0, "plot 1 → track 0");
+        assert!(betas[1][2] > 0.0 && betas[0][2] == 0.0, "plot 2 → track 1");
+        for row in &betas {
+            assert!((row.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        }
+    }
+
+    /// A well-separated pair is untouched — the guard is a no-op in
+    /// ordinary traffic. REQ: FR-TRK-045
+    #[test]
+    fn resolved_pair_is_left_alone() {
+        // 5 km apart with σ_pos = 100 m each → d² ≫ 4.
+        let reference = vec![track_at(0.0, 10_000.0), track_at(5_000.0, 10_000.0)];
+        let gate = crate::Gate::from_probability(0.9999);
+        let clutter = ClutterModel::new(1e-9, 0.95);
+        let measurements = vec![measurement(0.0), measurement(5_000.0)];
+        let mut betas = joint_association_probabilities(&reference, &measurements, &gate, &clutter);
+        let before = betas.clone();
+        decouple_coalescing_pairs(&reference, &mut betas);
+        assert_eq!(betas, before);
     }
 }
