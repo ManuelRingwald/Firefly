@@ -432,6 +432,14 @@ nicht): erst eine **reif** beobachtete ruhige Region (≥ 1200 s) darf λ
 ehrlich **unter** den Default senken (bis 0,1×) — vorher gilt: Ereignis-
 Abwesenheit allein beweist keine Sauberkeit (Deckel bleibt 100×).
 
+**Korrelation (Flugplan ↔ Track)**
+Das Zusammenführen von Radarziel und Flugplan: „dieses Ziel **ist** Flug
+DLH123" — die Grundlage für Flugstreifen, Freigaben und Konfliktprüfung.
+Läuft per ADR 0038 **zentral im SDPS** (Firefly), damit alle Arbeitsplätze
+dieselbe Zuordnung sehen; das Ergebnis geht als I062/390 in den Strom
+(FPL.2). Schlüssel-Disziplin nach der Weeze-Lektion: Callsign zuerst,
+Squawk nur bei Eindeutigkeit, nie bei Identitäts-Konflikt, nie Code 1000.
+
 **Multipath-Reflexion (Radar-Geist)**
 Ein starkes Ziel nahe einer Reflektorfläche (Gebäude, Gelände) erzeugt ein
 Echo über den Umweg — im Lagebild ein Geisterziel auf ähnlichem Azimut

@@ -10,6 +10,28 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (FPL.0 — Korrelations-ADR + Wayfinder-Abstimmung)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **FPL.0 (ADR 0038, Status „vorgeschlagen"):** Grundsatzentscheidung
+  geschrieben — **die Flugplan-Korrelation läuft zentral im SDPS
+  (Firefly)**, nicht am CWP: eine Zuordnung für alle Arbeitsplätze
+  (widersprüchliche Labels bei der Übergabe wären gefährlich),
+  ARTAS-konsistent, und die Zutaten (I062/245, Squawk,
+  `identity_conflict` aus SPEC.1, Kinematik) liegen im Tracker. Wayfinder
+  zeigt/bedient (manuelle Kommandos via API in FPL.2), Anzeige-
+  Mandantierung bleibt dort. Korrelations-Regeln aus der Weeze-Notiz
+  verbindlich übernommen (Callsign-first; Squawk nur bei Eindeutigkeit,
+  nie bei `identity_conflict`, nie Code 1000; räumlich-zeitlich
+  plausibilisiert; Duplikat-Beobachtbarkeit). **Abstimmung: Wayfinder
+  #244** (`from-firefly`, Vorbedingung für deren EFS-1 — das ADR wird
+  mit der Bestätigung ratifiziert). Kein Code, kein ICD-Bezug.
+  Roadmap: **72 %**.
+- **Nächster Schritt:** **FPL.1** ankündigen — minimaler FDPS-Eingangs-
+  Kontrakt + Code/Callsign-Korrelation nach den ADR-0038-Regeln (S5,
+  76 %) — und Freigabe abwarten. Sinnvoll erst nach Rückmeldung auf
+  Wayfinder #244 (EFS-Mindestanforderungen fließen in den Kontrakt).
+
 ## 🎯 Stand 2026-07-14 (SPEC.2b — Expositions-Buchführung für die Clutter-Karte)
 
 - **Zuletzt aktualisiert:** 2026-07-14
