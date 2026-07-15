@@ -297,11 +297,29 @@ schlimmer als ein fehlendes): **Callsign zuerst** (normalisiert);
 keinen `identity_conflict` trägt, der Code nicht Conspicuity 1000 ist und
 die Erwartungszeit plausibel liegt (±45 min); jede Verweigerung zählt
 sichtbar (`firefly_correlation_refused`). Die Korrelation läuft
-**zustandslos je Output-Tick** am Ausgabe-Rand (nach der QNH-Korrektur);
-der Tracker-Kern bleibt flugplan-frei. Ergebnis auf dem WS-JSON:
+**je Output-Tick** am Ausgabe-Rand (nach der QNH-Korrektur); der
+Tracker-Kern bleibt flugplan-frei. Ergebnis auf dem WS-JSON:
 `SystemTrack.flight_plan` (`{callsign, departure?, destination?}`) und
-`SystemTrack.identity_conflict` — beide **additiv**; CAT062 unberührt
-(I062/390 = FPL.2, ebenso gehaltener Zustand + manuelle Übersteuerung).
+`SystemTrack.identity_conflict` — beide **additiv** — und seit FPL.2 auf
+dem CAT062-Draht als **I062/390** (FRN 21: CSN/DEP/DST, ICD 3.7.0,
+additiv; nur bei korreliertem Track).
+
+**Manuelle Korrelation (FPL.2, ADR 0039):** Der Lotse (via Wayfinder)
+kann die Zuordnung übersteuern — manuell schlägt Automatik:
+
+| Endpunkt | Wirkung |
+|----------|---------|
+| `POST /correlation` (JSON `{"track_number": N, "callsign": "DLH123"}`) | pinnt den Plan auf den Track (422 bei unbekanntem Callsign) |
+| `POST /correlation` (JSON `{"track_number": N}`) | pinnt den Track auf **unkorreliert** — die Automatik darf das entfernte Label nicht wieder anbringen |
+| `DELETE /correlation/{N}` | Pin löschen, Automatik übernimmt wieder (idempotent) |
+| `GET /correlation` | aktuelle Pins auflisten |
+
+Ohne konfigurierte Flugpläne antworten Mutationen **409**. Auth: dasselbe
+Token wie `/ws` (`FIREFLY_WS_TOKEN`), aber **nur** als
+`Authorization: Bearer`-Header (kein Query-Fallback — Query-Strings landen
+in Logs); Origin-Check nur bei mitgesendetem `Origin`-Header. **Pins
+sterben mit dem TSE ihres Tracks** (Draht-Nummern werden wiederverwendet)
+und sind **flüchtig** (Neustart verliert sie; Persistenz = HA.1).
 
 | Variable | Typ | Default | Bedeutung |
 |----------|-----|---------|-----------|
@@ -485,6 +503,7 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_flight_plans` | gauge | **FPL.1:** Anzahl geladener Flugpläne (`FIREFLY_FLIGHT_PLANS`) |
 | `firefly_tracks_correlated` | gauge | **FPL.1:** Tracks mit Flugplan-Korrelation im letzten Output-Tick |
 | `firefly_correlation_refused` | gauge | **FPL.1:** sichtbar verweigerte Squawk-Korrelationen im letzten Output-Tick (Duplikat unter Plänen, Conspicuity 1000, Identitätskonflikt) |
+| `firefly_correlation_manual` | gauge | **FPL.2:** manuelle Korrelations-Pins in Kraft auf lebenden Tracks im letzten Output-Tick |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |

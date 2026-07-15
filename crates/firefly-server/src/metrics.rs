@@ -118,6 +118,9 @@ pub struct Metrics {
     /// conspicuity 1000 or identity conflict) — the "needs manual
     /// correlation" signal (ADR 0038 rule 4).
     pub correlation_refused: AtomicU64,
+    /// Manual correlation overrides in effect on live tracks in the latest
+    /// snapshot (FPL.2, FR-TRK-048).
+    pub correlation_manual: AtomicU64,
 
     // --- Registration shadow monitor (REG.2a, ADR 0034) ---
     /// Total number of registration bias estimates produced by the shadow
@@ -372,6 +375,13 @@ pub fn render(metrics: &Metrics) -> String {
         "gauge",
         "Squawk-correlation refusals in the latest snapshot (duplicate/conspicuity/identity conflict).",
         metrics.correlation_refused.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_correlation_manual",
+        "gauge",
+        "Manual correlation overrides in effect on live tracks in the latest snapshot (FPL.2).",
+        metrics.correlation_manual.load(Ordering::Relaxed) as f64,
     );
     write_metric(
         &mut out,
@@ -634,6 +644,11 @@ mod tests {
             .lock()
             .unwrap()
             .insert("EDDF".into(), 1008.0);
+        metrics.clutter_cells.store(64, Ordering::Relaxed);
+        metrics.flight_plans.store(3, Ordering::Relaxed);
+        metrics.tracks_correlated.store(2, Ordering::Relaxed);
+        metrics.correlation_refused.store(1, Ordering::Relaxed);
+        metrics.correlation_manual.store(1, Ordering::Relaxed);
 
         let text = render(&metrics);
 
@@ -689,6 +704,12 @@ mod tests {
         assert!(text.contains("firefly_meteo_qnh_regions 2"));
         assert!(text.contains("firefly_meteo_qnh_hpa{region=\"EDDF\"} 1008"));
         assert!(text.contains("# TYPE firefly_meteo_qnh_hpa gauge"));
+        assert!(text.contains("firefly_clutter_cells 64"));
+        assert!(text.contains("firefly_flight_plans 3"));
+        assert!(text.contains("firefly_tracks_correlated 2"));
+        assert!(text.contains("firefly_correlation_refused 1"));
+        assert!(text.contains("firefly_correlation_manual 1"));
+        assert!(text.contains("# TYPE firefly_correlation_manual gauge"));
     }
 
     /// Without any registration estimate the labelled bias gauges are absent —

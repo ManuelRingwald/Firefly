@@ -301,10 +301,15 @@ pub struct RegistrationTick {
     pub applied: Vec<(SensorId, f64, f64)>,
 }
 
-/// Correct a track's barometric altitude to the regional QNH at its position
-/// (VERT.2). Only an **observed** regional QNH corrects; the
-/// standard-atmosphere fallback leaves the pressure altitude untouched and
-/// the flag cleared — I062/135 then honestly reports an uncorrected value.
+/// Manual correlation overrides (FPL.2, ADR 0039), shared between the HTTP
+/// command edge and the live-tracker task: wire track number → pinned plan
+/// callsign (`Some`) or pinned **uncorrelated** (`None` — the automatics must
+/// not re-apply a label the controller just removed). No entry = automatic
+/// correlation. Entries are dropped when their track ends (TSE): wire track
+/// numbers are pool-managed and **reused**, so a stale override would label
+/// the next aircraft that inherits the number.
+pub type ManualOverrides = Arc<std::sync::Mutex<std::collections::BTreeMap<u16, Option<String>>>>;
+
 /// Correlate one output track against the flight plans (FPL.1, ADR 0038) —
 /// the central output-stage function: one association for every consumer.
 /// Returns the outcome so the caller can count (observability, rule 4).
@@ -328,6 +333,10 @@ fn apply_correlation(
     outcome
 }
 
+/// Correct a track's barometric altitude to the regional QNH at its position
+/// (VERT.2). Only an **observed** regional QNH corrects; the
+/// standard-atmosphere fallback leaves the pressure altitude untouched and
+/// the flag cleared — I062/135 then honestly reports an uncorrected value.
 fn apply_qnh(track: &mut SystemTrack, meteo: &QnhService) {
     let Some(pressure_altitude_ft) = track.barometric_altitude_ft else {
         return;
@@ -365,12 +374,19 @@ pub struct LiveTracker {
     /// Flight plans + correlation rules (FPL.1, ADR 0038), applied at the
     /// output stage like the QNH.
     correlation: Option<CorrelationService>,
+    /// Manual correlation overrides shared with the HTTP command edge
+    /// (FPL.2, ADR 0039). Manual beats automatic; entries are garbage-
+    /// collected when their track ends (see [`ManualOverrides`]).
+    manual_overrides: Option<ManualOverrides>,
     /// Tracks correlated in the most recent snapshot (gauge semantics).
     correlated_last: u64,
     /// Squawk-refusal decisions in the most recent snapshot (duplicate /
     /// conspicuity / identity conflict) — the "needs manual correlation"
     /// signal (gauge semantics).
     refused_last: u64,
+    /// Manual overrides in effect on live tracks in the most recent snapshot
+    /// (gauge semantics).
+    manual_last: u64,
     /// The freshest plot data-time seen, the instant snapshots are projected to.
     latest_data_time: Option<f64>,
     /// Total plots handed to the tracker (for metrics, AP9.4c-4).
@@ -387,8 +403,10 @@ impl LiveTracker {
             applier: None,
             meteo: None,
             correlation: None,
+            manual_overrides: None,
             correlated_last: 0,
             refused_last: 0,
+            manual_last: 0,
             latest_data_time: None,
             plots_ingested: 0,
         }
@@ -402,29 +420,37 @@ impl LiveTracker {
         self
     }
 
-    /// Attach the QNH service (VERT.2): each published snapshot's barometric
-    /// altitude is corrected to the regional QNH at the track position —
-    /// where one is **observed**; otherwise the pressure altitude passes
-    /// through with the QNH flag cleared (never a silent standard-atmosphere
-    /// claim).
     /// Attach the flight-plan correlation service (FPL.1).
     pub fn with_flight_plans(mut self, service: CorrelationService) -> Self {
         self.correlation = Some(service);
         self
     }
 
-    /// Correlated tracks / squawk refusals of the latest snapshot, and the
-    /// number of loaded plans — the metrics surface.
-    pub fn correlation_stats(&self) -> (u64, u64, u64) {
+    /// Attach the shared manual-override map (FPL.2): the HTTP command edge
+    /// writes it, each snapshot reads it — manual beats automatic.
+    pub fn with_manual_overrides(mut self, overrides: ManualOverrides) -> Self {
+        self.manual_overrides = Some(overrides);
+        self
+    }
+
+    /// The metrics surface: loaded plans, plus the latest snapshot's
+    /// correlated tracks, squawk refusals and manual overrides in effect.
+    pub fn correlation_stats(&self) -> (u64, u64, u64, u64) {
         (
             self.correlation
                 .as_ref()
                 .map_or(0, |c| c.plans_total() as u64),
             self.correlated_last,
             self.refused_last,
+            self.manual_last,
         )
     }
 
+    /// Attach the QNH service (VERT.2): each published snapshot's barometric
+    /// altitude is corrected to the regional QNH at the track position —
+    /// where one is **observed**; otherwise the pressure altitude passes
+    /// through with the QNH flag cleared (never a silent standard-atmosphere
+    /// claim).
     pub fn with_meteo(mut self, service: QnhService) -> Self {
         self.meteo = Some(service);
         self
@@ -560,18 +586,48 @@ impl LiveTracker {
             }
         }
         if let Some(correlation) = &self.correlation {
-            let (mut correlated, mut refused) = (0u64, 0u64);
+            let (mut correlated, mut refused, mut manual) = (0u64, 0u64, 0u64);
+            let mut overrides = self
+                .manual_overrides
+                .as_ref()
+                .map(|o| o.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
             for track in &mut tracks {
-                match apply_correlation(track, correlation, t) {
-                    CorrelationOutcome::ByCallsign(_) | CorrelationOutcome::BySquawk(_) => {
+                // Manual beats automatic (FPL.2, ADR 0039): a pinned callsign
+                // labels the track with that plan, a pinned `None` keeps it
+                // honestly uncorrelated (the automatics must not re-apply a
+                // label the controller just removed).
+                let pinned = overrides
+                    .as_ref()
+                    .and_then(|o| o.get(&track.track_number).cloned());
+                if let Some(pin) = pinned {
+                    manual += 1;
+                    track.flight_plan =
+                        pin.and_then(|callsign| correlation.reference_by_callsign(&callsign));
+                    if track.flight_plan.is_some() {
                         correlated += 1;
                     }
-                    CorrelationOutcome::SquawkRefused => refused += 1,
-                    CorrelationOutcome::None => {}
+                } else {
+                    match apply_correlation(track, correlation, t) {
+                        CorrelationOutcome::ByCallsign(_) | CorrelationOutcome::BySquawk(_) => {
+                            correlated += 1;
+                        }
+                        CorrelationOutcome::SquawkRefused => refused += 1,
+                        CorrelationOutcome::None => {}
+                    }
+                }
+                // Wire track numbers are pool-managed and reused: drop the
+                // override with its ending track (TSE is emitted exactly once
+                // per track), or a recycled number would label the next
+                // aircraft that inherits it.
+                if track.ended {
+                    if let Some(o) = overrides.as_mut() {
+                        o.remove(&track.track_number);
+                    }
                 }
             }
             self.correlated_last = correlated;
             self.refused_last = refused;
+            self.manual_last = manual;
         }
         tracks
     }
@@ -585,13 +641,13 @@ impl LiveTracker {
         }
     }
 
-    /// Total plots handed to the tracker so far.
     /// Learned spatial clutter-map cells across all sensors (SPEC.2b) —
     /// exported as the `firefly_clutter_cells` gauge.
     pub fn clutter_cells(&self) -> u64 {
         self.tracker.clutter_cells_total() as u64
     }
 
+    /// Total plots handed to the tracker so far.
     pub fn plots_ingested(&self) -> u64 {
         self.plots_ingested
     }
@@ -666,7 +722,7 @@ pub async fn run_live_tracker<F>(
     output_period: Duration,
     on_tick: F,
 ) where
-    F: Fn(u64, u64, Option<RegistrationTick>, u64, (u64, u64, u64)),
+    F: Fn(u64, u64, Option<RegistrationTick>, u64, (u64, u64, u64, u64)),
 {
     let mut ticker = tokio::time::interval(output_period);
     // A delayed tick should not fire a burst of catch-up ticks afterwards.
@@ -919,6 +975,89 @@ mod tests {
         let outcome = apply_correlation(&mut conflicted, &service, 0.0);
         assert_eq!(outcome, CorrelationOutcome::SquawkRefused);
         assert!(conflicted.flight_plan.is_none());
+    }
+
+    /// Manual correlation (FPL.2, ADR 0039): a pinned callsign beats the
+    /// automatics, a pinned `None` keeps the track honestly uncorrelated even
+    /// though the automatics would label it, and the override dies with the
+    /// track's TSE record — wire numbers are pool-managed and reused, so a
+    /// stale override would label the next aircraft inheriting the number.
+    /// REQ: FR-TRK-048
+    #[test]
+    fn manual_override_beats_automatics_and_dies_with_the_track() {
+        use firefly_fpl::FlightPlan;
+        let plan = |cs: &str| FlightPlan {
+            callsign: cs.into(),
+            squawk: None,
+            departure: None,
+            destination: None,
+            expected_time: None,
+        };
+        let overrides = ManualOverrides::default();
+        let mut live = LiveTracker::new(build_live_tracker(&config()), None)
+            .with_flight_plans(CorrelationService::new(vec![plan("DLH123"), plan("BAW22")]))
+            .with_manual_overrides(Arc::clone(&overrides));
+
+        // Confirm one aircraft whose downlinked callsign auto-correlates.
+        for k in 0..8 {
+            live.ingest(
+                &[adsb(k as f64 * 10.0, 51.0, 10.5, 0x3C_AB_CD)],
+                now_unix_ns(),
+            );
+        }
+        let auto = live.snapshot();
+        let number = auto[0].track_number;
+        assert_eq!(
+            auto[0].flight_plan.as_ref().map(|p| p.callsign.as_str()),
+            Some("DLH123"),
+            "automatics label by callsign"
+        );
+
+        // A pinned plan wins over the automatic callsign match.
+        overrides
+            .lock()
+            .unwrap()
+            .insert(number, Some("BAW22".into()));
+        let pinned = live.snapshot();
+        assert_eq!(
+            pinned[0].flight_plan.as_ref().map(|p| p.callsign.as_str()),
+            Some("BAW22"),
+            "manual beats automatic"
+        );
+        assert_eq!(live.correlation_stats(), (2, 1, 0, 1));
+
+        // A pinned `None` keeps the track uncorrelated — the automatics must
+        // not re-apply the label the controller just removed.
+        overrides.lock().unwrap().insert(number, None);
+        let decorrelated = live.snapshot();
+        assert!(
+            decorrelated[0].flight_plan.is_none(),
+            "pinned uncorrelated blocks the automatics"
+        );
+
+        // Let the track die: no further plots for it, another aircraft keeps
+        // the data-time advancing until the TSE record appears — which must
+        // garbage-collect the override.
+        let mut ended_seen = false;
+        for k in 9..120 {
+            live.ingest(
+                &[adsb(k as f64 * 10.0, 51.5, 11.0, 0x11_22_33)],
+                now_unix_ns(),
+            );
+            if live
+                .snapshot()
+                .iter()
+                .any(|t| t.ended && t.track_number == number)
+            {
+                ended_seen = true;
+                break;
+            }
+        }
+        assert!(ended_seen, "the silent track must end within the horizon");
+        assert!(
+            !overrides.lock().unwrap().contains_key(&number),
+            "the override dies with the track (wire numbers are reused)"
+        );
     }
 
     /// The QNH correction applies only where a regional QNH is **observed**;

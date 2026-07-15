@@ -10,6 +10,35 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (FPL.2 — I062/390 + manuelle Korrelation)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **FPL.2 (FR-TRK-048, ADR 0039; ICD 3.7.0 additiv):** Die zentrale
+  Flugplan-Korrelation steht jetzt **auf dem CAT062-Draht** und der Lotse
+  hat die **Hand aufs Ergebnis**. (a) **I062/390** (FRN 21, Compound):
+  CSN (Plan-Callsign, 7 Okt. ASCII) + DEP/DST (je 4 Okt. ICAO-Locator);
+  nur bei korreliertem Track, unkorreliert **byte-identisch** alt (FRN 21
+  liegt im vorhandenen 3. FSPEC-Oktett); byte-genaue Referenz-Vektoren +
+  Decoder-Rückweg (ICD §4.10). (b) **Kommando-API**: `POST /correlation`
+  (Plan-Pin; ohne Callsign = Pin auf unkorreliert — Automatik gesperrt;
+  422 bei unbekanntem Plan), `DELETE /correlation/{track}` (zurück zur
+  Automatik), `GET /correlation`; **manuell schlägt Automatik** je
+  Output-Tick; **Pin stirbt mit dem TSE** seines Tracks (Draht-Nummern
+  werden wiederverwendet, FR-TRK-035); Auth = `/ws`-Token nur als
+  Bearer-Header (kein Query-Fallback), Origin-Check nur im
+  Browser-Kontext. (c) Metrik `firefly_correlation_manual`; der
+  Metrics-Render-Test prüft jetzt auch die FPL.1-Gauges +
+  `firefly_clutter_cells` explizit (Trace-Lücke geschlossen). Unterwegs
+  drei verrutschte Doc-Kommentare aus FPL.1 begradigt (apply_qnh/
+  with_meteo/plots_ingested). **Wayfinder #245** (`from-firefly`):
+  ICD-3.7.0-Nachzug + WS-JSON-Felder + Bedienweg, kein Lockstep.
+  Roadmap: **78 %**.
+- **Nächster Schritt:** **HA.1** ankündigen (Snapshot/Restore produktiv —
+  periodischer Tracker-Zustand + Wiederanlauf; nimmt die flüchtigen
+  Korrelations-Pins mit; S3–S4, 80,5 %) — und Freigabe abwarten.
+  Parallel: Wayfinder-Feedback auf #244 (EFS-Feldsatz) und #245 im Blick
+  behalten; ADR 0038 bleibt bis zur Bestätigung „vorgeschlagen".
+
 ## 🎯 Stand 2026-07-15 (FPL.1 — Flugplan-Eingang + Auto-Korrelation)
 
 - **Zuletzt aktualisiert:** 2026-07-15

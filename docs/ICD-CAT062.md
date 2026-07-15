@@ -21,7 +21,26 @@
 
 ## Version
 
-**3.6.0** (2026-07-11) — **Additiv (FR-TRK-043, ARTAS-Roadmap VERT.3):**
+**3.7.0** (2026-07-15) — **Additiv (FR-TRK-048, ARTAS-Roadmap FPL.2):**
+Das Ergebnis der **zentralen Flugplan-Korrelation** (ADR 0038/0039) kommt
+auf den Draht — ein neues optionales Compound-Item an seiner
+Standard-UAP-Position:
+
+- **I062/390** (FRN 21) — *Flight Plan Related Data*: die dem Track
+  zugeordneten Flugplan-Felder. Primary Subfield (1–2 Oktette, FX-Kette),
+  darin belegt Firefly minimal: **CSN** (#2, Oktett 1 Bit 7): der
+  Plan-Callsign, 7 Oktette ASCII, linksbündig mit Leerzeichen aufgefüllt;
+  **DEP** (#7, Oktett 1 Bit 2) und **DST** (#8, Oktett 2 Bit 8): Start-/
+  Ziel-Flugplatz, je 4 Oktette ICAO-Locator. Weitere Standard-Subfelder
+  sendet Firefly (noch) nicht; der Feldsatz wächst additiv mit dem
+  EFS-Bedarf (Wayfinder #244).
+
+Das Item erscheint **nur bei korreliertem Track** (automatisch nach den
+ADR-0038-Regeln oder manuell via Kommando-API). **Kein Wire-Bruch:** ein
+unkorrelierter Track ist byte-identisch zur Vor-3.7.0-Form. Details +
+Referenz-Bytes: Abschnitt 4.10.
+
+Vorgänger **3.6.0** (2026-07-11) — **Additiv (FR-TRK-043, ARTAS-Roadmap VERT.3):**
 Die **Kinematik-Kette** kommt auf den Draht — zwei neue optionale Items an
 ihren Standard-UAP-Positionen:
 
@@ -135,6 +154,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 3.7.0 | 2026-07-15 | **Additiv (FR-TRK-048, FPL.2; ADR 0038/0039).** **I062/390** (Flight Plan Related Data, FRN 21) trägt das Ergebnis der **zentralen Flugplan-Korrelation**: Compound-Item, Primary Subfield 1–2 Oktette (FX-Kette), belegt sind **CSN** (#2, Oktett 1 Bit 7; Plan-Callsign, 7 Oktette ASCII, linksbündig leerzeichen-gepolstert), **DEP** (#7, Oktett 1 Bit 2) und **DST** (#8, Oktett 2 Bit 8; je 4 Oktette ICAO-Locator). Nur bei **korreliertem** Track gesendet (automatisch nach ADR-0038-Regeln oder manuell via Kommando-API); unkorrelierter Track byte-identisch alt. FRN 21 liegt im bereits vorhandenen 3. FSPEC-Oktett — kein FSPEC-Wachstum. Referenz-Bytes in 4.10. Konsument: subfeld-getrieben lesen (Reihenfolge/Präsenz aus dem Primary Subfield), kein Lockstep. |
 | 3.6.0 | 2026-07-11 | **Additiv (FR-TRK-043, VERT.3).** Kinematik-Kette: **I062/210** (FRN 8, Ax/Ay je i8 × 0,25 m/s², geclampt) und **I062/200** (FRN 15, TRANS aus IMM-Kurvenmodellen \| LONG aus Längs-Beschleunigung \| VERT aus der RoCD; ADF immer 0). I062/200 entfällt bei komplett unbestimmter Lage, I062/210 bei fehlendem/stalem Schätzwert; Track ohne Kinematik byte-identisch alt. Referenz-Bytes in 4.9. Konsument: zwei feste Items an Standard-UAP-Positionen, kein Lockstep. |
 | 3.5.0 | 2026-07-11 | **Additiv (FR-TRK-042, VERT.2).** Vertikal-Kette auf dem Draht: **I062/130** (FRN 18, geometrische Höhe, i16 × 6,25 ft), **I062/135** (FRN 19, gefilterte barometrische Höhe; **QNH-Bit** nur bei Korrektur auf beobachtetes regionales QNH, sonst Druckhöhe mit Bit 0; 15-Bit-ZK × 25 ft), **I062/220** (FRN 20, Steig-/Sinkrate, i16 × 6,25 ft/min, positiv = steigen). Jedes Item nur bei frischem Schätzwert (≤ 30 s); Track ohne Vertikal-Daten byte-identisch alt; I062/136 bleibt daneben. Referenz-Bytes in 4.8. Konsument: drei feste 2-Oktett-Items an Standard-UAP-Positionen, kein Lockstep. |
 | 3.4.0 | 2026-07-11 | **Additiv (FR-TRK-040, FEP.2).** I062/380 um die Mode-S-EHS-DAPs erweitert: **MHG** (#3, LSB 360/2¹⁶ °), **SAL** (#6, SAS/Source=MCP + 13-Bit-Zweierkomplement, LSB 25 ft — die eingedrehte Autopilot-Höhe, Level-Bust-Basis), **IAR** (#26, LSB 1 kt), **MAC** (#27, LSB 0,008). Nur bei vorhandenem, frischem Wert (≤ 30 s) gesendet; DAP-loser Track byte-identisch zur alten Form; IAR/MAC verlängern die Subfeld-Spec via FX auf 4 Oktette. Byte-genauer Referenz-Dump in 4.7. Konsument: subfeld-getrieben lesen, kein Lockstep. |
@@ -231,6 +251,7 @@ zusätzlichen FSPEC-Bits — unbekannte Items werden anhand ihrer Längen-Regeln
 | 18 | I062/130 | Calculated Track Geometric Altitude (nur wenn vorhanden, seit 3.5.0) | 2 Oktette | signed i16 BE, LSB = 6,25 ft; siehe 4.8 |
 | 19 | I062/135 | Calculated Track Barometric Altitude (nur wenn vorhanden, seit 3.5.0) | 2 Oktette | Bit 16 = QNH-Bit, Bits 15–1 = 15-Bit-Zweierkomplement, LSB = 1/4 FL = 25 ft; siehe 4.8 |
 | 20 | I062/220 | Calculated Rate of Climb/Descent (nur wenn vorhanden, seit 3.5.0) | 2 Oktette | signed i16 BE, LSB = 6,25 ft/min, positiv = steigen; siehe 4.8 |
+| 21 | I062/390 | Flight Plan Related Data (nur bei korreliertem Track, seit 3.7.0) | variabel (Compound) | Primary Subfield 1–2 Oktette (FX); CSN (7 Okt. ASCII), DEP/DST (je 4 Okt. ICAO-Locator); siehe 4.10 |
 | 27 | I062/500 | Estimated Accuracies | variabel | siehe 4.3 |
 
 > **UAP-Standardtreue (ADR 0015).** Die FRNs folgen der echten EUROCONTROL-
@@ -238,9 +259,9 @@ zusätzlichen FSPEC-Bits — unbekannte Items werden anhand ihrer Längen-Regeln
 > emittierten Standard-Items: FRN 2 (Spare), 3 (I062/015) und
 > **16 (I062/295 — reserviert, ungenutzt)**. Seit 3.5.0 sind FRN 18–20
 > (I062/130/135/220) belegt, seit 3.6.0 auch FRN 8 (I062/210) und 15
-> (I062/200). Ein konformer Fremd-Decoder liest den Strom ohne privates
-> Profil. Weil I062/500 auf FRN 27 (4. FSPEC-Oktett) liegt, hat ein Record
-> mindestens **4 FSPEC-Oktette**.
+> (I062/200), seit 3.7.0 FRN 21 (I062/390). Ein konformer Fremd-Decoder
+> liest den Strom ohne privates Profil. Weil I062/500 auf FRN 27
+> (4. FSPEC-Oktett) liegt, hat ein Record mindestens **4 FSPEC-Oktette**.
 
 Items werden **nur kodiert, wenn der Wert vorhanden ist** — I062/060, I062/245
 und I062/380 erscheinen nur bei vorhandener Mode-3/A-, Callsign- bzw.
@@ -499,6 +520,41 @@ Im FSPEC liegen FRN 18/19/20 im **dritten** Oktett (Bits `0x10`/`0x08`/
 Im FSPEC liegt FRN 8 im **zweiten** Oktett (Bit `0x80`) und FRN 15 im
 **dritten** (Bit `0x80`); ein Track ohne Kinematik-Daten sendet exakt die
 Vor-3.6.0-Bytes.
+
+### 4.10 I062/390 — Flight Plan Related Data (seit 3.7.0)
+
+Das Ergebnis der **zentralen Flugplan-Korrelation** (ADR 0038/0039): ein
+Compound-Item — Primary Subfield (FX-verkettete Oktette, Bits in
+Standard-Reihenfolge), dann die vorhandenen Subfelder aufsteigend. Firefly
+belegt minimal:
+
+| Subfeld | Spec-Bit | Länge | Inhalt |
+|---------|----------|-------|--------|
+| CSN (#2) | Oktett 1, Bit 7 (`0x40`) | 7 Oktette | Plan-Callsign, ASCII, linksbündig, mit Leerzeichen aufgefüllt |
+| DEP (#7) | Oktett 1, Bit 2 (`0x02`) | 4 Oktette | Start-Flugplatz, ICAO-Vier-Buchstaben-Locator, ASCII |
+| DST (#8) | Oktett 2, Bit 8 (`0x80`) | 4 Oktette | Ziel-Flugplatz, ICAO-Vier-Buchstaben-Locator, ASCII |
+
+CSN ist immer vorhanden (der Callsign ist die Identität der Zuordnung);
+DEP/DST nur, wenn der Plan sie trägt. Ohne DST bleibt das Primary Subfield
+ein einzelnes Oktett (kein FX); mit DST verkettet es auf zwei. Weitere
+Standard-Subfelder (TAG, IFI, CFL, …) sendet Firefly (noch) nicht — der
+Feldsatz wächst **additiv** mit dem EFS-Bedarf (Wayfinder #244).
+
+**Referenz-Bytes** (byte-genau, `firefly-asterix`-Test
+`flight_plan_item_encodes_byte_exactly_and_round_trips`):
+
+| Wert | Item-Bytes |
+|------|-----------|
+| Plan DLH123, EDDF → EDDM | `43 80` `44 4C 48 31 32 33 20` `45 44 44 46` `45 44 44 4D` |
+| Plan BAW22 (nur Callsign) | `40` `42 41 57 32 32 20 20` |
+
+Im FSPEC liegt FRN 21 im **dritten** Oktett (Bit `0x02`) — das bei jedem
+Standard-Record ohnehin existiert (FRN 27!). Das Item erscheint **nur bei
+korreliertem Track**; ein unkorrelierter Track sendet exakt die
+Vor-3.7.0-Bytes. Hinweis Konsument: I062/245 (downgelinkte Target
+Identification) und I062/390-CSN können abweichen — CSN ist der **gefilte
+Plan**, I062/245 das, was das Luftfahrzeug **sendet**; eine Differenz ist
+Anzeige-relevant (Callsign-Mismatch).
 
 ## 5. Koordinaten
 
