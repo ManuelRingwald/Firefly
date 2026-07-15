@@ -456,6 +456,7 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_sources_radar` | gauge | Anzahl konfigurierter `radar_asterix`-Quellen |
 | `firefly_sources_adsb021` | gauge | Anzahl konfigurierter `adsb_asterix`-Quellen (CAT021-Bodenstation, FEP.3) |
 | `firefly_sources_mlat` | gauge | Anzahl konfigurierter `mlat_asterix`-Quellen (WAM/MLAT, FEP.5) |
+| `firefly_clutter_cells` | gauge | **SPEC.2b:** Gelernte Zellen der räumlichen Clutter-Karten über alle Sensoren (wachsender Wert = der Tracker kartiert Hotspots) |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |

@@ -10,6 +10,26 @@
 
 ---
 
+## 🎯 Stand 2026-07-14 (SPEC.2b — Expositions-Buchführung für die Clutter-Karte)
+
+- **Zuletzt aktualisiert:** 2026-07-14
+- **SPEC.2b (FR-TRK-046 erweitert, ADR-0037-Nachtrag; vorab freigegeben
+  „Nach dem merge kannst du loslegen"):** Die Clutter-Karte kreditiert
+  jetzt **Beobachtungszeit** je Sensor-Batch (`mark_active`; eine
+  Aktivitätslücke kreditiert max. 30 s — ein Feed-Ausfall ist keine
+  Beobachtung und reift die Karte nie). Ab **1200 s Reife** (2τ; je Zelle
+  ab ihrem ersten Ereignis, ereignisfreie Zellen ab Karten-Start) sinkt
+  der Dichte-Floor auf **0,1 × Default** — nachweislich ruhige Regionen
+  entlasten die Assoziation ehrlich; unreife Evidenz behält den Default
+  (die SPEC.2-Regression um Gründungs-Plots bleibt konstruktiv geschützt,
+  Testhorizonte ≪ Reife). **Metrik `firefly_clutter_cells`** über die
+  erweiterte On-Tick-Kette (TECHNICAL.md nachgeführt). 4 neue Tests
+  (Reife/Unreife/Ausfall + Metrik-Render), Gates grün (53 Suiten).
+  Kein Prozent-Zuwachs: **71 %**.
+- **Nächster Schritt:** **FPL.0** ankündigen — ADR „Korrelation im SDPS
+  vs. CWP", Architektur-Abstimmung mit Wayfinder (**vor** deren EFS-1;
+  S3, 72 %) — und Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-14 (SPEC.2 — Clutter-Karte + Reflexionen)
 
 - **Zuletzt aktualisiert:** 2026-07-14

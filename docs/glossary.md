@@ -426,9 +426,11 @@ Modelle), **modellbedingtes Filtern** (jedes Modell prädiziert + aktualisiert),
 Ein per-Radar gelerntes polares Raster der lokalen Falschplot-Dichte λ
 (SPEC.2, ADR 0037): Zellen, in denen sich unassoziierte Plots häufen
 (Windpark, Straße, Wetter), melden der Assoziation ein höheres λ — ein
-unerklärter Plot dort ist wahrscheinlich Clutter. Ehrlichkeits-Grenze:
-ohne Expositions-Buchführung hebt die Karte λ nur **an** (Deckel 100×),
-nie unter den Default — Ereignis-Abwesenheit beweist keine Sauberkeit.
+unerklärter Plot dort ist wahrscheinlich Clutter. Seit SPEC.2b zählt die
+Karte auch **Exposition** (kreditierte Beobachtungszeit, Ausfall zählt
+nicht): erst eine **reif** beobachtete ruhige Region (≥ 1200 s) darf λ
+ehrlich **unter** den Default senken (bis 0,1×) — vorher gilt: Ereignis-
+Abwesenheit allein beweist keine Sauberkeit (Deckel bleibt 100×).
 
 **Multipath-Reflexion (Radar-Geist)**
 Ein starkes Ziel nahe einer Reflektorfläche (Gebäude, Gelände) erzeugt ein
