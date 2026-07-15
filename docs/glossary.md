@@ -797,6 +797,13 @@ Messgröße (bei uns Meter). Damit messen wir, *ob* der Tracker gut funktioniert
 
 ## Software-Begriffe (das Werkzeug Rust)
 
+**criterion (Benchmark)**
+Das Standard-Benchmark-Framework im Rust-Ökosystem: misst Laufzeiten
+statistisch sauber (Warmup, viele Stichproben, Ausreißer-Erkennung) und
+führt eine Historie für Trend-Vergleiche. Fireflys Lastmessung (CAP.1)
+läuft darüber: `cargo bench -p firefly-eval` misst den Tracker-Hot-Path
+in Plots/s über synthetische `N Radare × M Ziele`-Szenarien.
+
 **Rust**
 Die Programmiersprache, in der wir die Rechen-Engine bauen. Stark auf
 Korrektheit und Geschwindigkeit ausgelegt.
