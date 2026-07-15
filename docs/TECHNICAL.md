@@ -373,12 +373,24 @@ Heartbeat startet erst nach der Promotion.
 | `FIREFLY_ROLE` | `main` \| `standby` | `main` | Instanz-Rolle. Unbekannter Wert → **Start-Abbruch**. `standby` verlangt `FIREFLY_CAT062_ENABLED=true` + CAT065-Heartbeat (sonst **Start-Abbruch**). |
 | `FIREFLY_FAILOVER_TIMEOUT` | Sekunden > 0 | 3 | Heartbeat-Stille bis zur Übernahme (3 = drei verpasste 1-s-Heartbeats). Die Uhr läuft ab Standby-Start — ein beim Start schon toter Main wird einen Timeout später übernommen. Malform → **Start-Abbruch**. |
 
+**Split-Brain-Schutz (HA.2b):** (1) **Startup-Arbitrierung** — ein
+`main` lauscht vor dem ersten Senden einen Failover-Timeout lang; ein
+fremder Heartbeat der eigenen Identität ⇒ Standby statt Doppel-Feed
+(Kaltstart-Latenz +1 Timeout; fail-open bei Socket-Fehler). (2)
+**Laufzeit-Demotion** — die aktive Instanz beobachtet die Gruppe weiter;
+bei Split-Brain weicht deterministisch die Seite mit der **höheren
+Absender-Adresse** und beendet sich mit **Exit-Code 3** (crash-only:
+der Supervisor-Neustart re-arbitriert in den Standby — **eine
+Restart-Policy ist Betriebs-Voraussetzung**). Eigene Loopback-Heartbeats
+werden über Egress-IP + Heartbeat-Socket-Port erkannt; bei unbestimmbarer
+Selbst-Adresse bleibt die Wache aus (laut geloggt).
+
 > **Ehrliche Grenzen (ADR 0041):** Timeout-Detektion, **kein Konsens** —
-> eine Netz-Partition kann vorübergehend zwei Sender erzeugen; die
-> Demotion (Main sieht fremden aktiven Heartbeat ⇒ tritt zurück) und die
-> Failover-Metriken (`firefly_role`, `firefly_failovers_total`) folgen
-> mit **HA.2b**. Übernahme-Bild = letzter Snapshot (Verlustfenster ≤
-> Snapshot-Periode + Timeout); gemeinsames Volume ist Deployment-Sache.
+> während einer echten Netz-Partition senden beide Seiten, bis die
+> Partition heilt und die Demotion greift. Übernahme-Bild = letzter
+> Snapshot (Verlustfenster ≤ Snapshot-Periode + Timeout); gemeinsames
+> Volume ist Deployment-Sache; Multi-homed-Hosts können die
+> Eigen-Erkennung täuschen (dokumentierte Restlücke).
 
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
@@ -558,6 +570,9 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_snapshot_errors_total` | counter | **HA.1:** fehlgeschlagene Snapshot-Schreibvorgänge — Persistenz kaputt, Lagebild läuft weiter (es wird weiter versucht) |
 | `firefly_snapshot_age_seconds` | gauge | **HA.1:** Sekunden seit dem letzten erfolgreichen Snapshot — das Verlustfenster eines Neustarts |
 | `firefly_restore` | gauge | **HA.1:** 1 = dieser Prozess hat sein Luftlagebild beim Start aus einem Snapshot wiederhergestellt |
+| `firefly_role` | gauge | **HA.2:** 1 = aktiv (main), 0 = standby (beobachtet den Main-Heartbeat) |
+| `firefly_failovers_total` | counter | **HA.2:** Promotions dieses Prozesses (ein übernommen habender Standby zählt eine) |
+| `firefly_main_heartbeat_age_seconds` | gauge | **HA.2:** Sekunden seit dem letzten beobachteten Main-Heartbeat (aussagekräftig im Standby) |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |

@@ -65,6 +65,45 @@ Fehlerquellen, Anbieter-Kopplung.
   kleines Verlustfenster (≤ Snapshot-Periode) für ein deutlich
   einfacheres, ehrliches Modell.
 
+## Nachtrag HA.2b — Split-Brain-Schutz (gleicher Tag)
+
+Die in Punkt 5 angekündigte Demotion ist umgesetzt, mit zwei bewussten
+Konkretisierungen:
+
+1. **Startup-Arbitrierung:** Ein `main` lauscht **vor** dem ersten Senden
+   einen Failover-Timeout lang auf der Gruppe. Hört er einen fremden
+   Heartbeat seiner eigenen Identität, geht er in die Standby-Wache statt
+   den Feed zu doppeln — das fängt den neu startenden (demotierten) Main
+   und die versehentlich doppelt als `main` konfigurierte Instanz.
+   Kosten: +1 Timeout (Default 3 s) beim Kaltstart jedes Mains mit
+   aktiviertem Feed. Die Arbitrierung ist **fail-open**: Kann sie nicht
+   lauschen (Socket-Fehler), startet die Instanz laut gewarnt aktiv —
+   ein Split-Brain-*Risiko* wiegt leichter als ein sicherer Ausfall.
+2. **Laufzeit-Demotion als Crash-only:** Die aktive Instanz beobachtet
+   die Gruppe weiter. Ein fremder Heartbeat der eigenen Identität
+   (andere Absender-Adresse) ist Split-Brain-Evidenz; der
+   **deterministische Tie-Breaker** — der Sender mit der **höheren**
+   Absender-Adresse (IP, Port) weicht — sorgt dafür, dass genau eine
+   der beiden Seiten geht. Die weichende Seite **beendet sich mit
+   Exit-Code 3** statt sich im Prozess umzubauen (Sender stummschalten,
+   Quellen stoppen — fehleranfällige Sonderpfade): Der Supervisor
+   (Kubernetes, systemd, Docker-Restart-Policy) startet sie neu, und die
+   Startup-Arbitrierung landet sie sauber im Standby. **Ohne Supervisor
+   bleibt die demotierte Instanz unten** — dokumentierte
+   Betriebs-Voraussetzung.
+3. **Eigen-Erkennung:** Die eigenen, per Multicast-Loopback zurückkommenden
+   Heartbeats werden über die Absender-Adresse (Egress-IP zur Gruppe +
+   Port des Heartbeat-Sockets) erkannt. Lässt sich die eigene Adresse
+   nicht bestimmen, wird die Demotion-Wache **nicht** scharfgeschaltet
+   (eine falsche Selbst-Sicht könnte den eigenen Loopback als fremd lesen
+   und die einzige Instanz töten) — der Schutz reduziert sich dann auf
+   die Startup-Arbitrierung, laut geloggt. Multi-homed-Hosts mit
+   asymmetrischem Routing sind die bekannte Restlücke.
+4. **Observability:** `firefly_role` (1 = aktiv, 0 = standby),
+   `firefly_failovers_total` (Promotions dieses Prozesses),
+   `firefly_main_heartbeat_age_seconds` (Alter des beobachteten
+   Heartbeats, im Standby gepflegt).
+
 ## Ehrliche Grenzen (bewusst dokumentiert)
 
 - **Failure Detection per Timeout, kein Konsens.** Eine Netz-Partition
