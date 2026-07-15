@@ -1068,6 +1068,15 @@ Mess-Evidenz für den regulatorischen Nachweis. Fireflys eigener
 Messstand ist `firefly-eval` (HA.4); der unabhängige Gegen-Check läuft
 über OpenATS COMPASS (HA.5).
 
+**OpenATS COMPASS**
+Open-Source-Analysewerkzeug der Surveillance-Community (früher „ATSDB")
+mit eigenem ASTERIX-Decoder und SASS-C-artigen Auswertungen. Für
+Firefly das Werkzeug des **unabhängigen Gegen-Checks** (HA.5,
+NFR-SAFE-003): Es liest den echten CAT062/065/063-Mitschnitt und muss
+zu denselben Aussagen kommen wie unsere eigenen Metriken — zugleich der
+stärkste Konformitätsbeleg für das Draht-Format, weil ein fremder
+Decoder ihn liest. Workflow: `docs/verification/compass-gegen-check.md`.
+
 **ESASSP**
 Die *EUROCONTROL Specification for ATM Surveillance System Performance*:
 definiert öffentlich, **welche** Kennzahlen die Güte einer
