@@ -10,6 +10,30 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (CAP.1 — Benchmark-Harness)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **CAP.1 (NFR-CAP-001; kein Wire-/ICD-Bezug):** Der Durchsatz des
+  Produktions-Hot-Path ist jetzt **messbar**: criterion-Benchmark
+  (`cargo bench -p firefly-eval`) über synthetische Lastszenarien
+  `load_grid(N Radare × M Ziele)` — separationstreues 5-km-Raster
+  (Stressgröße Volumen; dichte Konflikt-Cluster = JPDA-Worst-Case
+  bewusst CAP.2), Radare mit eigenen Site-Frames, Tracker wie die
+  Live-Verdrahtung gebaut. Der Generator ist gegen das HA.4-Harness
+  abgesichert (alle Ziele je genau 1 Track, 0 Geister — sonst misst der
+  Benchmark Müll). **Baseline (Release, Sandbox-Host):** 221 k Plots/s
+  (1R×10Z) bis 114 k Plots/s (3R×100Z) — gegenüber 75 Plots/s
+  Echtzeit-Last derselben Konstellation **> 1500× Reserve**.
+  Messwerte-Tabelle + Lesart in
+  `docs/milestones/CAP1-Benchmark-Harness.md`. Ehrliche Grenzen:
+  host-abhängig (auf Zielhardware wiederholen); kein CI-Zeit-Gate
+  (Trends via criterion-Historie). Roadmap: **90,5 %**.
+- **Nächster Schritt:** **CAP.2** ankündigen (Hot-Path-Analyse:
+  JPDA-Cluster-Grenzen/Worst-Case-Formen + dokumentierte
+  Auslegungsgrenzen; S4, 94 %) — und Freigabe abwarten. Offen beim
+  Betreiber: erster COMPASS-Bericht (HA.5-Abnahme). Weiter offen:
+  Wayfinder #244/#245.
+
 ## 🎯 Stand 2026-07-15 (HA.5 — COMPASS-Gegen-Check, Verfahren)
 
 - **Zuletzt aktualisiert:** 2026-07-15

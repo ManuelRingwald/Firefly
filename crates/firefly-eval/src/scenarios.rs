@@ -84,3 +84,44 @@ pub fn parallel_pair() -> Scenario {
 pub fn builtin() -> Vec<(&'static str, Scenario)> {
     vec![("single", single_target()), ("pair", parallel_pair())]
 }
+
+/// A synthetic **load** scenario (CAP.1): `radars` sensors around the
+/// origin observe `targets` aircraft laid out on a wide grid, all
+/// cruising. Grid spacing (5 km) keeps association clusters small and
+/// realistic — en-route traffic is separated; the deliberate stress is
+/// *volume* (plots/second), not pathological overlap (that is what the
+/// SPEC benchmarks probe qualitatively).
+pub fn load_grid(radars: usize, targets: usize, duration: f64) -> Scenario {
+    let mut scenario = Scenario::new(origin())
+        .with_duration(duration)
+        .with_seed(20260715);
+    for r in 0..radars {
+        // Radar sites 30 km apart on a line — distinct site frames, all
+        // covering the same traffic (the multi-sensor fusion load path).
+        let east = r as f64 * 30_000.0 - (radars as f64 - 1.0) * 15_000.0;
+        let site =
+            firefly_geo::LocalFrame::new(origin()).enu_to_geodetic(&Enu::new(east, -60_000.0, 0.0));
+        let mut r = Radar::new(Sensor::new(SensorId(1 + r as u16), site), radar(4.0).params);
+        r.params.max_range = 400_000.0;
+        scenario = scenario.add_radar(r);
+    }
+    let per_row = (targets as f64).sqrt().ceil() as usize;
+    for k in 0..targets {
+        let row = k / per_row;
+        let col = k % per_row;
+        // Alternate headings so the picture stays busy but separated.
+        let heading = if (row + col).is_multiple_of(2) {
+            0.0
+        } else {
+            90.0_f64.to_radians()
+        };
+        scenario = scenario.add_target(cruiser(
+            1 + k as u32,
+            10_000.0 + col as f64 * 5_000.0,
+            row as f64 * 5_000.0,
+            heading,
+            duration,
+        ));
+    }
+    scenario
+}
