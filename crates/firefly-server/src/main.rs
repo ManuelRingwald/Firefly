@@ -76,21 +76,74 @@ async fn main() {
         tracing::error!(error = %e, "invalid role configuration");
         std::process::exit(1);
     });
-    if role == firefly_server::Role::Standby {
-        run_standby_phase(
-            &config,
-            Arc::clone(&metrics),
-            ws_token.clone(),
-            ws_allowed_origin.clone(),
-        )
-        .await;
+    let mc = MulticastConfig::from_env();
+    match role {
+        firefly_server::Role::Standby => {
+            run_standby_phase(
+                &config,
+                Arc::clone(&metrics),
+                ws_token.clone(),
+                ws_allowed_origin.clone(),
+            )
+            .await;
+        }
+        // Startup arbitration (HA.2b, ADR-0041-Nachtrag): before a main
+        // starts sending, it listens one failover timeout for a heartbeat
+        // already carrying its identity — a restarted (demoted) main, or a
+        // second instance misconfigured as main, then serves as standby
+        // instead of doubling the feed. Best-effort: an arbitration socket
+        // failure proceeds loudly (fail-open — refusing to start would
+        // trade a split-brain *risk* for a certain outage).
+        firefly_server::Role::Main if mc.enabled && mc.heartbeat_enabled => {
+            let timeout = firefly_server::failover_timeout_from_env().unwrap_or_else(|e| {
+                tracing::error!(error = %e, "invalid failover timeout");
+                std::process::exit(1);
+            });
+            match firefly_server::standby::foreign_heartbeat_within(
+                mc.group,
+                mc.port,
+                mc.data_source(),
+                timeout,
+            )
+            .await
+            {
+                Ok(Some(addr)) => {
+                    tracing::warn!(
+                        active_sender = %addr,
+                        "startup arbitration: our identity is already served on the group; \
+                         entering standby instead of doubling the feed (HA.2b)"
+                    );
+                    run_standby_phase(
+                        &config,
+                        Arc::clone(&metrics),
+                        ws_token.clone(),
+                        ws_allowed_origin.clone(),
+                    )
+                    .await;
+                }
+                Ok(None) => {}
+                Err(error) => tracing::warn!(
+                    %error,
+                    "startup arbitration could not listen; proceeding as active (fail-open)"
+                ),
+            }
+        }
+        firefly_server::Role::Main => {}
     }
 
     // CAT065 heartbeat: wall-clock liveness signal, independent of the sources —
     // it is what lets the ASD tell "empty sky" from "dead feed" (ADR 0018).
     // Deliberately AFTER any standby phase: the heartbeat says "I am the
     // active SDPS" — a standby stays silent.
-    spawn_cat065_heartbeat(Arc::clone(&metrics));
+    let heartbeat_port = spawn_cat065_heartbeat(Arc::clone(&metrics)).await;
+
+    // Runtime demotion watch (HA.2b): the active instance keeps watching the
+    // group; on a split brain the deterministic tie-break makes exactly one
+    // side exit (crash-only — the supervisor restart re-arbitrates into
+    // standby).
+    if let Some(hb_port) = heartbeat_port {
+        spawn_demotion_watch(&mc, hb_port);
+    }
 
     let state = build_live_state(metrics, ws_token, ws_allowed_origin).await;
 
@@ -187,9 +240,15 @@ async fn run_standby_phase(
     let promoted = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let promoted_flag = Arc::clone(&promoted);
     let (group, port, expected) = (mc.group, mc.port, mc.data_source());
+    let age_metrics = Arc::clone(&metrics);
     let shutdown = async move {
+        let on_age = move |age: std::time::Duration| {
+            age_metrics
+                .main_heartbeat_age_seconds
+                .store(age.as_secs(), Ordering::Relaxed);
+        };
         tokio::select! {
-            result = firefly_server::wait_for_promotion(group, port, expected, timeout) => {
+            result = firefly_server::wait_for_promotion(group, port, expected, timeout, on_age) => {
                 match result {
                     Ok(()) => promoted_flag.store(true, Ordering::Relaxed),
                     Err(error) => {
@@ -213,9 +272,57 @@ async fn run_standby_phase(
         std::process::exit(0);
     }
     metrics.standby.store(false, Ordering::Relaxed);
+    metrics.failovers_total.fetch_add(1, Ordering::Relaxed);
     tracing::info!(
         "standby promoted to active: starting the full live stack (HA.1 snapshot restore included)"
     );
+}
+
+/// Spawn the runtime demotion watch (HA.2b): compute our heartbeat's
+/// source address as consumers see it (egress IP toward the group + the
+/// heartbeat socket's port), then watch the group for a **foreign**
+/// heartbeat of our identity. When the tie-break says we yield, exit with
+/// a distinct code (3) — crash-only: the supervisor restart re-arbitrates
+/// and lands in standby while the other side keeps serving. If the own
+/// address cannot be determined the watch is NOT armed (a wrong self-view
+/// could read our own loopback as foreign and kill the only instance).
+fn spawn_demotion_watch(mc: &MulticastConfig, heartbeat_port: u16) {
+    let (group, port, expected) = (mc.group, mc.port, mc.data_source());
+    let destination = mc.destination();
+    tokio::spawn(async move {
+        let egress_ip = match tokio::net::UdpSocket::bind("0.0.0.0:0").await {
+            Ok(probe) => match probe.connect(destination).await.and(probe.local_addr()) {
+                Ok(addr) => addr.ip(),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "cannot determine own egress address; demotion watch NOT armed \
+                         (split-brain protection reduced to startup arbitration)"
+                    );
+                    return;
+                }
+            },
+            Err(error) => {
+                tracing::warn!(%error, "cannot probe egress address; demotion watch NOT armed");
+                return;
+            }
+        };
+        let own = std::net::SocketAddr::new(egress_ip, heartbeat_port);
+        match firefly_server::standby::run_demotion_watch(group, port, expected, own).await {
+            Ok(foreign) => {
+                tracing::error!(
+                    %foreign,
+                    %own,
+                    "split brain: a second active sender carries our identity and wins the \
+                     tie-break — demoting by exit (supervisor restart re-arbitrates, HA.2b)"
+                );
+                std::process::exit(3);
+            }
+            Err(error) => {
+                tracing::warn!(%error, "demotion watch stopped (socket error); protection reduced");
+            }
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1289,11 +1396,13 @@ fn spawn_cat063_sensor_sender(monitor: Arc<SensorHealthMonitor>, metrics: Arc<Me
 
 /// Spawn the CAT065 SDPS-status heartbeat alongside the track feed, if both
 /// `FIREFLY_CAT062_ENABLED` and `FIREFLY_CAT065_ENABLED` (default on) are set
-/// (ADR 0018). Runs in both Replay and Live modes.
-fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) {
+/// (ADR 0018). Returns the heartbeat socket's local **port** so the demotion
+/// watch (HA.2b) can tell our own looped-back heartbeats from a foreign
+/// sender's; `None` when the heartbeat is disabled or its socket failed.
+async fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) -> Option<u16> {
     let config = MulticastConfig::from_env();
     if !config.enabled || !config.heartbeat_enabled {
-        return;
+        return None;
     }
 
     let destination = config.destination();
@@ -1301,14 +1410,18 @@ fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) {
     let period = Duration::from_secs_f64(config.heartbeat_period_secs);
     tracing::info!(%destination, period_s = config.heartbeat_period_secs, "CAT065 heartbeat enabled");
 
+    // The socket is created HERE (not in the task) so its concrete local
+    // port is known to the caller before any heartbeat is sent.
+    let socket = match firefly_multicast::sender_socket().await {
+        Ok(socket) => socket,
+        Err(error) => {
+            tracing::error!(%error, "failed to open CAT065 heartbeat socket");
+            return None;
+        }
+    };
+    let port = socket.local_addr().ok().map(|a| a.port());
+
     tokio::spawn(async move {
-        let socket = match firefly_multicast::sender_socket().await {
-            Ok(socket) => socket,
-            Err(error) => {
-                tracing::error!(%error, "failed to open CAT065 heartbeat socket");
-                return;
-            }
-        };
         let result = firefly_multicast::run_heartbeat(
             &socket,
             destination,
@@ -1326,6 +1439,7 @@ fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) {
             tracing::error!(%error, "CAT065 heartbeat stopped");
         }
     });
+    port
 }
 
 /// The current UTC time of day in seconds since midnight, for I065/030.

@@ -138,8 +138,15 @@ pub struct Metrics {
     pub restore: AtomicBool,
     /// `true` while this process runs as **standby** (HA.2a): probes only,
     /// watching the main's heartbeat. Cleared on promotion. Drives the
-    /// role-aware `/ready` answer; the Prometheus role gauge is HA.2b.
+    /// role-aware `/ready` answer and the `firefly_role` gauge.
     pub standby: AtomicBool,
+    /// Promotions performed by this process (HA.2b): a standby that took
+    /// over increments this once. 0 on a process that started active.
+    pub failovers_total: AtomicU64,
+    /// Seconds since the watched main's last heartbeat (HA.2b) — only
+    /// meaningful while in standby; frozen at its last value after
+    /// promotion (the watched main is gone then, by definition).
+    pub main_heartbeat_age_seconds: AtomicU64,
 
     // --- Registration shadow monitor (REG.2a, ADR 0034) ---
     /// Total number of registration bias estimates produced by the shadow
@@ -432,6 +439,27 @@ pub fn render(metrics: &Metrics) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_role",
+        "gauge",
+        "Instance role (HA.2): 1 = active (main), 0 = standby watching the main's heartbeat.",
+        f64::from(!metrics.standby.load(Ordering::Relaxed)),
+    );
+    write_metric(
+        &mut out,
+        "firefly_failovers_total",
+        "counter",
+        "Promotions performed by this process (HA.2): a standby that took over counts one.",
+        metrics.failovers_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_main_heartbeat_age_seconds",
+        "gauge",
+        "Seconds since the watched main's last CAT065 heartbeat (meaningful in standby).",
+        metrics.main_heartbeat_age_seconds.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
         "firefly_clutter_cells",
         "gauge",
         "Learned spatial clutter-map cells across all sensors (SPEC.2b).",
@@ -700,6 +728,10 @@ mod tests {
         metrics.snapshot_errors_total.store(2, Ordering::Relaxed);
         metrics.snapshot_age_seconds.store(8, Ordering::Relaxed);
         metrics.restore.store(true, Ordering::Relaxed);
+        metrics.failovers_total.store(1, Ordering::Relaxed);
+        metrics
+            .main_heartbeat_age_seconds
+            .store(2, Ordering::Relaxed);
 
         let text = render(&metrics);
 
@@ -767,6 +799,11 @@ mod tests {
         assert!(text.contains("firefly_restore 1"));
         assert!(text.contains("# TYPE firefly_snapshot_writes_total counter"));
         assert!(text.contains("# TYPE firefly_restore gauge"));
+        assert!(text.contains("firefly_role 1"), "active unless standby");
+        assert!(text.contains("firefly_failovers_total 1"));
+        assert!(text.contains("firefly_main_heartbeat_age_seconds 2"));
+        assert!(text.contains("# TYPE firefly_role gauge"));
+        assert!(text.contains("# TYPE firefly_failovers_total counter"));
     }
 
     /// Without any registration estimate the labelled bias gauges are absent —
