@@ -430,6 +430,28 @@ curl -X DELETE localhost:8080/correlation/7 -H 'Authorization: Bearer <token>'
 Pins sind flüchtig (Neustart verliert sie) und sterben automatisch mit dem
 Track-Ende (TSE) — Details in `docs/TECHNICAL.md`.
 
+### Schritt 4h (optional): Zustands-Snapshots für den schnellen Wiederanlauf (HA.1)
+
+Ohne Snapshots beginnt das Luftlagebild nach jedem Neustart bei Null
+(jeder Track bestätigt sich über mehrere Antennen-Umläufe neu, manuelle
+Korrelations-Pins gehen verloren). Mit gesetztem Pfad sichert Firefly
+seinen Arbeitszustand periodisch und liest ihn beim Start wieder ein:
+
+```bash
+export FIREFLY_SNAPSHOT_PATH=/var/lib/firefly/state.json
+# optional (Defaults: 10 s Schreib-Kadenz, 300 s maximales Restore-Alter):
+export FIREFLY_SNAPSHOT_PERIOD=10
+export FIREFLY_SNAPSHOT_MAX_AGE=300
+```
+
+Geschrieben wird atomar (`.tmp` + rename); ein Schreibfehler stoppt das
+Lagebild nicht (WARN + Metrik, Wiederversuch). Beim Start wird ein
+Snapshot nur übernommen, wenn Format-Version und **Quell-Konfiguration**
+(Referenzpunkt + Sensor-Liste) passen und er jünger als das Maximal-Alter
+ist — sonst startet Firefly laut begründet leer. In Kubernetes muss der
+Pfad auf einem **persistenten Volume** liegen. Malforme Werte (z. B.
+`FIREFLY_SNAPSHOT_PERIOD=soon`) brechen den Start ab.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den

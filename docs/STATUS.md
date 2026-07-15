@@ -10,6 +10,36 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (HA.1 — Zustands-Snapshot + Wiederanlauf)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **HA.1 (FR-TRK-049, ADR 0040; kein ICD-Bezug):** Firefly sichert seinen
+  Arbeitszustand jetzt periodisch und stellt ihn beim Start wieder her —
+  **das Luftlagebild ist nach einem Neustart binnen eines Output-Ticks
+  zurück** (samt Track-Nummern, Identitäten und der manuellen
+  Korrelations-Pins aus FPL.2, die bisher flüchtig waren). Neues Modul
+  `firefly-server::snapshot`: versioniertes JSON-Envelope (Tracker-Kern,
+  Datenzeit, Pins, **Konfigurations-Fingerprint** aus Referenzpunkt +
+  Sensor-Liste), **atomar** geschrieben (`.tmp` + fsync + rename) je
+  `FIREFLY_SNAPSHOT_PERIOD` (10 s) auf `FIREFLY_SNAPSHOT_PATH` (unset =
+  aus; kaputte Knobs = Start-Fehler). Schreibfehler nicht fatal (WARN +
+  Zähler, Wiederversuch). Restore hinter **drei Torwächtern** —
+  Format-Version, Fingerprint (Restart mit geänderter `FIREFLY_SOURCES`
+  wird deterministisch abgefangen), Alter ≤ `FIREFLY_SNAPSHOT_MAX_AGE`
+  (300 s) — jede Ablehnung laut, dann leerer Start; korrupter Inhalt nie
+  Panic. `/ready` bleibt am ersten Quell-Plot. Metriken
+  `firefly_snapshot_writes_total`/`_errors_total`/`_age_seconds`/
+  `firefly_restore`. 6 neue Tests (Roundtrip mit Tracker-`PartialEq`,
+  alle Ablehnungspfade, Fingerprint-Sensitivität, Knob-Parsing,
+  End-to-End-Restore mit Negativ-Check). Ehrliche Grenzen: Plots seit
+  letztem Snapshot verloren (≤ Periode; Forensik = `.ffplots`);
+  K8s-Volume = Deployment (HA.3); Main/Standby = HA.2. Roadmap:
+  **80,5 %**.
+- **Nächster Schritt:** **HA.2** ankündigen (Main/Standby: Leader
+  Election, State-Sync, unterbrechungsfreier Feed-Übergang; S5, 85 %) —
+  und Freigabe abwarten. Weiter offen: Wayfinder-Feedback auf #244
+  (EFS-Feldsatz; ADR 0038 bleibt „vorgeschlagen") und #245.
+
 ## 🎯 Stand 2026-07-15 (FPL.2 — I062/390 + manuelle Korrelation)
 
 - **Zuletzt aktualisiert:** 2026-07-15

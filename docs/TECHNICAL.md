@@ -330,6 +330,31 @@ und sind **flüchtig** (Neustart verliert sie; Persistenz = HA.1).
 > einen eigenen ADR. Der Feldsatz wächst **additiv** nach dem
 > EFS-Feedback aus Wayfinder #244.
 
+#### Zustands-Snapshot + Wiederanlauf (`FIREFLY_SNAPSHOT_*`, HA.1)
+
+Der SDPS-002-Baustein (ADR 0040): Der Live-Tracker sichert seinen
+Arbeitszustand (Tracks, IMM-Filterzustände, Track-Nummern-Pool,
+Clutter-Karten, letzte Datenzeit, manuelle Korrelations-Pins) periodisch
+als versioniertes JSON und liest ihn beim Start wieder ein — das Bild ist
+nach einem Neustart binnen eines Output-Ticks zurück statt nach Minuten
+der Neu-Bestätigung. Geschrieben wird **atomar** (`.tmp` + fsync +
+rename); Schreibfehler sind nicht fatal (WARN + Zähler, Wiederversuch).
+Restore nur, wenn **Format-Version**, **Konfigurations-Fingerprint**
+(Referenzpunkt + vollständige Sensor-Liste — ein Zustand für eine andere
+`FIREFLY_SOURCES`-Konfiguration wird nie wiederbelebt) **und Alter**
+passen; jede Ablehnung ist ein lautes WARN mit Grund, dann leerer Start.
+`/ready` bleibt an den ersten Quell-Plot gekoppelt.
+
+| Variable | Typ | Default | Bedeutung |
+|----------|-----|---------|-----------|
+| `FIREFLY_SNAPSHOT_PATH` | Pfad | — (aus) | Snapshot-Datei (K8s: persistentes Volume!). Unset/leer = keine Snapshots. |
+| `FIREFLY_SNAPSHOT_PERIOD` | Sekunden > 0 | 10 | Schreib-Kadenz (wall-clock, geprüft je Output-Tick). Malform → **Start-Abbruch**. |
+| `FIREFLY_SNAPSHOT_MAX_AGE` | Sekunden > 0 | 300 | Maximales Snapshot-Alter beim Restore — älter wird laut verworfen (veralteter Verkehr ist gefährlicher als ein leerer Start). Malform → **Start-Abbruch**. |
+
+> **Ehrliche Grenzen:** Plots zwischen letztem Snapshot und Absturz sind
+> verloren (Fenster ≤ Periode; forensisches Replay = `.ffplots`,
+> ADR 0020); Metrik-Zählerstände starten bei 0; Main/Standby = HA.2.
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.7.0. Im **Live-Modus** liest Firefly
@@ -504,6 +529,10 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_tracks_correlated` | gauge | **FPL.1:** Tracks mit Flugplan-Korrelation im letzten Output-Tick |
 | `firefly_correlation_refused` | gauge | **FPL.1:** sichtbar verweigerte Squawk-Korrelationen im letzten Output-Tick (Duplikat unter Plänen, Conspicuity 1000, Identitätskonflikt) |
 | `firefly_correlation_manual` | gauge | **FPL.2:** manuelle Korrelations-Pins in Kraft auf lebenden Tracks im letzten Output-Tick |
+| `firefly_snapshot_writes_total` | counter | **HA.1:** erfolgreiche Zustands-Snapshot-Schreibvorgänge (0 ohne `FIREFLY_SNAPSHOT_PATH`) |
+| `firefly_snapshot_errors_total` | counter | **HA.1:** fehlgeschlagene Snapshot-Schreibvorgänge — Persistenz kaputt, Lagebild läuft weiter (es wird weiter versucht) |
+| `firefly_snapshot_age_seconds` | gauge | **HA.1:** Sekunden seit dem letzten erfolgreichen Snapshot — das Verlustfenster eines Neustarts |
+| `firefly_restore` | gauge | **HA.1:** 1 = dieser Prozess hat sein Luftlagebild beim Start aus einem Snapshot wiederhergestellt |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |

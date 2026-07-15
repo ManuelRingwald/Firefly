@@ -930,6 +930,17 @@ selbst-gehosteter Stil für volle Souveränität bleibt ein späterer Schritt.
 
 ## Cloud & Betrieb
 
+**Zustands-Snapshot (HA.1)**
+Die periodische Sicherung des Tracker-Arbeitszustands (Tracks,
+Filterzustände, Track-Nummern-Pool, Clutter-Karten, manuelle
+Korrelations-Pins) auf Platte, atomar geschrieben und beim Start hinter
+drei Torwächtern (Format-Version, Konfigurations-Fingerprint,
+Maximal-Alter) wieder eingelesen — nach einem Neustart ist das
+Luftlagebild binnen eines Output-Ticks zurück statt nach Minuten der
+Neu-Bestätigung (ADR 0040, SDPS-002). Abzugrenzen vom Input-Recording
+(`.ffplots`): das ist forensisches Replay, der Snapshot ist schneller
+Wiederanlauf.
+
 **Cloud-nativ**
 Software, die *für* die Cloud gebaut ist statt nur *in* die Cloud verschoben:
 Sie nimmt an, dass Recheninstanzen jederzeit verschwinden können, dass skaliert
