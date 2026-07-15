@@ -437,8 +437,12 @@ Das Zusammenführen von Radarziel und Flugplan: „dieses Ziel **ist** Flug
 DLH123" — die Grundlage für Flugstreifen, Freigaben und Konfliktprüfung.
 Läuft per ADR 0038 **zentral im SDPS** (Firefly), damit alle Arbeitsplätze
 dieselbe Zuordnung sehen; das Ergebnis geht als I062/390 in den Strom
-(FPL.2). Schlüssel-Disziplin nach der Weeze-Lektion: Callsign zuerst,
-Squawk nur bei Eindeutigkeit, nie bei Identitäts-Konflikt, nie Code 1000.
+(FPL.2, ADR 0039). Schlüssel-Disziplin nach der Weeze-Lektion: Callsign
+zuerst, Squawk nur bei Eindeutigkeit, nie bei Identitäts-Konflikt, nie
+Code 1000. Die **manuelle Korrelation** (Pin auf Plan oder auf
+„unkorreliert" je Draht-Track-Nummer, via Kommando-API) schlägt die
+Automatik immer — sie ist das ehrliche Ventil für alles, was die
+konservativen Regeln verweigern; ein Pin stirbt mit dem Track-Ende (TSE).
 
 **Multipath-Reflexion (Radar-Geist)**
 Ein starkes Ziel nahe einer Reflektorfläche (Gebäude, Gelände) erzeugt ein

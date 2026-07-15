@@ -410,6 +410,26 @@ unset heißt schlicht „keine Flugpläne" (INFO im Log). Der Feldsatz wächst
 additiv (EFS-Bedarf, Wayfinder #244); eine Live-FDPS-Anbindung ist ein
 dokumentiertes Folge-Häppchen.
 
+Die berechnete Zuordnung steht im WS-JSON (`flight_plan`) **und** auf dem
+CAT062-Draht (I062/390, ICD 3.7.0). **Manuell übersteuern** (FPL.2;
+Token nur nötig, wenn `FIREFLY_WS_TOKEN` gesetzt ist):
+
+```bash
+# Plan DLH123 auf Draht-Track 7 pinnen (manuell schlägt Automatik):
+curl -X POST localhost:8080/correlation \
+  -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' \
+  -d '{"track_number":7,"callsign":"DLH123"}'
+# Track 9 auf "unkorreliert" pinnen (Automatik bleibt gesperrt):
+curl -X POST localhost:8080/correlation \
+  -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' \
+  -d '{"track_number":9}'
+# Pin lösen — die Automatik übernimmt wieder:
+curl -X DELETE localhost:8080/correlation/7 -H 'Authorization: Bearer <token>'
+```
+
+Pins sind flüchtig (Neustart verliert sie) und sterben automatisch mit dem
+Track-Ende (TSE) — Details in `docs/TECHNICAL.md`.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den
