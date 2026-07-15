@@ -1,0 +1,88 @@
+# Firefly deployment values (HA.3, ADR 0041/0040).
+#
+# The defaults describe the intended production shape: one active instance
+# (main) plus one warm spare (standby) over a SHARED snapshot volume, both
+# with a restart policy (Deployments restart by design) — the operational
+# prerequisites the HA.2b split-brain guard documents.
+
+image:
+  repository: firefly-server
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# The warm spare (FIREFLY_ROLE=standby, ADR 0041). Disable only for
+# single-instance setups — you then run without automatic takeover.
+standby:
+  enabled: true
+
+# UDP multicast (the CAT062/065/063 wire contract) is NOT a given in
+# standard CNI pod networks. The default follows ADR 0017 (an isolated
+# operations network): hostNetwork, so the feed uses the node's interfaces.
+# Alternative: set false and provide a multicast-capable secondary network
+# (e.g. Multus) yourself — the chart does not pretend to solve that.
+# With hostNetwork the main and standby pods MUST land on different nodes
+# (same host port, same multicast socket) — the chart enforces this with a
+# required pod anti-affinity.
+hostNetwork: true
+
+# Plain (non-secret) environment for BOTH instances. Identical config on
+# main and standby is an ADR 0041 requirement — the HA.1 configuration
+# fingerprint rejects a takeover from a mismatching snapshot.
+env:
+  FIREFLY_CAT062_ENABLED: "true"          # the wire feed (heartbeat included)
+  FIREFLY_SNAPSHOT_PATH: /var/lib/firefly/state.json   # on the shared volume
+  RUST_LOG: info
+  # FIREFLY_FAILOVER_TIMEOUT: "3"
+  # FIREFLY_SNAPSHOT_PERIOD: "10"
+  # FIREFLY_CAT062_GROUP: 239.255.0.62
+  # FIREFLY_CAT062_PORT: "8600"
+
+# The source-input contract (ADR 0023): the FIREFLY_SOURCES JSON list.
+# Empty = an idle tracker (empty sky + heartbeat, ADR 0030).
+sources: ""
+
+# Secret environment (FIREFLY_WS_TOKEN, FIREFLY_SOURCE_*_SECRET credential
+# values referenced via cred_env). Either inline here (rendered into a
+# Secret — fine for a lab, use existingSecret in production) …
+secrets: {}
+# … or reference a Secret you manage outside the chart (takes precedence):
+existingSecret: ""
+
+# The shared state-snapshot volume (ADR 0040): the main writes it, the
+# standby restores from it at takeover. ReadWriteMany (NFS & co.) lets the
+# pair run on different nodes; with ReadWriteOnce you must co-schedule both
+# pods on one node yourself — which contradicts the hostNetwork
+# anti-affinity, so RWX is the honest default.
+snapshot:
+  enabled: true
+  size: 1Gi
+  accessMode: ReadWriteMany
+  storageClass: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+# Non-root, read-only root filesystem: the process writes only to the
+# snapshot volume (fsGroup makes it writable) and to stdout.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Graceful shutdown (ADR 0003): SIGTERM → recorder/snapshot flush.
+terminationGracePeriodSeconds: 20

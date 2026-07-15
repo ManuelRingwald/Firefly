@@ -1,0 +1,16 @@
+# One ConfigMap for BOTH instances: identical configuration on main and
+# standby is an ADR 0041 requirement (the HA.1 fingerprint enforces it at
+# takeover) — sharing the map makes drift structurally impossible.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-firefly-env
+  labels:
+    {{- include "firefly.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- if .Values.sources }}
+  FIREFLY_SOURCES: {{ .Values.sources | quote }}
+  {{- end }}

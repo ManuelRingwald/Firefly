@@ -1,0 +1,21 @@
+{{- if .Values.snapshot.enabled }}
+# The shared state-snapshot volume (ADR 0040): the main writes
+# FIREFLY_SNAPSHOT_PATH here, the standby restores from it at takeover
+# (ADR 0041). Without this volume a takeover starts with an EMPTY picture
+# (the HA.1 gates say so loudly, but the minutes are lost anyway).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-firefly-snapshot
+  labels:
+    {{- include "firefly.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.snapshot.accessMode }}
+  {{- if .Values.snapshot.storageClass }}
+  storageClassName: {{ .Values.snapshot.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.snapshot.size }}
+{{- end }}
