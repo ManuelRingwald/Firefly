@@ -10,6 +10,34 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (HA.2a — Standby-Rolle + automatische Übernahme)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **HA.2a (FR-TRK-050, ADR 0041; kein ICD-Bezug — CAT065 wird nur
+  konsumiert):** Firefly kennt jetzt eine **Standby-Rolle**
+  (`FIREFLY_ROLE=standby`): Die Bereitschafts-Instanz bedient nur ihre
+  Probes (`/ready` = 503 „standby"), sendet nichts und pollt keine
+  Quellen — sie **beobachtet den CAT065-Heartbeat der eigenen
+  SDPS-Identität** auf der Multicast-Gruppe (kein externer Koordinator:
+  der Wire-Vertrag selbst trägt die Liveness, ADR 0018). Verstummt der
+  Heartbeat länger als `FIREFLY_FAILOVER_TIMEOUT` (3 s), **promotet**
+  sie sich: voller Live-Stack inkl. **HA.1-Restore** vom gemeinsamen
+  Snapshot-Volume — gleiche Track-Nummern, Identitäten, Pins; der
+  eigene Heartbeat startet erst nach der Promotion. Detektor-Regeln:
+  fremde SDPS/Garbage re-armieren nie, NOGO zählt als lebendig, Uhr ab
+  Standby-Start (schon toter Main ⇒ Übernahme nach einem Timeout).
+  4 neue Tests, darunter End-to-End über **echtes UDP-Multicast**
+  (Fake-Main verstummt ⇒ Promotion erst danach). Ehrliche Grenzen:
+  Timeout-Detektion, kein Konsens — **Demotion/Split-Brain-Schutz +
+  Failover-Metriken = HA.2b** (bereits freigegeben, Teil des
+  HA.2-Go). Roadmap: **83 %**.
+- **Nächster Schritt:** **HA.2b** umsetzen (im HA.2-Go enthaltene zweite
+  Hälfte, keine neue Ankündigungsrunde): Demotion (aktiver Main sieht
+  fremden aktiven Heartbeat derselben Identität ⇒ tritt zurück),
+  Metriken `firefly_role`/`firefly_failovers_total`/Heartbeat-Alter,
+  Partitions-Grenzen dokumentiert (S4, 85 %). Danach **HA.3**
+  ankündigen. Weiter offen: Wayfinder #244/#245.
+
 ## 🎯 Stand 2026-07-15 (HA.1 — Zustands-Snapshot + Wiederanlauf)
 
 - **Zuletzt aktualisiert:** 2026-07-15

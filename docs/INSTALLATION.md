@@ -452,6 +452,31 @@ ist — sonst startet Firefly laut begründet leer. In Kubernetes muss der
 Pfad auf einem **persistenten Volume** liegen. Malforme Werte (z. B.
 `FIREFLY_SNAPSHOT_PERIOD=soon`) brechen den Start ab.
 
+### Schritt 4i (optional): Standby-Instanz für automatische Übernahme (HA.2a)
+
+Eine zweite Firefly-Instanz kann als **Bereitschaft** mitlaufen: Sie
+sendet nichts und pollt keine Quellen, beobachtet aber den
+CAT065-Heartbeat der aktiven Instanz auf der Multicast-Gruppe und
+übernimmt automatisch, wenn er verstummt — mit dem letzten
+Zustands-Snapshot (Schritt 4h) als Startbild.
+
+```bash
+# Auf der Bereitschafts-Instanz (identische Konfiguration wie der Main,
+# insbesondere FIREFLY_SOURCES, FIREFLY_CAT062_* und FIREFLY_SNAPSHOT_PATH
+# auf einem GEMEINSAMEN Volume):
+export FIREFLY_ROLE=standby
+# optional: Sekunden Heartbeat-Stille bis zur Übernahme (Default 3):
+export FIREFLY_FAILOVER_TIMEOUT=3
+```
+
+Voraussetzungen: `FIREFLY_CAT062_ENABLED=true` (samt CAT065-Heartbeat,
+Default an) — sonst bricht der Start ab, denn ohne Feed kann der Standby
+weder wachen noch nach der Übernahme senden. `/ready` antwortet im
+Standby mit 503 „standby" (Kubernetes routet keinen Traffic dorthin).
+Ohne gemeinsames Snapshot-Volume übernimmt der Standby mit leerem Bild.
+Hinweis: Der Schutz gegen zwei gleichzeitige Sender nach einer
+Netz-Partition (Demotion) folgt mit HA.2b.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den

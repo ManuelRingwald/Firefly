@@ -28,6 +28,7 @@ pub mod metrics;
 pub mod replay;
 pub mod snapshot;
 pub mod sources;
+pub mod standby;
 
 pub use app::{router, AppState, CorrelationApi, FrameSource};
 pub use config::ServerConfig;
@@ -40,6 +41,7 @@ pub use live::{
 };
 pub use metrics::Metrics;
 pub use snapshot::{config_fingerprint, RestoreDecision, SnapshotConfig};
+pub use standby::{failover_timeout_from_env, role_from_env, wait_for_promotion, Role};
 
 use tokio::net::TcpListener;
 

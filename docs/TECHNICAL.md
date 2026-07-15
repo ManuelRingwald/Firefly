@@ -355,6 +355,31 @@ passen; jede Ablehnung ist ein lautes WARN mit Grund, dann leerer Start.
 > verloren (Fenster ≤ Periode; forensisches Replay = `.ffplots`,
 > ADR 0020); Metrik-Zählerstände starten bei 0; Main/Standby = HA.2.
 
+#### Main/Standby + Heartbeat-Failover (`FIREFLY_ROLE`, HA.2a)
+
+Der zweite SDPS-002-Baustein (ADR 0041): Eine **Standby-Instanz** läuft
+als warm spare mit — Probes-only (`/ready` = 503 „standby"), kein Senden
+(eine SDPS-Identität, ein Sender), keine Quellen (kein doppeltes
+Rate-Limit-Budget). Sie beobachtet den **CAT065-Heartbeat der eigenen
+SAC/SIC** auf der Multicast-Gruppe (das Liveness-Signal aus ADR 0018 —
+kein externer Koordinator); ein NOGO-Heartbeat zählt als lebendig.
+Verstummt der Heartbeat länger als der Failover-Timeout, **promotet**
+sich der Standby: voller Live-Stack inkl. HA.1-Snapshot-Restore vom
+gemeinsamen Volume (gleiche Track-Nummern/Identitäten/Pins); der eigene
+Heartbeat startet erst nach der Promotion.
+
+| Variable | Typ | Default | Bedeutung |
+|----------|-----|---------|-----------|
+| `FIREFLY_ROLE` | `main` \| `standby` | `main` | Instanz-Rolle. Unbekannter Wert → **Start-Abbruch**. `standby` verlangt `FIREFLY_CAT062_ENABLED=true` + CAT065-Heartbeat (sonst **Start-Abbruch**). |
+| `FIREFLY_FAILOVER_TIMEOUT` | Sekunden > 0 | 3 | Heartbeat-Stille bis zur Übernahme (3 = drei verpasste 1-s-Heartbeats). Die Uhr läuft ab Standby-Start — ein beim Start schon toter Main wird einen Timeout später übernommen. Malform → **Start-Abbruch**. |
+
+> **Ehrliche Grenzen (ADR 0041):** Timeout-Detektion, **kein Konsens** —
+> eine Netz-Partition kann vorübergehend zwei Sender erzeugen; die
+> Demotion (Main sieht fremden aktiven Heartbeat ⇒ tritt zurück) und die
+> Failover-Metriken (`firefly_role`, `firefly_failovers_total`) folgen
+> mit **HA.2b**. Übernahme-Bild = letzter Snapshot (Verlustfenster ≤
+> Snapshot-Periode + Timeout); gemeinsames Volume ist Deployment-Sache.
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.7.0. Im **Live-Modus** liest Firefly

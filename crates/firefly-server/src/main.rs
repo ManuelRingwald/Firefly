@@ -69,19 +69,32 @@ async fn main() {
         );
     }
 
+    // Main/Standby role (HA.2a, ADR 0041): a standby serves probes only and
+    // watches the main's CAT065 heartbeat; the full live stack (sources,
+    // tracker, senders, incl. the HA.1 restore) starts only on promotion.
+    let role = firefly_server::role_from_env().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "invalid role configuration");
+        std::process::exit(1);
+    });
+    if role == firefly_server::Role::Standby {
+        run_standby_phase(
+            &config,
+            Arc::clone(&metrics),
+            ws_token.clone(),
+            ws_allowed_origin.clone(),
+        )
+        .await;
+    }
+
     // CAT065 heartbeat: wall-clock liveness signal, independent of the sources —
     // it is what lets the ASD tell "empty sky" from "dead feed" (ADR 0018).
+    // Deliberately AFTER any standby phase: the heartbeat says "I am the
+    // active SDPS" — a standby stays silent.
     spawn_cat065_heartbeat(Arc::clone(&metrics));
 
     let state = build_live_state(metrics, ws_token, ws_allowed_origin).await;
 
-    let listener = match TcpListener::bind(("0.0.0.0", config.port)).await {
-        Ok(listener) => listener,
-        Err(error) => {
-            tracing::error!(%error, port = config.port, "failed to bind");
-            std::process::exit(1);
-        }
-    };
+    let listener = bind_listener(config.port).await;
     match listener.local_addr() {
         Ok(addr) => tracing::info!(%addr, "listening; open http://{addr} in a browser"),
         Err(_) => tracing::info!("listening"),
@@ -95,6 +108,114 @@ async fn main() {
         tracing::error!(%error, "server error");
     }
     tracing::info!("shutdown complete");
+}
+
+// ---------------------------------------------------------------------------
+// Standby phase (HA.2a, ADR 0041)
+// ---------------------------------------------------------------------------
+
+/// Bind the HTTP listener with `SO_REUSEADDR`: the standby phase serves and
+/// shuts down its probes-only server before the full stack rebinds the same
+/// port — lingering `TIME_WAIT` sockets from probe connections must not
+/// block the promotion.
+async fn bind_listener(port: u16) -> TcpListener {
+    let bind = || -> std::io::Result<TcpListener> {
+        let socket = tokio::net::TcpSocket::new_v4()?;
+        socket.set_reuseaddr(true)?;
+        socket.bind(std::net::SocketAddr::from(([0, 0, 0, 0], port)))?;
+        socket.listen(1024)
+    };
+    match bind() {
+        Ok(listener) => listener,
+        Err(error) => {
+            tracing::error!(%error, port, "failed to bind");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Run the standby phase (HA.2a, ADR 0041): serve a probes-only HTTP app
+/// (`/ready` answers "standby", 503) while watching the main's CAT065
+/// heartbeat on the multicast group. Returns when promotion is due — the
+/// caller then starts the full live stack (whose HA.1 restore picks up the
+/// main's last state snapshot). A shutdown signal during standby ends the
+/// process; misconfiguration and socket failures are fatal (a standby that
+/// cannot watch cannot do its job).
+async fn run_standby_phase(
+    config: &ServerConfig,
+    metrics: Arc<Metrics>,
+    ws_token: Option<String>,
+    ws_allowed_origin: Option<String>,
+) {
+    use std::sync::atomic::Ordering;
+
+    let mc = MulticastConfig::from_env();
+    if !mc.enabled || !mc.heartbeat_enabled {
+        tracing::error!(
+            "FIREFLY_ROLE=standby requires the multicast feed (FIREFLY_CAT062_ENABLED=true) \
+             and the CAT065 heartbeat — a standby that could not send after promotion, or has \
+             no heartbeat to watch, cannot provide availability"
+        );
+        std::process::exit(1);
+    }
+    let timeout = firefly_server::failover_timeout_from_env().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "invalid failover timeout");
+        std::process::exit(1);
+    });
+    metrics.standby.store(true, Ordering::Relaxed);
+
+    // Probes-only state: no tracker/sources yet — a WS client connecting to a
+    // standby sees an empty stream, `/ready` says why (503 "standby").
+    let (_dummy_tx, dummy_rx) = watch::channel(LiveSnapshot::empty());
+    let state = AppState {
+        source: FrameSource::Live {
+            snapshots: dummy_rx,
+            sensor: SensorId(0),
+        },
+        metrics: Arc::clone(&metrics),
+        ws_token,
+        ws_allowed_origin,
+        correlation: None,
+    };
+    let listener = bind_listener(config.port).await;
+    tracing::info!(
+        port = config.port,
+        timeout_s = timeout.as_secs_f64(),
+        "standby: probes serving; full live stack deferred until promotion (HA.2a)"
+    );
+
+    let promoted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let promoted_flag = Arc::clone(&promoted);
+    let (group, port, expected) = (mc.group, mc.port, mc.data_source());
+    let shutdown = async move {
+        tokio::select! {
+            result = firefly_server::wait_for_promotion(group, port, expected, timeout) => {
+                match result {
+                    Ok(()) => promoted_flag.store(true, Ordering::Relaxed),
+                    Err(error) => {
+                        tracing::error!(%error, "standby heartbeat watch failed");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            () = shutdown_signal() => {}
+        }
+    };
+    if let Err(error) = axum::serve(listener, router(state))
+        .with_graceful_shutdown(shutdown)
+        .await
+    {
+        tracing::error!(%error, "standby server error");
+        std::process::exit(1);
+    }
+    if !promoted.load(Ordering::Relaxed) {
+        tracing::info!("shutdown during standby");
+        std::process::exit(0);
+    }
+    metrics.standby.store(false, Ordering::Relaxed);
+    tracing::info!(
+        "standby promoted to active: starting the full live stack (HA.1 snapshot restore included)"
+    );
 }
 
 // ---------------------------------------------------------------------------

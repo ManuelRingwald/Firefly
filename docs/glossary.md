@@ -930,6 +930,17 @@ selbst-gehosteter Stil für volle Souveränität bleibt ein späterer Schritt.
 
 ## Cloud & Betrieb
 
+**Main/Standby (HA.2)**
+Zwei Firefly-Instanzen, eine Rolle: Der **Main** rechnet und sendet; der
+**Standby** bedient nur seine Probes, sendet nichts und beobachtet den
+CAT065-Heartbeat des Mains auf der Multicast-Gruppe. Verstummt der
+Heartbeat länger als der Failover-Timeout, **promotet** sich der Standby
+und startet mit dem letzten Zustands-Snapshot — das ASD sieht weiter ein
+Lagebild statt eines Ausfalls (ADR 0041, SDPS-002). Bewusst ohne
+externen Koordinator: Der Wire-Vertrag selbst trägt das Liveness-Signal;
+die ehrliche Grenze (Timeout-Detektion statt Konsens, Split-Brain bei
+Netz-Partition) steht im ADR.
+
 **Zustands-Snapshot (HA.1)**
 Die periodische Sicherung des Tracker-Arbeitszustands (Tracks,
 Filterzustände, Track-Nummern-Pool, Clutter-Karten, manuelle
