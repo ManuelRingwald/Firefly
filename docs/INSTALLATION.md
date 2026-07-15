@@ -131,6 +131,41 @@ docker run --rm \
 
 ---
 
+## 6a. Kubernetes-Betrieb (Main/Standby-Paar, HA.3)
+
+Das geprüfte Deployment-Rezept liegt unter `deploy/` — es verdrahtet die
+HA-Bausteine (gemeinsames Snapshot-Volume, Standby mit automatischer
+Übernahme, Restart-Policy, Readiness-Routing) so, dass die bekannten
+Fußangeln strukturell ausgeschlossen sind:
+
+```bash
+# Empfohlen (Helm):
+helm install firefly deploy/helm/firefly \
+  --set image.repository=<registry>/firefly-server \
+  --set sources='<FIREFLY_SOURCES-JSON>'
+
+# Ohne Helm (statisches Äquivalent, vorher Image/Sources eintragen):
+kubectl apply -f deploy/kubernetes/firefly.yaml
+
+# Prüfen: der Main ist ready, der Standby antwortet 503 "standby":
+kubectl get pods -l app.kubernetes.io/name=firefly
+```
+
+Wichtige Punkte (Details und Begründungen in `deploy/README.md`):
+
+- **Multicast:** Default ist `hostNetwork: true` (abgeschottetes
+  Betriebsnetz, ADR 0017) mit Pflicht-Anti-Affinity — Main und Standby
+  landen nie auf demselben Knoten. Standard-CNI-Pod-Netze können in der
+  Regel **kein** Multicast; wer `hostNetwork` abschaltet, braucht ein
+  multicast-fähiges Zweitnetz (z. B. Multus).
+- **Snapshot-Volume:** ein PVC mit `ReadWriteMany` (z. B. NFS) — der
+  Standby liest bei der Übernahme, was der Main geschrieben hat.
+- **Secrets:** `FIREFLY_WS_TOKEN`/`FIREFLY_SOURCE_*_SECRET` über ein
+  selbst verwaltetes Secret (`--set existingSecret=<name>`).
+- **Validierung:** `deploy/validate.sh` (YAML-Syntax überall; `helm lint`
+  + Voll-Render, wo Helm installiert ist). Der erste echte `helm install`
+  gehört in die Abnahme des Zielclusters.
+
 ## 7. ADS-B-Echtbetrieb mit OpenSky Network
 
 Mit aktivierter OpenSky-Quelle (`FIREFLY_OPENSKY_ENABLED=true`, ADR 0030:
