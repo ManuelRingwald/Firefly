@@ -10,6 +10,33 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (HA.5 — COMPASS-Gegen-Check, Verfahren)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **HA.5 (NFR-SAFE-003; kein Code-, kein ICD-Bezug):** Der
+  **unabhängige Gegen-Check** ist als geprüftes Verfahren dokumentiert
+  (`docs/verification/compass-gegen-check.md`): PCAP-Mitschnitt des
+  echten CAT062/065/063-Multicast per `tcpdump` (wichtiges Detail: der
+  Mitschnitt-Host braucht einen IGMP-haltenden Konsumenten),
+  Schnell-Sichtung über Wiresharks eigenen ASTERIX-Dissector (zweiter
+  Fremd-Decoder), Import/Auswertung in **OpenATS COMPASS** mit
+  **Checkliste C1–C6** (0 Dekodier-Fehler; nur Kategorien 062/065/063;
+  Item-Abdeckung gegen ICD 3.7.0 inkl. „I062/390 nur bei korreliertem
+  Track"; Update-Raten; Track-/Korrelations-Konsistenz gegen
+  `/metrics`-Schnappschüsse) und **Abgleich-Bericht-Template** (je Lauf
+  als `compass-bericht-<datum>.md` einzuchecken; Abweichungen
+  klassifiziert: Format-Fehler/Konsistenz/Werkzeug-Differenz).
+  Ehrliche Grenzen: der COMPASS-Lauf selbst ist ein GUI-gebundener
+  **Betreiber-/Abnahme-Schritt** (kein CI-Gate; Wiederholung je
+  ICD-Bump); keine wahrheitsbasierte Genauigkeit aus Track-only-Daten
+  (bleibt beim HA.4-Messstand). **AP-HA ist damit komplett
+  (HA.1–HA.5).** Roadmap: **89 %**.
+- **Nächster Schritt:** **CAP.1** ankündigen (Benchmark-Harness mit
+  criterion + synthetische Lastszenarien N Sensoren × M Tracks; S3,
+  90,5 %) — und Freigabe abwarten. Offen beim Betreiber: der erste
+  ausgefüllte COMPASS-Bericht (HA.5-Abnahme). Weiter offen:
+  Wayfinder #244/#245.
+
 ## 🎯 Stand 2026-07-15 (HA.4 — Auswertungs-Harness)
 
 - **Zuletzt aktualisiert:** 2026-07-15
