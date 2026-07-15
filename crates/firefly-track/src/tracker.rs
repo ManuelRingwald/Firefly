@@ -1193,6 +1193,14 @@ fn system_track_from(
         v_north: v[1],
         confirmed: track.is_confirmed(),
         coasting,
+        // SPEC.1 exported with FPL.1: the duplicate-identity flag reaches the
+        // output so the correlation (its first consumer) and the display can
+        // honour it.
+        identity_conflict: track.identity_conflict(),
+        // Correlation is a central *output-stage* function (ADR 0038): the
+        // live path fills this via apply_correlation, the tracker core stays
+        // flight-plan-free.
+        flight_plan: None,
         // Mono/multisensor over the provenance freshness window (FR-TRK-036):
         // the per-scan contributing set would flap on an asynchronous
         // multi-radar feed whose sensors rarely land in one opportunity.

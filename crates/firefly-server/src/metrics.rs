@@ -110,6 +110,14 @@ pub struct Metrics {
     /// Learned spatial clutter-map cells across all sensors (SPEC.2b,
     /// FR-TRK-046) — a growing value means the tracker is mapping hotspots.
     pub clutter_cells: AtomicU64,
+    /// Loaded flight plans (FPL.1, FR-TRK-047).
+    pub flight_plans: AtomicU64,
+    /// Tracks correlated to a flight plan in the latest snapshot.
+    pub tracks_correlated: AtomicU64,
+    /// Squawk-correlation refusals in the latest snapshot (duplicate code,
+    /// conspicuity 1000 or identity conflict) — the "needs manual
+    /// correlation" signal (ADR 0038 rule 4).
+    pub correlation_refused: AtomicU64,
 
     // --- Registration shadow monitor (REG.2a, ADR 0034) ---
     /// Total number of registration bias estimates produced by the shadow
@@ -343,6 +351,27 @@ pub fn render(metrics: &Metrics) -> String {
         "gauge",
         "Number of configured adsb_asterix (CAT021 ground station) sources for this instance.",
         metrics.sources_adsb021.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_flight_plans",
+        "gauge",
+        "Loaded flight plans (FPL.1).",
+        metrics.flight_plans.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_tracks_correlated",
+        "gauge",
+        "Tracks correlated to a flight plan in the latest snapshot (FPL.1).",
+        metrics.tracks_correlated.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_correlation_refused",
+        "gauge",
+        "Squawk-correlation refusals in the latest snapshot (duplicate/conspicuity/identity conflict).",
+        metrics.correlation_refused.load(Ordering::Relaxed) as f64,
     );
     write_metric(
         &mut out,

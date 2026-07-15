@@ -15,7 +15,7 @@ pub use ids::{SensorId, TargetId, TrackId};
 pub use plot::{Callsign, Daps, DetectionKind, Measurement, ModeAC, Plot, SourceKind};
 pub use sensor::Sensor;
 pub use system_track::{
-    CourseTrend, ModeOfMovement, Provenance, SourceAges, SpeedTrend, SystemTrack, VerticalTrend,
-    PROVENANCE_FRESH_S,
+    CourseTrend, FlightPlanRef, ModeOfMovement, Provenance, SourceAges, SpeedTrend, SystemTrack,
+    VerticalTrend, PROVENANCE_FRESH_S,
 };
 pub use time::Timestamp;

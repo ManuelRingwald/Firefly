@@ -111,6 +111,21 @@ pub enum VerticalTrend {
     Undetermined,
 }
 
+/// A reference to the flight plan a track is correlated with (FPL.1,
+/// ADR 0038): the minimal field set a label/strip needs today; grows
+/// additively as the EFS requirements land (Wayfinder #244).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlightPlanRef {
+    /// The plan's callsign — also the primary correlation key.
+    pub callsign: String,
+    /// Departure aerodrome (ICAO locator), when the plan carries it.
+    #[serde(default)]
+    pub departure: Option<String>,
+    /// Destination aerodrome (ICAO locator), when the plan carries it.
+    #[serde(default)]
+    pub destination: Option<String>,
+}
+
 /// The track's **mode of movement** (I062/200): what the aircraft is doing in
 /// each of the three axes, as far as the tracker can honestly tell —
 /// `Undetermined` where it cannot.
@@ -274,6 +289,19 @@ pub struct SystemTrack {
     /// Encoded as CAT062 I062/200 when present.
     #[serde(default)]
     pub mode_of_movement: Option<ModeOfMovement>,
+    /// Whether another live track currently carries the same ICAO address or
+    /// Mode 3/A code (SPEC.1, exported with FPL.1 — the correlation is its
+    /// first consumer): a duplicated identity must never auto-correlate by
+    /// code, and a display may flag it. Additive WS-JSON field; no CAT062
+    /// impact.
+    #[serde(default)]
+    pub identity_conflict: bool,
+    /// The correlated flight plan (FPL.1, ADR 0038), absent while the track
+    /// is uncorrelated. Filled centrally at the output stage — one
+    /// association for every consumer. Additive WS-JSON field; the wire item
+    /// (I062/390) follows in FPL.2.
+    #[serde(default)]
+    pub flight_plan: Option<FlightPlanRef>,
 }
 
 impl SystemTrack {
@@ -365,6 +393,8 @@ mod tests {
             rocd_ft_min: None,
             acceleration_mps2: None,
             mode_of_movement: None,
+            identity_conflict: false,
+            flight_plan: None,
         }
     }
 

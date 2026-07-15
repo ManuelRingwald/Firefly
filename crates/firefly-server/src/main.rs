@@ -121,6 +121,10 @@ async fn build_live_state(
     // is fatal (the vertical chain must not silently degrade to standard
     // atmosphere). The service itself is consumed by the vertical tracking
     // (VERT.2); here it is resolved, surfaced as metrics and logged.
+    let fpl = firefly_fpl::FplConfig::from_env().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "invalid flight-plan configuration");
+        std::process::exit(1);
+    });
     let meteo = firefly_meteo::MeteoConfig::from_env().unwrap_or_else(|e| {
         tracing::error!(error = %e, "FIREFLY_METEO_QNH invalid; aborting");
         std::process::exit(1);
@@ -338,6 +342,10 @@ async fn build_live_state(
     if !meteo.regions.is_empty() {
         live = live.with_meteo(meteo.into_service());
     }
+    if !fpl.plans.is_empty() {
+        tracing::info!(plans = fpl.plans.len(), "flight-plan correlation active");
+        live = live.with_flight_plans(firefly_fpl::CorrelationService::new(fpl.plans.clone()));
+    }
     match (registration, apply) {
         (Some(monitor), true) => {
             tracing::info!(
@@ -360,7 +368,14 @@ async fn build_live_state(
             plots_rx,
             snapshot_tx,
             output_period,
-            move |plots, records, registration, clutter_cells| {
+            move |plots, records, registration, clutter_cells, correlation| {
+                let (plans, correlated, refused) = correlation;
+                m.flight_plans
+                    .store(plans, std::sync::atomic::Ordering::Relaxed);
+                m.tracks_correlated
+                    .store(correlated, std::sync::atomic::Ordering::Relaxed);
+                m.correlation_refused
+                    .store(refused, std::sync::atomic::Ordering::Relaxed);
                 m.live_plots_ingested_total
                     .store(plots, std::sync::atomic::Ordering::Relaxed);
                 m.plot_records_written_total
