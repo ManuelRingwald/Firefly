@@ -88,6 +88,26 @@ fn false_track_metric_counts_unmatched_tracks() {
     assert_eq!(report.aggregate.confirmed_tracks_total, 2);
 }
 
+/// The CAP.1 load-scenario generator produces a trackable picture: on a
+/// small grid every aircraft is confirmed as exactly one track and no
+/// ghosts appear — the property that makes the load benchmarks
+/// meaningful (a generator the tracker cannot follow would benchmark
+/// garbage). REQ: NFR-CAP-001
+#[test]
+fn load_grid_scenario_tracks_all_aircraft() {
+    let scenario = scenarios::load_grid(1, 10, 120.0);
+    let report = evaluate(&scenario, &cfg("load-1x10"));
+    assert_eq!(report.targets.len(), 10);
+    assert!(
+        report.aggregate.track_pd >= 0.9,
+        "aggregate PD {} too low",
+        report.aggregate.track_pd
+    );
+    assert_eq!(report.aggregate.confirmed_tracks_total, 10);
+    assert_eq!(report.aggregate.false_tracks, 0);
+    assert_eq!(report.aggregate.id_switches, 0);
+}
+
 /// Determinism (NFR-CLOUD-001): the same scenario produces a byte-identical
 /// JSON report — the property that makes CI trend lines meaningful.
 /// REQ: FR-TRK-051
