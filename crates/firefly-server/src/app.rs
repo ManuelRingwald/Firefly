@@ -106,6 +106,19 @@ async fn health() -> impl IntoResponse {
 /// sources is ready immediately (main pre-sets the flag): its empty sky IS the
 /// complete picture (ADR 0030).
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    if state
+        .metrics
+        .standby
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        // A standby (HA.2a) is deliberately not ready: it must not receive
+        // traffic while the main is active — it promotes on the main's
+        // heartbeat silence and only then becomes ready like any instance.
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "standby: watching the main's heartbeat",
+        );
+    }
     let is_ready = state
         .metrics
         .live_ready
@@ -469,6 +482,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// A standby (HA.2a) is deliberately not ready — even when `live_ready`
+    /// is set — and says why; after promotion (flag cleared) the normal
+    /// readiness semantics apply. REQ: FR-TRK-050
+    #[tokio::test]
+    async fn ready_probe_answers_standby_while_in_standby() {
+        use std::sync::atomic::Ordering;
+        let state_sb = state();
+        state_sb.metrics.standby.store(true, Ordering::Relaxed);
+        let response = router(state_sb.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("standby"));
+
+        state_sb.metrics.standby.store(false, Ordering::Relaxed);
+        let response = router(state_sb)
+            .oneshot(
+                Request::builder()
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "promotion clears it");
     }
 
     /// The metrics endpoint answers 200 with a Prometheus exposition.

@@ -136,6 +136,10 @@ pub struct Metrics {
     /// 1 if this process restored its air picture from a state snapshot at
     /// startup, else 0 (set once in main).
     pub restore: AtomicBool,
+    /// `true` while this process runs as **standby** (HA.2a): probes only,
+    /// watching the main's heartbeat. Cleared on promotion. Drives the
+    /// role-aware `/ready` answer; the Prometheus role gauge is HA.2b.
+    pub standby: AtomicBool,
 
     // --- Registration shadow monitor (REG.2a, ADR 0034) ---
     /// Total number of registration bias estimates produced by the shadow

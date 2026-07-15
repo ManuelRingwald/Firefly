@@ -90,8 +90,13 @@ fn positive_secs(name: &str, default: f64) -> Result<f64, String> {
 
 /// Parse one positive-seconds value with a default; a set but unparsable
 /// or non-positive value is a hard error. Separated from the env read so
-/// it is directly testable (env vars are process-global).
-fn parse_positive_secs(name: &str, raw: Option<&str>, default: f64) -> Result<f64, String> {
+/// it is directly testable (env vars are process-global). Shared with the
+/// standby failover timeout (HA.2a).
+pub(crate) fn parse_positive_secs(
+    name: &str,
+    raw: Option<&str>,
+    default: f64,
+) -> Result<f64, String> {
     match raw.map(str::trim).filter(|s| !s.is_empty()) {
         Some(raw) => match raw.parse::<f64>() {
             Ok(v) if v.is_finite() && v > 0.0 => Ok(v),
