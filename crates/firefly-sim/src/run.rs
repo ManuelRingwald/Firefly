@@ -9,15 +9,19 @@ use crate::target::{State, Target};
 
 /// A precomputed ground-truth trajectory for one target, sampled at the
 /// scenario's truth step. Positions in between are linearly interpolated.
-struct Trajectory<'a> {
-    target: &'a Target,
+///
+/// Public since HA.4: the evaluation harness (`firefly-eval`) scores the
+/// tracker against exactly the same truth the simulator painted from — the
+/// measurement and the data share one trajectory model by construction.
+pub struct TruthTrajectory {
     step: f64,
     samples: Vec<Enu>,
     end_time: f64,
 }
 
-impl<'a> Trajectory<'a> {
-    fn build(target: &'a Target, step: f64) -> Self {
+impl TruthTrajectory {
+    /// Sample `target`'s scripted motion at `step`-second intervals.
+    pub fn build(target: &Target, step: f64) -> Self {
         let mut samples = vec![target.initial.position];
         let mut state: State = target.initial;
         for leg in &target.legs {
@@ -31,7 +35,6 @@ impl<'a> Trajectory<'a> {
         }
         let end_time = target.scripted_duration();
         Self {
-            target,
             step,
             samples,
             end_time,
@@ -39,7 +42,7 @@ impl<'a> Trajectory<'a> {
     }
 
     /// True position at scenario time `t`, or `None` once the script has ended.
-    fn position_at(&self, t: f64) -> Option<Enu> {
+    pub fn position_at(&self, t: f64) -> Option<Enu> {
         if t < 0.0 || t > self.end_time + 1e-9 {
             return None;
         }
@@ -57,6 +60,30 @@ impl<'a> Trajectory<'a> {
             north: a.north + (b.north - a.north) * frac,
             up: a.up + (b.up - a.up) * frac,
         })
+    }
+
+    /// When the scripted motion ends (scenario seconds).
+    pub fn end_time(&self) -> f64 {
+        self.end_time
+    }
+}
+
+/// The simulator-internal pairing of a target with its truth sampler.
+struct Trajectory<'a> {
+    target: &'a Target,
+    truth: TruthTrajectory,
+}
+
+impl<'a> Trajectory<'a> {
+    fn build(target: &'a Target, step: f64) -> Self {
+        Self {
+            target,
+            truth: TruthTrajectory::build(target, step),
+        }
+    }
+
+    fn position_at(&self, t: f64) -> Option<Enu> {
+        self.truth.position_at(t)
     }
 }
 

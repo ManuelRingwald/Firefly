@@ -1059,6 +1059,26 @@ Luftlage soft-echtzeitkritisch — sie muss klein *und vorhersagbar* sein.
 
 ## Zertifizierung & Assurance
 
+**SASS-C**
+EUROCONTROLs Analyse-Werkzeugkasten zur Bewertung von
+Überwachungs-Systemleistung (Radar-/Tracker-Ketten) — der Industrie-
+Referenzmessstand. Nicht frei verfügbar (Verteilung über EUROCONTROL-
+Vereinbarungen) und selbst **kein** Qualitätssiegel: Es liefert
+Mess-Evidenz für den regulatorischen Nachweis. Fireflys eigener
+Messstand ist `firefly-eval` (HA.4); der unabhängige Gegen-Check läuft
+über OpenATS COMPASS (HA.5).
+
+**ESASSP**
+Die *EUROCONTROL Specification for ATM Surveillance System Performance*:
+definiert öffentlich, **welche** Kennzahlen die Güte einer
+Überwachungskette beschreiben (u. a. horizontale Positionsgenauigkeit
+als RMS, Track-Kontinuität, Falsch-Track-Anteile) und welche Schwellen
+z. B. für 5-NM-/3-NM-Staffelung gelten. Für Firefly der Anker der
+Aussagekraft: `firefly-eval` übernimmt Namen und Intention dieser
+Definitionen (Mapping im HA.4-Meilenstein-Dokument) — glaubwürdig macht
+eine Zahl die öffentliche Definition plus nachrechenbarer Code, nicht
+das Werkzeug.
+
 **Zertifizierung / Audit**
 Der formale Nachweis (und seine Prüfung), dass ein System die geltenden Vorgaben
 erfüllt und sicher betrieben werden darf. Bei ANS überwacht durch

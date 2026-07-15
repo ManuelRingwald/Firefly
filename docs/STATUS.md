@@ -10,6 +10,34 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (HA.4 — Auswertungs-Harness)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **HA.4 (FR-TRK-051; kein Wire-/ICD-Bezug):** Die Tracker-Güte wird
+  jetzt **gemessen statt geglaubt**. Neue Crate **`firefly-eval`**
+  (Bibliothek + CLI `firefly-eval [--json]`): Szenarien mit exakter
+  Simulator-Wahrheit (`firefly-sim::TruthTrajectory` öffentlich) laufen
+  durch den **produktiv konfigurierten** Tracker; der Bericht liefert
+  **ESASSP-orientierte Metriken** (Betreiber-Abstimmung: SASS-C ist für
+  uns nicht verfügbar; Aussagekraft kommt aus den öffentlichen
+  Metrik-Definitionen + offenem, deterministischem Code): Track-PD,
+  Positions-RMSE, Kontinuität, Falsch-Tracks, Bestätigungs-Latenz.
+  Bewertet wird das **projizierte Ausgabe-Bild** (`snapshot_at`) — die
+  wichtigste Korrektur unterwegs: der Erst-Entwurf maß den
+  Last-Update-Zustand und überschätzte die RMSE ×6 (288 m statt 46 m).
+  Ist-Stand-Benchmarks: Single PD 0,967 · RMSE 45,6 m · Latenz 9 s ·
+  1 ID · 0 Geister. 5 neue Tests: 2 Regression-Gates (ehrlich am
+  Ist-Stand kalibriert), 2 **Instrument-Tests** (die Messung beißt:
+  degradierte Detektion senkt PD; vorenthaltene Wahrheit erscheint als
+  Falsch-Track), Determinismus (byte-identisches JSON). **Neu in der
+  Roadmap: HA.5** — unabhängiger OpenATS-COMPASS-Gegen-Check des echten
+  CAT062-Mitschnitts (entkräftet „selbst benotete Hausaufgabe").
+  Ehrliche Grenzen: misst nur Simuliertes (kein Clutter-Modell);
+  Live-Mitschnitte ohne Wahrheit = Folgearbeit. Roadmap: **88,5 %**.
+- **Nächster Schritt:** **HA.5** ankündigen (COMPASS-Gegen-Check,
+  dokumentierter Workflow + Abgleich-Bericht; S3, 89 %) — und Freigabe
+  abwarten. Weiter offen: Wayfinder #244/#245.
+
 ## 🎯 Stand 2026-07-15 (HA.3 — Kubernetes-Deployment)
 
 - **Zuletzt aktualisiert:** 2026-07-15
