@@ -320,6 +320,12 @@ async fn build_live_state(
         None
     };
 
+    // Fingerprint of the tracker-shaping configuration (HA.1, ADR 0040):
+    // stamped into every state snapshot and checked at restore, so a tracker
+    // state built for a different sensor set is never resurrected here.
+    let snapshot_fingerprint =
+        firefly_server::config_fingerprint(reference, &geodetic_sensors, &radar_sensors);
+
     // Build and spawn the live tracker task, registering every source sensor —
     // geodetic adapters on the shared frame, radar sensors on their own site frame.
     let tracker =
@@ -373,6 +379,61 @@ async fn build_live_state(
         ),
         (None, false) => {}
     }
+
+    // State snapshots + restart restore (HA.1, ADR 0040): a misconfigured
+    // knob is fatal (meteo pattern); an unset path simply means "off". The
+    // restore happens AFTER the correlation wiring so restored manual pins
+    // land in the shared override map. Every rejected snapshot starts empty
+    // and says why.
+    let snapshot_cfg = firefly_server::snapshot::config_from_env().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "invalid snapshot configuration");
+        std::process::exit(1);
+    });
+    let mut restored = false;
+    if let Some(cfg) = snapshot_cfg {
+        let now_unix_s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        match firefly_server::snapshot::load(
+            &cfg.path,
+            &snapshot_fingerprint,
+            cfg.max_age_s,
+            now_unix_s,
+        ) {
+            firefly_server::RestoreDecision::Restored(envelope) => {
+                let age_s = now_unix_s.saturating_sub(envelope.written_unix_s);
+                live.restore(*envelope);
+                restored = true;
+                tracing::info!(
+                    path = %cfg.path.display(),
+                    age_s,
+                    "air picture restored from state snapshot (HA.1)"
+                );
+            }
+            firefly_server::RestoreDecision::NoSnapshot => {
+                tracing::info!(path = %cfg.path.display(), "no state snapshot found; starting empty");
+            }
+            firefly_server::RestoreDecision::Rejected(reason) => {
+                tracing::warn!(
+                    path = %cfg.path.display(),
+                    reason,
+                    "state snapshot rejected; starting empty"
+                );
+            }
+        }
+        tracing::info!(
+            path = %cfg.path.display(),
+            period_s = cfg.period.as_secs_f64(),
+            max_age_s = cfg.max_age_s,
+            "periodic state snapshots enabled (HA.1)"
+        );
+        live = live.with_snapshots(cfg, snapshot_fingerprint);
+    }
+    metrics
+        .restore
+        .store(restored, std::sync::atomic::Ordering::Relaxed);
+
     {
         let m = Arc::clone(&metrics);
         tokio::spawn(run_live_tracker(
@@ -380,7 +441,15 @@ async fn build_live_state(
             plots_rx,
             snapshot_tx,
             output_period,
-            move |plots, records, registration, clutter_cells, correlation| {
+            move |plots, records, registration, clutter_cells, correlation, snapshot| {
+                if let Some(tick) = snapshot {
+                    m.snapshot_writes_total
+                        .store(tick.writes_total, std::sync::atomic::Ordering::Relaxed);
+                    m.snapshot_errors_total
+                        .store(tick.errors_total, std::sync::atomic::Ordering::Relaxed);
+                    m.snapshot_age_seconds
+                        .store(tick.age_seconds, std::sync::atomic::Ordering::Relaxed);
+                }
                 let (plans, correlated, refused, manual) = correlation;
                 m.flight_plans
                     .store(plans, std::sync::atomic::Ordering::Relaxed);
