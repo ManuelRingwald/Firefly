@@ -287,6 +287,31 @@ ist VERT.2.
 > QNH), **I062/130** (geometrisch), **I062/220** (RoCD) — je nur bei
 > frischem Schätzwert (≤ 30 s), ICD 3.5.0 additiv.
 
+#### Flugplan-Eingang + Korrelation (`FIREFLY_FLIGHT_PLANS`, FPL.1)
+
+Der FPL-Baustein (ADR 0038): Firefly korreliert System-Tracks **zentral**
+mit gefileten Flugplänen — eine Zuordnung für alle Konsumenten, statt dass
+jedes Display selbst rät. Regeln (Lektion Weeze — ein falsches Label ist
+schlimmer als ein fehlendes): **Callsign zuerst** (normalisiert);
+**Squawk nur als Fallback**, wenn eindeutig unter allen Plänen, der Track
+keinen `identity_conflict` trägt, der Code nicht Conspicuity 1000 ist und
+die Erwartungszeit plausibel liegt (±45 min); jede Verweigerung zählt
+sichtbar (`firefly_correlation_refused`). Die Korrelation läuft
+**zustandslos je Output-Tick** am Ausgabe-Rand (nach der QNH-Korrektur);
+der Tracker-Kern bleibt flugplan-frei. Ergebnis auf dem WS-JSON:
+`SystemTrack.flight_plan` (`{callsign, departure?, destination?}`) und
+`SystemTrack.identity_conflict` — beide **additiv**; CAT062 unberührt
+(I062/390 = FPL.2, ebenso gehaltener Zustand + manuelle Übersteuerung).
+
+| Variable | Typ | Default | Bedeutung |
+|----------|-----|---------|-----------|
+| `FIREFLY_FLIGHT_PLANS` | JSON-Array | — (leer) | Gefilete Flugpläne: `[{"callsign":"DLH123","squawk":1234,"departure":"EDDF","destination":"EDDM","expected_time":1752580800}, …]`. Nur `callsign` Pflicht (Duplikate → **Start-Abbruch**). `squawk` **oktal wie geschrieben** (Zahl `1234` oder String `"1234"` = Oktal 1234; Ziffer 8/9 → **Start-Abbruch**). `expected_time` = Unix-Sekunden (Fensterzentrum). Malformes JSON → **Start-Abbruch**; unset/leer = keine Flugpläne (INFO). |
+
+> **Betrieb:** Wie beim Meteo-Dienst ist der env-getriebene Provider bewusst
+> der erste Schritt; eine Live-FDPS-Anbindung (Datei/Netz, Reload) braucht
+> einen eigenen ADR. Der Feldsatz wächst **additiv** nach dem
+> EFS-Feedback aus Wayfinder #244.
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.7.0. Im **Live-Modus** liest Firefly
@@ -457,6 +482,9 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_sources_adsb021` | gauge | Anzahl konfigurierter `adsb_asterix`-Quellen (CAT021-Bodenstation, FEP.3) |
 | `firefly_sources_mlat` | gauge | Anzahl konfigurierter `mlat_asterix`-Quellen (WAM/MLAT, FEP.5) |
 | `firefly_clutter_cells` | gauge | **SPEC.2b:** Gelernte Zellen der räumlichen Clutter-Karten über alle Sensoren (wachsender Wert = der Tracker kartiert Hotspots) |
+| `firefly_flight_plans` | gauge | **FPL.1:** Anzahl geladener Flugpläne (`FIREFLY_FLIGHT_PLANS`) |
+| `firefly_tracks_correlated` | gauge | **FPL.1:** Tracks mit Flugplan-Korrelation im letzten Output-Tick |
+| `firefly_correlation_refused` | gauge | **FPL.1:** sichtbar verweigerte Squawk-Korrelationen im letzten Output-Tick (Duplikat unter Plänen, Conspicuity 1000, Identitätskonflikt) |
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |
