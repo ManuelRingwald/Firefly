@@ -1,0 +1,18 @@
+# One Service over BOTH deployments: the selector matches main and
+# standby, and READINESS does the routing — the standby answers /ready
+# with 503 until it promotes, so traffic always reaches exactly the
+# active instance (including through a failover, hands-off).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-firefly
+  labels:
+    {{- include "firefly.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "firefly.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http

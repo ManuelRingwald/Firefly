@@ -10,6 +10,31 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (HA.3 — Kubernetes-Deployment)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **HA.3 (NFR-OPS-002; kein Code-, kein ICD-Bezug):** Das
+  **Deployment-Rezept** für das Main/Standby-Paar: Helm-Chart
+  `deploy/helm/firefly/` + statisches kubectl-Äquivalent
+  `deploy/kubernetes/firefly.yaml`. Es erzwingt die ADR-0040/0041-
+  Betriebs-Voraussetzungen **strukturell**: eine geteilte ConfigMap
+  (Fingerprint-Disziplin — Konfigurations-Drift zwischen Main und
+  Standby unmöglich), RWX-Snapshot-PVC, Deployments mit `Recreate`
+  (Restart-Policy für die Exit-3-Demotion; kein Rolling-Split-Brain),
+  **ein** Service mit Readiness-Routing (Standby-503 ⇒ Traffic folgt dem
+  Failover ohne Eingriff), `hostNetwork` + Pflicht-Anti-Affinity als
+  ehrlicher Multicast-Default (Standard-CNI kann kein Multicast;
+  Multus-Alternative dokumentiert), non-root/read-only-rootfs.
+  `deploy/validate.sh` (YAML-Syntax hier gelaufen; helm lint/Render
+  dokumentiert für CI/Betreiber-Umgebung — kein Helm im Sandbox-Netz)
+  + `deploy/README.md` mit Begründungs-Tabelle; INSTALLATION §6a.
+  Ehrliche Grenzen: kein Cluster-Smoke-Test im Repo; Monitoring bewusst
+  außerhalb. Roadmap: **86,5 %**.
+- **Nächster Schritt:** **HA.4** ankündigen (Auswertungs-Harness,
+  SASS-C-artig: PD/RMSE/Kontinuität gegen Referenz aus
+  `.ffrec`/`.ffplots`; S4, 88,5 %) — und Freigabe abwarten. Weiter
+  offen: Wayfinder #244/#245.
+
 ## 🎯 Stand 2026-07-15 (HA.2b — Split-Brain-Schutz + Failover-Observability)
 
 - **Zuletzt aktualisiert:** 2026-07-15

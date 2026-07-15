@@ -1,0 +1,29 @@
+# The active instance (FIREFLY_ROLE=main). Exactly one replica: the SDPS
+# identity (SAC/SIC) has ONE sender; redundancy is the standby deployment,
+# not a replica count. A Deployment restarts its pod by design — the
+# restart policy the HA.2b split-brain demotion (exit code 3) relies on.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-firefly-main
+  labels:
+    {{- include "firefly.labels" . | nindent 4 }}
+    app.kubernetes.io/component: main
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: two simultaneous mains during a rollout
+  # would be a self-made split brain (the startup arbitration would catch
+  # it, but there is no reason to provoke it).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "firefly.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: main
+  template:
+    metadata:
+      labels:
+        {{- include "firefly.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: main
+    spec:
+      {{- include "firefly.podSpec" (dict "root" . "role" "main") | nindent 6 }}

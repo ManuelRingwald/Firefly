@@ -1,0 +1,16 @@
+apiVersion: v2
+name: firefly
+description: >-
+  Firefly SDPS (radar tracker): a main/standby pair with heartbeat-watched
+  failover (ADR 0041), a shared state-snapshot volume for fast takeover
+  (ADR 0040) and the CAT062/065/063 multicast feed (docs/ICD-CAT062.md).
+type: application
+# Chart version (deployment recipe), independent of the app version.
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - surveillance
+  - asterix
+  - sdps
+sources:
+  - https://github.com/ManuelRingwald/Firefly

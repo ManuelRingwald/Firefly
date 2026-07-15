@@ -392,6 +392,13 @@ Selbst-Adresse bleibt die Wache aus (laut geloggt).
 > Volume ist Deployment-Sache; Multi-homed-Hosts können die
 > Eigen-Erkennung täuschen (dokumentierte Restlücke).
 
+> **Deployment (HA.3):** Das geprüfte Kubernetes-Rezept für das
+> Main/Standby-Paar (Helm-Chart + statisches Manifest, geteilte
+> ConfigMap, RWX-Snapshot-PVC, Readiness-Routing über einen Service,
+> `hostNetwork` + Anti-Affinity für Multicast) liegt unter `deploy/` —
+> Begründungen in `deploy/README.md`, Installation in
+> `docs/INSTALLATION.md` §6a.
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.7.0. Im **Live-Modus** liest Firefly

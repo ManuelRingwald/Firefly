@@ -1,0 +1,29 @@
+{{- if .Values.standby.enabled }}
+# The warm spare (FIREFLY_ROLE=standby, ADR 0041): probes only, no
+# sending, no sources — it watches the main's CAT065 heartbeat and takes
+# over on its silence, restoring the shared snapshot (ADR 0040). Its
+# /ready answers 503 ("standby"), so the shared Service never routes
+# traffic here until a promotion.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-firefly-standby
+  labels:
+    {{- include "firefly.labels" . | nindent 4 }}
+    app.kubernetes.io/component: standby
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "firefly.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: standby
+  template:
+    metadata:
+      labels:
+        {{- include "firefly.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: standby
+    spec:
+      {{- include "firefly.podSpec" (dict "root" . "role" "standby") | nindent 6 }}
+{{- end }}

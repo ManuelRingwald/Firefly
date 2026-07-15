@@ -972,6 +972,13 @@ gegen die Umgebung.
 Ein abgeschlossenes „Paket" mit Anwendung und allem, was sie zum Laufen braucht.
 Läuft überall gleich, unabhängig vom Wirts-System.
 
+**Helm-Chart**
+Ein versioniertes, parametrisierbares Paket aus Kubernetes-Manifesten —
+das „Installationsrezept" einer Anwendung. Fireflys Chart
+(`deploy/helm/firefly`, HA.3) beschreibt das komplette Main/Standby-Paar
+samt Snapshot-Volume und Probes; die Manifeste im Repo sind zugleich
+Konfigurationsmanagement im Sinne von ADR 0004.
+
 **Kubernetes**
 Ein „Dirigent" für Container: startet, überwacht, skaliert und ersetzt sie
 automatisch über viele Maschinen hinweg. Anbieter-neutral (läuft bei allen

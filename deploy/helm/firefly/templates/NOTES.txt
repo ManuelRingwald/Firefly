@@ -1,0 +1,20 @@
+Firefly {{ .Chart.AppVersion }} deployed as release {{ .Release.Name }}.
+
+  Active instance : deployment/{{ .Release.Name }}-firefly-main
+  Warm spare      : {{ if .Values.standby.enabled }}deployment/{{ .Release.Name }}-firefly-standby{{ else }}DISABLED (no automatic takeover!){{ end }}
+  HTTP service    : service/{{ .Release.Name }}-firefly (routing via readiness — only the active instance is ready)
+  Snapshot volume : {{ if .Values.snapshot.enabled }}pvc/{{ .Release.Name }}-firefly-snapshot ({{ .Values.snapshot.accessMode }}){{ else }}DISABLED (a takeover starts with an empty picture!){{ end }}
+
+Checks:
+  kubectl get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl exec deploy/{{ .Release.Name }}-firefly-main -- wget -qO- http://localhost:8080/ready
+  # -> "ready" on the main, 503 "standby: ..." on the spare.
+
+Multicast reminder (docs/ICD-CAT062.md, ADR 0017):
+{{- if .Values.hostNetwork }}
+  hostNetwork is ON — the CAT062/065/063 feed uses the node's interfaces.
+  The pair is forced onto different nodes (required anti-affinity).
+{{- else }}
+  hostNetwork is OFF — you must provide a multicast-capable pod network
+  (e.g. Multus secondary network) yourself, or consumers will hear nothing.
+{{- end }}
