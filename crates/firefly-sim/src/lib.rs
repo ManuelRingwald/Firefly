@@ -34,6 +34,6 @@ mod target;
 
 pub use radar::{Radar, RadarParams};
 pub use rng::Pcg32;
-pub use run::run;
+pub use run::{run, TruthTrajectory};
 pub use scenario::Scenario;
 pub use target::{Leg, State, Target};

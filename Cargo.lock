@@ -251,6 +251,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-eval"
+version = "0.1.0"
+dependencies = [
+ "firefly-core",
+ "firefly-geo",
+ "firefly-sim",
+ "firefly-track",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "firefly-flarm"
 version = "0.1.0"
 dependencies = [

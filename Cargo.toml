@@ -5,6 +5,7 @@ members = [
     "crates/firefly-core",
     "crates/firefly-sim",
     "crates/firefly-track",
+    "crates/firefly-eval",
     "crates/firefly-io",
     "crates/firefly-player",
     "crates/firefly-server",
@@ -38,6 +39,7 @@ firefly-core = { path = "crates/firefly-core" }
 firefly-sim = { path = "crates/firefly-sim" }
 firefly-io = { path = "crates/firefly-io" }
 firefly-track = { path = "crates/firefly-track" }
+firefly-eval = { path = "crates/firefly-eval" }
 firefly-player = { path = "crates/firefly-player" }
 firefly-asterix = { path = "crates/firefly-asterix" }
 firefly-multicast = { path = "crates/firefly-multicast" }

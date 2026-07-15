@@ -1,0 +1,17 @@
+[package]
+name = "firefly-eval"
+version = "0.1.0"
+edition = "2021"
+description = "Surveillance-quality evaluation harness (HA.4): scores the tracker against ground truth with ESASSP-style metrics"
+
+[dependencies]
+firefly-core = { workspace = true }
+firefly-geo = { workspace = true }
+firefly-sim = { workspace = true }
+firefly-track = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "firefly-eval"
+path = "src/main.rs"
