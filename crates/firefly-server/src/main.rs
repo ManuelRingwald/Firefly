@@ -360,11 +360,13 @@ async fn build_live_state(
             plots_rx,
             snapshot_tx,
             output_period,
-            move |plots, records, registration| {
+            move |plots, records, registration, clutter_cells| {
                 m.live_plots_ingested_total
                     .store(plots, std::sync::atomic::Ordering::Relaxed);
                 m.plot_records_written_total
                     .store(records, std::sync::atomic::Ordering::Relaxed);
+                m.clutter_cells
+                    .store(clutter_cells, std::sync::atomic::Ordering::Relaxed);
                 if let Some(tick) = registration {
                     m.registration_estimates_total
                         .store(tick.estimates_total, std::sync::atomic::Ordering::Relaxed);
