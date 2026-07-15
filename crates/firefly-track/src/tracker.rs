@@ -885,6 +885,13 @@ impl Tracker {
         // If two tracks somehow share the same ICAO (should not happen for valid
         // data, but is defensive), the plot falls through to JPDA rather than
         // being silently mis-associated.
+        // SPEC.2b: credit clutter-map exposure for every sensor that
+        // delivered a batch — watching without unassociated plots is the
+        // evidence that lets a cell honestly claim quiet.
+        for &sensor in by_sensor.keys() {
+            self.clutter_maps.entry(sensor).or_default().mark_active(t);
+        }
+
         let mut icao_handled: BTreeMap<SensorId, Vec<bool>> = by_sensor
             .keys()
             .map(|&s| (s, vec![false; by_sensor[&s].len()]))

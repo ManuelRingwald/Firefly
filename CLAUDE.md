@@ -97,6 +97,12 @@ oder Schnittstellen-Wirkung lieber das stärkere Modell.
 - **Chat und Dokumentation (`docs/`, `CLAUDE.md`):** Deutsch.
 - **Quellcode (Bezeichner, Kommentare im Code):** Englisch — internationaler
   Industriestandard, hält den Code portabel und anschlussfähig.
+- **Verständlichkeit (Betreiber-Vorgabe 2026-07-15):** Ankündigungen und
+  Ergebnis-Meldungen im Chat werden in **normaler Sprache** erklärt — zuerst
+  der Kern allgemein verständlich (Was wurde gebaut? Welches Problem löst es
+  im Betrieb? Was ändert sich sichtbar?), die Fachdetails danach.
+  Fachbegriffe (ASTERIX-Items, Filter-Mathematik) sind erlaubt, dürfen aber
+  nie die **einzige** Erklärung sein.
 - Bewusste Entscheidung (ADR 0002), jederzeit änderbar.
 
 ---

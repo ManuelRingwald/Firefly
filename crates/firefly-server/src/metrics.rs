@@ -107,6 +107,9 @@ pub struct Metrics {
     /// Number of configured `mlat_asterix` (WAM/MLAT) sources (gauge, static
     /// per process; FEP.5).
     pub sources_mlat: AtomicU64,
+    /// Learned spatial clutter-map cells across all sensors (SPEC.2b,
+    /// FR-TRK-046) — a growing value means the tracker is mapping hotspots.
+    pub clutter_cells: AtomicU64,
 
     // --- Registration shadow monitor (REG.2a, ADR 0034) ---
     /// Total number of registration bias estimates produced by the shadow
@@ -340,6 +343,13 @@ pub fn render(metrics: &Metrics) -> String {
         "gauge",
         "Number of configured adsb_asterix (CAT021 ground station) sources for this instance.",
         metrics.sources_adsb021.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_clutter_cells",
+        "gauge",
+        "Learned spatial clutter-map cells across all sensors (SPEC.2b).",
+        metrics.clutter_cells.load(Ordering::Relaxed) as f64,
     );
     write_metric(
         &mut out,

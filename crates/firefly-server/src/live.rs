@@ -518,6 +518,12 @@ impl LiveTracker {
     }
 
     /// Total plots handed to the tracker so far.
+    /// Learned spatial clutter-map cells across all sensors (SPEC.2b) —
+    /// exported as the `firefly_clutter_cells` gauge.
+    pub fn clutter_cells(&self) -> u64 {
+        self.tracker.clutter_cells_total() as u64
+    }
+
     pub fn plots_ingested(&self) -> u64 {
         self.plots_ingested
     }
@@ -578,7 +584,7 @@ impl LiveTracker {
 ///   yet) is ignored — the snapshot is the latest value any future reader sees.
 ///   Before the first poll the snapshot carries the empty sentinel.
 ///   `on_tick` is called after each tick with `(plots_ingested,
-///   records_written, registration_tick)` so callers can update Prometheus
+///   records_written, registration_tick, clutter_cells)` so callers can update Prometheus
 ///   counters (AP9.4c-4; the registration snapshot is `None` without a
 ///   shadow monitor, REG.2a).
 ///
@@ -591,7 +597,7 @@ pub async fn run_live_tracker<F>(
     output_period: Duration,
     on_tick: F,
 ) where
-    F: Fn(u64, u64, Option<RegistrationTick>),
+    F: Fn(u64, u64, Option<RegistrationTick>, u64),
 {
     let mut ticker = tokio::time::interval(output_period);
     // A delayed tick should not fire a burst of catch-up ticks afterwards.
@@ -620,7 +626,12 @@ pub async fn run_live_tracker<F>(
                 let time = live.latest_data_time().unwrap_or(Timestamp(0.0));
                 let tracks = live.snapshot();
                 let _ = snapshot_tx.send(LiveSnapshot { time, tracks: Arc::new(tracks) });
-                on_tick(live.plots_ingested(), live.records_written(), live.registration_tick());
+                on_tick(
+                    live.plots_ingested(),
+                    live.records_written(),
+                    live.registration_tick(),
+                    live.clutter_cells(),
+                );
             }
         }
     }
@@ -1114,7 +1125,7 @@ mod tests {
             plots_rx,
             snapshot_tx,
             Duration::from_millis(100),
-            |_, _, _| {},
+            |_, _, _, _| {},
         ));
 
         // Feed enough hits to confirm a track.

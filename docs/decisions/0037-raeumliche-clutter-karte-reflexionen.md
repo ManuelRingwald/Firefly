@@ -57,3 +57,22 @@ statt pro Track (der Clutter-Faktor hängt im Joint-Event am Track).
   Betriebs-Härtung verschoben; Test-/Debug-Hook `clutter_cells_total()`.
 - Ein echtes Ziel, das PSR-only exakt hinter einem anderen einfliegt,
   bestätigt 2 Umläufe später — dokumentierter Trade.
+
+## Nachtrag SPEC.2b (2026-07-14, Betreiber-Entscheidung „sauber abarbeiten")
+
+Die Floor-Regel aus Punkt 2 ist durch **Expositions-Buchführung**
+abgelöst: Die Karte akkumuliert je Sensor **kreditierte Beobachtungszeit**
+(`mark_active` je verarbeitetem Batch; eine Aktivitätslücke kreditiert
+höchstens 30 s — ein Feed-Ausfall ist keine Beobachtung und reift die
+Karte nie). Erst ab **1200 s Reife** (2τ; je Zelle ab ihrem ersten
+Ereignis, für ereignisfreie Zellen ab Karten-Start) darf der Floor auf
+**0,1 × Default** sinken: Die Region wurde nachweislich beobachtet und
+blieb (nahezu) frei von unassoziierten Plots. Unreife Evidenz behält den
+Default-Floor — genau die Regel, die die Messerschneiden-Assoziation um
+Gründungs-Plots echter Ziele schützt (SPEC.2-Regression bleibt grün, da
+Testhorizonte ≪ 1200 s). Metrik `firefly_clutter_cells` exportiert.
+Ehrliche Grenzen: Reife unterscheidet nicht zwischen „im Erfassungsbereich
+beobachtet" und „außerhalb der Reichweite" (dort ist die Quiet-Behauptung
+folgenlos — es entstehen keine Plots); für Nicht-Radar-Sensoren entsteht
+eine leere Karte (nur `mark_active`, keine Polar-Zellen), deren
+Mature-Quiet-Aussage dieselbe ehrliche Bedeutung trägt.

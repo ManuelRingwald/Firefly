@@ -27,6 +27,19 @@
 //! cell_area`, clamped to a sane band around the configured default so a
 //! single stray plot can neither silence nor lock out association.
 //!
+//! **Exposure bookkeeping (SPEC.2b):** events alone cannot prove
+//! cleanliness — only *watching without events* can. The map therefore
+//! accrues credited observation time via [`ClutterMap::mark_active`]
+//! (called once per processed sensor batch; feed outages credit at most
+//! [`MAX_GAP_CREDIT_S`], so downtime never counts as evidence). Once a
+//! cell has been under observation for [`MATURITY_S`] — since its first
+//! event, or since map start for event-free cells — the density floor
+//! drops from `default` to `0.1·default`: the region has demonstrably
+//! produced (almost) no unassociated plots, and association may honestly
+//! trust it. Immature evidence keeps the conservative `default` floor,
+//! which is what protects knife-edge associations around the founding
+//! plots of real aircraft (the SPEC.2 regression).
+//!
 //! REQ: FR-TRK-046
 
 use std::collections::BTreeMap;
@@ -45,6 +58,17 @@ const TIME_CONSTANT_S: f64 = 600.0;
 /// Clamp ceiling: a learned cell may claim at most this factor *more*
 /// clutter than the default.
 const MAX_DENSITY_FACTOR: f64 = 100.0;
+/// Credited observation time (seconds) after which absence of events counts
+/// as evidence and the floor may drop below the default — two forgetting
+/// time constants of watching.
+const MATURITY_S: f64 = 2.0 * TIME_CONSTANT_S;
+/// The mature floor: a demonstrably quiet cell may claim at most this
+/// fraction of the default density — never zero, so association keeps a
+/// residual clutter hypothesis everywhere.
+const MATURE_MIN_FACTOR: f64 = 0.1;
+/// A single activity gap credits at most this much exposure (seconds):
+/// a feed outage is not observation, so downtime never matures the map.
+const MAX_GAP_CREDIT_S: f64 = 30.0;
 
 /// One cell's exponentially-forgotten event rate.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -53,6 +77,10 @@ struct Cell {
     rate_per_s: f64,
     /// Data time of the last observed event.
     last_time: f64,
+    /// The map's credited exposure at this cell's first event — its
+    /// maturity clock starts here (SPEC.2b).
+    #[serde(default)]
+    born_observed_s: f64,
 }
 
 /// The spatial clutter map of one radar sensor.
@@ -64,6 +92,13 @@ pub struct ClutterMap {
     /// require string keys (snapshot/restore, NFR-CLOUD-003).
     #[serde(with = "cells_as_pairs")]
     cells: BTreeMap<(u32, u16), Cell>,
+    /// Credited observation time in seconds (SPEC.2b): grows with sensor
+    /// activity, capped per gap — the evidence base for claiming quiet.
+    #[serde(default)]
+    observed_s: f64,
+    /// Data time of the last credited activity.
+    #[serde(default)]
+    last_activity: Option<f64>,
 }
 
 /// Serde helper: tuple-keyed map ↔ list of `(key, cell)` pairs.
@@ -109,14 +144,28 @@ impl ClutterMap {
         std::f64::consts::PI * (r_out * r_out - r_in * r_in) / f64::from(AZIMUTH_SECTORS)
     }
 
+    /// Credit observation time (SPEC.2b): called once per processed batch
+    /// of this sensor's plots. Each gap credits at most
+    /// [`MAX_GAP_CREDIT_S`] seconds, so a feed outage — during which the
+    /// sensor demonstrably watched nothing — never matures the map.
+    pub fn mark_active(&mut self, time: f64) {
+        if let Some(last) = self.last_activity {
+            let dt = (time - last).max(0.0);
+            self.observed_s += dt.min(MAX_GAP_CREDIT_S);
+        }
+        self.last_activity = Some(self.last_activity.unwrap_or(time).max(time));
+    }
+
     /// Fold in one clutter-evidence event (a plot that associated with
     /// nothing) at polar position (`range_m`, `azimuth_rad`) and data time
     /// `time`. Out-of-order times decay by zero rather than negatively.
     pub fn observe(&mut self, range_m: f64, azimuth_rad: f64, time: f64) {
         let key = Self::key(range_m, azimuth_rad);
+        let observed_s = self.observed_s;
         let cell = self.cells.entry(key).or_insert(Cell {
             rate_per_s: 0.0,
             last_time: time,
+            born_observed_s: observed_s,
         });
         let dt = (time - cell.last_time).max(0.0);
         cell.rate_per_s = cell.rate_per_s * (-dt / TIME_CONSTANT_S).exp() + 1.0 / TIME_CONSTANT_S;
@@ -126,14 +175,12 @@ impl ClutterMap {
     /// The local clutter density at (`range_m`, `azimuth_rad`) and data time
     /// `time`, in expected false returns per m² per scan of length
     /// `scan_period_s` — the units [`crate::pda::ClutterModel`] carries.
-    /// A cell the map has never seen an event in reports `default` exactly
-    /// (no cold-start bias); learned cells are clamped to
-    /// `[default, 100·default]`. The **floor is the default** on purpose:
-    /// this estimator only records events, never exposure ("a scan passed
-    /// with no false return"), so an absence of events is *not* evidence of
-    /// a cleaner-than-default cell — the map may honestly raise the local
-    /// density, never lower it. (Learning clean regions needs exposure
-    /// bookkeeping — an explicit follow-up.)
+    /// Clamped to `[floor, 100·default]`, where the floor is `default`
+    /// until the evidence is **mature** (SPEC.2b): a cell watched for
+    /// [`MATURITY_S`] of credited exposure since its first event — or an
+    /// event-free cell of a mature map — may honestly claim down to
+    /// `0.1·default`. Immature evidence never drops below the default:
+    /// "we only just started watching" is not "clean".
     pub fn density(
         &self,
         range_m: f64,
@@ -144,12 +191,26 @@ impl ClutterMap {
     ) -> f64 {
         let key = Self::key(range_m, azimuth_rad);
         let Some(cell) = self.cells.get(&key) else {
-            return default;
+            // Event-free cell: with a mature map the whole coverage was
+            // demonstrably watched without an event here — the floor may
+            // drop; a young map claims nothing beyond the default.
+            return if self.observed_s >= MATURITY_S {
+                default * MATURE_MIN_FACTOR
+            } else {
+                default
+            };
+        };
+        // A cell's maturity clock starts at its first event: only credited
+        // watching *since then* makes its low rate a claim of quiet.
+        let floor = if self.observed_s - cell.born_observed_s >= MATURITY_S {
+            default * MATURE_MIN_FACTOR
+        } else {
+            default
         };
         let dt = (time - cell.last_time).max(0.0);
         let rate = cell.rate_per_s * (-dt / TIME_CONSTANT_S).exp();
         let raw = rate * scan_period_s / Self::cell_area(key.0);
-        raw.clamp(default, default * MAX_DENSITY_FACTOR)
+        raw.clamp(floor, default * MAX_DENSITY_FACTOR)
     }
 
     /// Number of cells that carry learned state — observability hook.
@@ -237,6 +298,52 @@ mod tests {
         let json = serde_json::to_string(&map).expect("serialise");
         let back: ClutterMap = serde_json::from_str(&json).expect("deserialise");
         assert_eq!(back, map);
+    }
+
+    /// Exposure matures the floor (SPEC.2b): after enough credited
+    /// watching, an ex-hotspot decays below the default and an event-free
+    /// cell reports the mature floor. REQ: FR-TRK-046
+    #[test]
+    fn mature_exposure_lets_quiet_cells_drop_below_the_default() {
+        let mut map = ClutterMap::new();
+        map.observe(30_000.0, 1.0, 0.0);
+        // Credit exposure in scan-sized steps well past maturity.
+        let mut t = 0.0;
+        while t < 3.0 * MATURITY_S {
+            t += SCAN;
+            map.mark_active(t);
+        }
+        // The single ancient event has decayed; the cell is mature → floor.
+        let ex_hotspot = map.density(30_000.0, 1.0, t, SCAN, DEFAULT);
+        assert_eq!(ex_hotspot, DEFAULT * MATURE_MIN_FACTOR);
+        // An event-free cell of the mature map also claims quiet.
+        let quiet = map.density(60_000.0, 2.0, t, SCAN, DEFAULT);
+        assert_eq!(quiet, DEFAULT * MATURE_MIN_FACTOR);
+    }
+
+    /// Immature evidence never claims cleaner than the default — the rule
+    /// that protects knife-edge associations around the founding plots of
+    /// real aircraft (the SPEC.2 regression). REQ: FR-TRK-046
+    #[test]
+    fn immature_evidence_keeps_the_default_floor() {
+        let mut map = ClutterMap::new();
+        map.observe(30_000.0, 1.0, 0.0);
+        for k in 1..=10 {
+            map.mark_active(k as f64 * SCAN); // 40 s ≪ maturity
+        }
+        assert_eq!(map.density(30_000.0, 1.0, 40.0, SCAN, DEFAULT), DEFAULT);
+        assert_eq!(map.density(60_000.0, 2.0, 40.0, SCAN, DEFAULT), DEFAULT);
+    }
+
+    /// A feed outage credits at most one gap allowance — downtime is not
+    /// observation and never matures the map. REQ: FR-TRK-046
+    #[test]
+    fn outages_do_not_accrue_exposure() {
+        let mut map = ClutterMap::new();
+        map.mark_active(0.0);
+        map.mark_active(2.0 * MATURITY_S); // one huge gap
+                                           // Only MAX_GAP_CREDIT_S was credited → still immature.
+        assert_eq!(map.density(60_000.0, 2.0, 3_000.0, SCAN, DEFAULT), DEFAULT);
     }
 
     /// Azimuth wraps: 2π−ε and +ε land in the same physical sector family

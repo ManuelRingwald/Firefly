@@ -39,4 +39,19 @@ Folge-Häppchen. Damit weicht die Umsetzung bewusst von der Ankündigung ab
   Reflexionen (selten, möglich) bleiben unerkannt.
 - Ein echtes PSR-only-Ziel exakt hinter einem anderen bestätigt
   2 Umläufe später (nie exekutiert) — dokumentierter Trade.
-- Metrik-Ausleitung → Betriebs-Härtung (`clutter_cells_total()` als Hook).
+- ~~Metrik-Ausleitung → Betriebs-Härtung~~ → **mit SPEC.2b geliefert.**
+
+## Nachtrag SPEC.2b — Expositions-Buchführung (gleicher Tag)
+
+Betreiber-Entscheidung: „Wir lassen nichts liegen, sondern arbeiten es
+sauber ab." Die Floor-Grenze ist abgelöst: `mark_active` kreditiert je
+Sensor-Batch Beobachtungszeit (Lücken-Kredit max. 30 s — ein Feed-Ausfall
+reift die Karte nie); ab **1200 s Reife** (2τ; je Zelle ab ihrem ersten
+Ereignis, ereignisfreie Zellen ab Karten-Start) darf der Floor auf
+**0,1 × Default** sinken — nachweislich ruhige Regionen entlasten die
+Assoziation ehrlich. Unreife Evidenz behält den Default-Floor; die
+SPEC.2-Regression (Gründungs-Plots echter Ziele) bleibt konstruktiv
+geschützt (Testhorizonte ≪ Reife). Metrik `firefly_clutter_cells` über
+die On-Tick-Kette exportiert (TECHNICAL.md). Verbleibende Grenze: Reife
+ist erfassungsbereichs-blind (Quiet-Behauptung außerhalb der Reichweite
+folgenlos); kein Prozent-Zuwachs (71 %).
