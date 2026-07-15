@@ -10,6 +10,36 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (HA.2b — Split-Brain-Schutz + Failover-Observability)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **HA.2b (FR-TRK-050 erweitert, ADR-0041-Nachtrag; kein ICD-Bezug):**
+  Der „zwei Sender einer Identität"-Zustand ist jetzt ein kurzer
+  Übergang statt eines Dauerzustands. (a) **Startup-Arbitrierung:** Ein
+  `main` lauscht vor dem ersten Senden einen Failover-Timeout (3 s) —
+  hört er einen fremden Heartbeat der eigenen Identität, startet er als
+  Standby statt den Feed zu doppeln (fängt den demotierten Main nach
+  Neustart und die Doppel-`main`-Fehlkonfiguration; fail-open bei
+  Socket-Fehler — Risiko < sicherer Ausfall). (b) **Laufzeit-Demotion,
+  crash-only:** Die aktive Instanz beobachtet die Gruppe weiter; bei
+  Split-Brain weicht deterministisch die Seite mit der **höheren
+  Absender-Adresse** (genau eine — nie beide, nie keine) und beendet
+  sich mit **Exit-Code 3**; der Supervisor-Neustart re-arbitriert in den
+  Standby (Restart-Policy = dokumentierte Betriebs-Voraussetzung).
+  Eigen-Erkennung über Egress-IP + Heartbeat-Socket-Port; unbestimmbare
+  Selbst-Adresse ⇒ Wache bleibt aus (nie Selbst-Kill). (c) **Metriken:**
+  `firefly_role`, `firefly_failovers_total`,
+  `firefly_main_heartbeat_age_seconds`. 4 neue Tests (Klassifikation
+  Loopback/fremd, Tie-Break-Symmetrie, Arbitrierung + Demotion-Wache
+  über echtes UDP-Multicast). Ehrliche Grenzen: kein Konsens — echte
+  Partition heißt zwei Sender bis zur Heilung; Kaltstart +3 s;
+  Multi-homed-Restlücke. **AP-HA · HA.2 damit komplett.** Roadmap:
+  **85 %**.
+- **Nächster Schritt:** **HA.3** ankündigen (K8s-Manifeste/Helm,
+  Deployment-Härtung — jetzt inkl. Main/Standby-Paar, Snapshot-Volume,
+  Restart-Policy; koppelt an Wayfinder ORCH-6; S3, 86,5 %) — und
+  Freigabe abwarten. Weiter offen: Wayfinder #244/#245.
+
 ## 🎯 Stand 2026-07-15 (HA.2a — Standby-Rolle + automatische Übernahme)
 
 - **Zuletzt aktualisiert:** 2026-07-15

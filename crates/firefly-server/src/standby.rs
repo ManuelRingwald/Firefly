@@ -13,10 +13,24 @@
 //! Deliberately **no external coordinator** (no etcd, no Kubernetes lease):
 //! the wire contract itself carries the liveness signal, observable by any
 //! consumer, provider-neutral. The honest limit: this is failure detection
-//! by timeout, not consensus — the split-brain guard (a returning main that
-//! sees a foreign active heartbeat demotes itself) is HA.2b.
+//! by timeout, not consensus.
+//!
+//! **Split-brain guard (HA.2b, ADR-0041-Nachtrag).** Two mechanisms keep
+//! "two active senders of one identity" a transient instead of a steady
+//! state:
+//!
+//! 1. **Startup arbitration:** a `main` listens for one failover timeout
+//!    before it starts sending; a foreign heartbeat of its own identity
+//!    means someone already serves — it enters the standby watch instead
+//!    of doubling the feed.
+//! 2. **Runtime demotion:** an active instance keeps watching the group.
+//!    A foreign heartbeat of its own identity (another source address) is
+//!    a split brain; the deterministic tie-break — the sender with the
+//!    **higher** source address yields — makes exactly one of the two
+//!    exit (crash-only: the supervisor restarts it, and the restart's
+//!    startup arbitration lands it in standby).
 
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use firefly_asterix::{decode_status_block, DataSourceId, MESSAGE_TYPE_SDPS_STATUS};
@@ -118,6 +132,12 @@ impl HeartbeatWatch {
         now.duration_since(self.last_seen) > self.timeout
     }
 
+    /// How long the heartbeat has been silent — the observability surface
+    /// (`firefly_main_heartbeat_age_seconds`, HA.2b).
+    pub fn age(&self, now: Instant) -> Duration {
+        now.duration_since(self.last_seen)
+    }
+
     /// Time until promotion would be due (zero when overdue) — the wait
     /// budget for the next receive.
     pub fn remaining(&self, now: Instant) -> Duration {
@@ -125,15 +145,119 @@ impl HeartbeatWatch {
     }
 }
 
+/// Is `datagram` (received from `src`) a **foreign** heartbeat of our own
+/// identity — i.e. split-brain evidence? Our own looped-back heartbeats
+/// (src == `own`) never count; neither do foreign SDPS identities or
+/// non-CAT065 traffic. Pure and deterministic (HA.2b).
+pub fn is_foreign_heartbeat(
+    datagram: &[u8],
+    expected: DataSourceId,
+    own: SocketAddr,
+    src: SocketAddr,
+) -> bool {
+    if src == own {
+        return false;
+    }
+    let Ok(reports) = decode_status_block(datagram) else {
+        return false;
+    };
+    reports
+        .iter()
+        .any(|r| r.source == expected && r.message_type == MESSAGE_TYPE_SDPS_STATUS)
+}
+
+/// The deterministic split-brain tie-break (HA.2b): of two active senders
+/// with the same identity, the one with the **higher** source address
+/// (ip, port ordering) yields. Both sides see both addresses, so exactly
+/// one of the two demotes — no configuration, no coordinator.
+pub fn demotion_required(own: SocketAddr, foreign: SocketAddr) -> bool {
+    own > foreign
+}
+
+/// Startup arbitration (HA.2b): listen on the group for up to `window`
+/// and return the source address of the first heartbeat carrying our
+/// identity — someone is already serving it — or `None` after a silent
+/// window. Called **before** this instance sends anything, so every
+/// matching heartbeat is foreign by construction.
+pub async fn foreign_heartbeat_within(
+    group: Ipv4Addr,
+    port: u16,
+    expected: DataSourceId,
+    window: Duration,
+) -> std::io::Result<Option<SocketAddr>> {
+    let socket = firefly_multicast::receiver::receiver_socket(group, port).await?;
+    let deadline = Instant::now() + window;
+    let far = SocketAddr::from(([255, 255, 255, 255], u16::MAX));
+    let mut buf = [0u8; 2048];
+    loop {
+        let now = Instant::now();
+        let Some(remaining) = deadline
+            .checked_duration_since(now)
+            .filter(|d| !d.is_zero())
+        else {
+            return Ok(None);
+        };
+        match tokio::time::timeout(remaining, socket.recv_from(&mut buf)).await {
+            Ok(Ok((n, src))) => {
+                // `own = far` can never equal a real src: every match counts.
+                if is_foreign_heartbeat(&buf[..n], expected, far, src) {
+                    return Ok(Some(src));
+                }
+            }
+            Ok(Err(e)) => return Err(e),
+            Err(_elapsed) => return Ok(None),
+        }
+    }
+}
+
+/// Runtime demotion watch (HA.2b), run by the **active** instance: follow
+/// the group and return the foreign sender's address as soon as a
+/// split-brain is detected **and** the tie-break says we are the one to
+/// yield (the caller then exits, crash-only). While we win the tie-break
+/// we hold and keep logging — the other side is expected to yield.
+pub async fn run_demotion_watch(
+    group: Ipv4Addr,
+    port: u16,
+    expected: DataSourceId,
+    own: SocketAddr,
+) -> std::io::Result<SocketAddr> {
+    let socket = firefly_multicast::receiver::receiver_socket(group, port).await?;
+    info!(%group, port, %own, "demotion watch armed (HA.2b): watching for a second active sender");
+    let mut held: u64 = 0;
+    let mut buf = [0u8; 2048];
+    loop {
+        let (n, src) = socket.recv_from(&mut buf).await?;
+        if !is_foreign_heartbeat(&buf[..n], expected, own, src) {
+            continue;
+        }
+        if demotion_required(own, src) {
+            return Ok(src);
+        }
+        held += 1;
+        if held == 1 || held.is_multiple_of(60) {
+            warn!(
+                foreign = %src,
+                held,
+                "split brain: a second active sender carries our identity; holding \
+                 (tie-break won) — the other side is expected to yield"
+            );
+        }
+    }
+}
+
 /// Run the standby watch: join the multicast group, follow the main's
 /// CAT065 heartbeat and return when promotion is due (the heartbeat stayed
 /// away longer than `timeout`). Returns `Err` only for socket-level
 /// failures — a standby that cannot listen cannot do its job.
+/// `on_age` is called with the current heartbeat age on every loop turn
+/// (each datagram or expired receive window) — the observability hook
+/// behind `firefly_main_heartbeat_age_seconds`.
 pub async fn wait_for_promotion(
     group: Ipv4Addr,
     port: u16,
     expected: DataSourceId,
     timeout: Duration,
+    on_age: impl Fn(Duration),
 ) -> std::io::Result<()> {
     let socket = firefly_multicast::receiver::receiver_socket(group, port).await?;
     info!(
@@ -149,6 +273,7 @@ pub async fn wait_for_promotion(
     let mut buf = [0u8; 2048];
     loop {
         let now = Instant::now();
+        on_age(watch.age(now));
         if watch.promotion_due(now) {
             warn!(
                 heartbeats,
@@ -245,7 +370,7 @@ mod tests {
         });
 
         let started = Instant::now();
-        wait_for_promotion(group, port, ours, timeout)
+        wait_for_promotion(group, port, ours, timeout, |_| {})
             .await
             .expect("watch runs");
         let elapsed = started.elapsed();
@@ -258,5 +383,133 @@ mod tests {
             elapsed < Duration::from_secs(5),
             "must promote promptly after silence (elapsed {elapsed:?})"
         );
+    }
+
+    /// Split-brain classification (HA.2b): our own looped-back heartbeat
+    /// never counts as foreign; a matching heartbeat from another address
+    /// does; foreign identities and garbage never do. REQ: FR-TRK-050
+    #[test]
+    fn foreign_heartbeat_classification_is_strict() {
+        let ours = DataSourceId::new(25, 2);
+        let own: SocketAddr = "192.168.1.10:41000".parse().unwrap();
+        let other: SocketAddr = "192.168.1.11:41000".parse().unwrap();
+        let hb = Cat065Encoder::new(ours, 1).encode_status(100.0, true);
+        let foreign_id = Cat065Encoder::new(DataSourceId::new(99, 9), 1).encode_status(100.0, true);
+
+        assert!(!is_foreign_heartbeat(&hb, ours, own, own), "own loopback");
+        assert!(is_foreign_heartbeat(&hb, ours, own, other), "split brain");
+        assert!(!is_foreign_heartbeat(&foreign_id, ours, own, other));
+        assert!(!is_foreign_heartbeat(b"garbage", ours, own, other));
+    }
+
+    /// The tie-break is deterministic and symmetric: of any two distinct
+    /// sender addresses exactly ONE side is required to demote — never
+    /// both (double outage), never neither (steady split brain).
+    /// REQ: FR-TRK-050
+    #[test]
+    fn tie_break_demotes_exactly_one_side() {
+        let pairs = [
+            ("10.0.0.1:1000", "10.0.0.2:1000"),
+            ("10.0.0.1:1000", "10.0.0.1:1001"),
+            ("192.168.9.9:65000", "10.0.0.1:1"),
+        ];
+        for (a, b) in pairs {
+            let a: SocketAddr = a.parse().unwrap();
+            let b: SocketAddr = b.parse().unwrap();
+            assert_ne!(
+                demotion_required(a, b),
+                demotion_required(b, a),
+                "exactly one of {a} / {b} must yield"
+            );
+        }
+    }
+
+    /// Startup arbitration over real multicast (HA.2b): with an active
+    /// sender on the group the window reports its address; on a silent
+    /// group it reports `None` after the window. REQ: FR-TRK-050
+    #[tokio::test]
+    async fn startup_arbitration_detects_an_active_sender() {
+        let group = Ipv4Addr::new(239, 255, 0, 62);
+        let port = 39_066; // distinct from the other multicast tests
+        let ours = DataSourceId::new(25, 2);
+
+        // Silent group: a full window passes, nobody is serving.
+        let silent = foreign_heartbeat_within(group, port, ours, Duration::from_millis(150))
+            .await
+            .expect("watch runs");
+        assert!(silent.is_none(), "silent group means nobody serves");
+
+        // Active sender: the window reports it well before it expires.
+        let sender = tokio::spawn(async move {
+            let socket = firefly_multicast::sender_socket().await.expect("sender");
+            let encoder = Cat065Encoder::new(ours, 1);
+            for k in 0..20u32 {
+                let block = encoder.encode_status(f64::from(k), true);
+                let _ = socket.send_to(&block, (group, port)).await;
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+        });
+        let found = foreign_heartbeat_within(group, port, ours, Duration::from_secs(3))
+            .await
+            .expect("watch runs");
+        assert!(found.is_some(), "an active sender must be detected");
+        sender.await.expect("sender task");
+    }
+
+    /// The runtime demotion watch over real multicast (HA.2b): while the
+    /// only heartbeats come from our own address it holds; a foreign
+    /// heartbeat that wins the tie-break makes it yield promptly.
+    /// REQ: FR-TRK-050
+    #[tokio::test]
+    async fn demotion_watch_ignores_own_and_yields_to_a_winning_foreign() {
+        let group = Ipv4Addr::new(239, 255, 0, 62);
+        let port = 39_067;
+        let ours = DataSourceId::new(25, 2);
+        let encoder = Cat065Encoder::new(ours, 1);
+
+        // A steady sender whose datagrams we will first treat as our own.
+        let sender_socket = firefly_multicast::sender_socket().await.expect("sender");
+        let probe = firefly_multicast::receiver::receiver_socket(group, port)
+            .await
+            .expect("probe");
+        sender_socket
+            .send_to(&encoder.encode_status(0.0, true), (group, port))
+            .await
+            .expect("send");
+        let mut buf = [0u8; 2048];
+        let (_, own_addr) = probe.recv_from(&mut buf).await.expect("probe recv");
+        drop(probe);
+
+        let feed = tokio::spawn({
+            let encoder = Cat065Encoder::new(ours, 1);
+            async move {
+                for k in 1..12u32 {
+                    let block = encoder.encode_status(f64::from(k), true);
+                    let _ = sender_socket.send_to(&block, (group, port)).await;
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                }
+            }
+        });
+
+        // Own heartbeats only: the watch must hold (we time it out).
+        let held = tokio::time::timeout(
+            Duration::from_millis(300),
+            run_demotion_watch(group, port, ours, own_addr),
+        )
+        .await;
+        assert!(held.is_err(), "own heartbeats must never trigger demotion");
+
+        // Same stream, but now "we" are the maximal address: every foreign
+        // heartbeat wins the tie-break against us — we must yield.
+        let far: SocketAddr = "255.255.255.255:65535".parse().unwrap();
+        let yielded = tokio::time::timeout(
+            Duration::from_secs(3),
+            run_demotion_watch(group, port, ours, far),
+        )
+        .await
+        .expect("must yield promptly")
+        .expect("watch runs");
+        assert_eq!(yielded, own_addr, "the foreign winner is reported");
+        feed.await.expect("feed task");
     }
 }

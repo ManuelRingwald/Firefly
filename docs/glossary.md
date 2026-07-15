@@ -937,9 +937,15 @@ CAT065-Heartbeat des Mains auf der Multicast-Gruppe. Verstummt der
 Heartbeat länger als der Failover-Timeout, **promotet** sich der Standby
 und startet mit dem letzten Zustands-Snapshot — das ASD sieht weiter ein
 Lagebild statt eines Ausfalls (ADR 0041, SDPS-002). Bewusst ohne
-externen Koordinator: Der Wire-Vertrag selbst trägt das Liveness-Signal;
-die ehrliche Grenze (Timeout-Detektion statt Konsens, Split-Brain bei
-Netz-Partition) steht im ADR.
+externen Koordinator: Der Wire-Vertrag selbst trägt das Liveness-Signal.
+Gegen **Split Brain** (zwei Sender einer Identität, z. B. nach einer
+Netz-Partition) wirken zwei Mechanismen (HA.2b): die
+Startup-Arbitrierung (ein startender Main, der seine Identität schon auf
+der Gruppe hört, wird Standby) und die Laufzeit-Demotion (die Seite mit
+der höheren Absender-Adresse weicht per Prozess-Ende, der
+Supervisor-Neustart landet im Standby). Ehrliche Grenze: Timeout-
+Detektion statt Konsens — während einer echten Partition senden beide,
+bis sie heilt (ADR 0041).
 
 **Zustands-Snapshot (HA.1)**
 Die periodische Sicherung des Tracker-Arbeitszustands (Tracks,

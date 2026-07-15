@@ -474,8 +474,15 @@ Default an) — sonst bricht der Start ab, denn ohne Feed kann der Standby
 weder wachen noch nach der Übernahme senden. `/ready` antwortet im
 Standby mit 503 „standby" (Kubernetes routet keinen Traffic dorthin).
 Ohne gemeinsames Snapshot-Volume übernimmt der Standby mit leerem Bild.
-Hinweis: Der Schutz gegen zwei gleichzeitige Sender nach einer
-Netz-Partition (Demotion) folgt mit HA.2b.
+
+**Split-Brain-Schutz (HA.2b):** Ein `main` mit aktiviertem Feed lauscht
+beim Start einen Failover-Timeout lang (Kaltstart +3 s) — hört er einen
+fremden Sender seiner Identität, startet er als Standby statt doppelt zu
+senden. Erkennen sich zwei aktive Sender zur Laufzeit (z. B. nach einer
+geheilten Netz-Partition), weicht deterministisch genau eine Seite und
+**beendet sich mit Exit-Code 3** — beide Instanzen brauchen deshalb eine
+**Restart-Policy** (Kubernetes `restartPolicy`, systemd `Restart=`,
+Docker `--restart`); der Neustart landet automatisch im Standby.
 
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
