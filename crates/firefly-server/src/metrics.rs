@@ -122,6 +122,21 @@ pub struct Metrics {
     /// snapshot (FPL.2, FR-TRK-048).
     pub correlation_manual: AtomicU64,
 
+    // --- State snapshot / restart restore (HA.1, ADR 0040) ---
+    /// Successful state-snapshot writes (counter). Stays 0 without
+    /// `FIREFLY_SNAPSHOT_PATH`.
+    pub snapshot_writes_total: AtomicU64,
+    /// Failed state-snapshot writes (counter) — the sink keeps retrying;
+    /// a growing value means persistence is broken while the live picture
+    /// continues.
+    pub snapshot_errors_total: AtomicU64,
+    /// Seconds since the last successful state-snapshot write (0 before
+    /// the first one) — the restart-loss window an operator would face.
+    pub snapshot_age_seconds: AtomicU64,
+    /// 1 if this process restored its air picture from a state snapshot at
+    /// startup, else 0 (set once in main).
+    pub restore: AtomicBool,
+
     // --- Registration shadow monitor (REG.2a, ADR 0034) ---
     /// Total number of registration bias estimates produced by the shadow
     /// monitor (counter). Stays 0 unless `FIREFLY_REGISTRATION_ENABLED` is set
@@ -382,6 +397,34 @@ pub fn render(metrics: &Metrics) -> String {
         "gauge",
         "Manual correlation overrides in effect on live tracks in the latest snapshot (FPL.2).",
         metrics.correlation_manual.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_snapshot_writes_total",
+        "counter",
+        "Successful state-snapshot writes (HA.1; 0 without FIREFLY_SNAPSHOT_PATH).",
+        metrics.snapshot_writes_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_snapshot_errors_total",
+        "counter",
+        "Failed state-snapshot writes (HA.1) — persistence broken while the live picture continues.",
+        metrics.snapshot_errors_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_snapshot_age_seconds",
+        "gauge",
+        "Seconds since the last successful state-snapshot write (restart-loss window).",
+        metrics.snapshot_age_seconds.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_restore",
+        "gauge",
+        "1 if this process restored its air picture from a state snapshot at startup, else 0.",
+        f64::from(metrics.restore.load(Ordering::Relaxed)),
     );
     write_metric(
         &mut out,
@@ -649,6 +692,10 @@ mod tests {
         metrics.tracks_correlated.store(2, Ordering::Relaxed);
         metrics.correlation_refused.store(1, Ordering::Relaxed);
         metrics.correlation_manual.store(1, Ordering::Relaxed);
+        metrics.snapshot_writes_total.store(360, Ordering::Relaxed);
+        metrics.snapshot_errors_total.store(2, Ordering::Relaxed);
+        metrics.snapshot_age_seconds.store(8, Ordering::Relaxed);
+        metrics.restore.store(true, Ordering::Relaxed);
 
         let text = render(&metrics);
 
@@ -710,6 +757,12 @@ mod tests {
         assert!(text.contains("firefly_correlation_refused 1"));
         assert!(text.contains("firefly_correlation_manual 1"));
         assert!(text.contains("# TYPE firefly_correlation_manual gauge"));
+        assert!(text.contains("firefly_snapshot_writes_total 360"));
+        assert!(text.contains("firefly_snapshot_errors_total 2"));
+        assert!(text.contains("firefly_snapshot_age_seconds 8"));
+        assert!(text.contains("firefly_restore 1"));
+        assert!(text.contains("# TYPE firefly_snapshot_writes_total counter"));
+        assert!(text.contains("# TYPE firefly_restore gauge"));
     }
 
     /// Without any registration estimate the labelled bias gauges are absent —

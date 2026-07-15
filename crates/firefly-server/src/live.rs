@@ -310,6 +310,36 @@ pub struct RegistrationTick {
 /// the next aircraft that inherits the number.
 pub type ManualOverrides = Arc<std::sync::Mutex<std::collections::BTreeMap<u16, Option<String>>>>;
 
+/// The periodic snapshot sink (HA.1, ADR 0040): where and how often the
+/// live tracker persists its working state, plus the write bookkeeping the
+/// metrics export reads. Attached via [`LiveTracker::with_snapshots`].
+struct SnapshotSink {
+    config: crate::snapshot::SnapshotConfig,
+    /// The configuration fingerprint stamped into every snapshot (and
+    /// checked at restore) — see [`crate::snapshot::config_fingerprint`].
+    fingerprint: String,
+    /// Wall-clock instant of the last write **attempt** (successful or
+    /// not) — the cadence gate.
+    last_attempt: Option<std::time::Instant>,
+    /// Unix time of the last **successful** write — the age gauge's basis.
+    last_success_unix_s: Option<u64>,
+    writes_total: u64,
+    errors_total: u64,
+}
+
+/// The snapshot bookkeeping as handed to the `on_tick` callback (HA.1
+/// metrics export). `None` when no snapshot sink is configured.
+#[derive(Clone, Copy, Debug)]
+pub struct SnapshotTick {
+    /// Successful snapshot writes so far (counter).
+    pub writes_total: u64,
+    /// Failed snapshot writes so far (counter). The sink keeps retrying —
+    /// a full disk may recover; the counter makes the failing state visible.
+    pub errors_total: u64,
+    /// Seconds since the last successful write (0 before the first one).
+    pub age_seconds: u64,
+}
+
 /// Correlate one output track against the flight plans (FPL.1, ADR 0038) —
 /// the central output-stage function: one association for every consumer.
 /// Returns the outcome so the caller can count (observability, rule 4).
@@ -387,6 +417,8 @@ pub struct LiveTracker {
     /// Manual overrides in effect on live tracks in the most recent snapshot
     /// (gauge semantics).
     manual_last: u64,
+    /// The periodic state-snapshot sink (HA.1, ADR 0040), if configured.
+    snapshot_sink: Option<SnapshotSink>,
     /// The freshest plot data-time seen, the instant snapshots are projected to.
     latest_data_time: Option<f64>,
     /// Total plots handed to the tracker (for metrics, AP9.4c-4).
@@ -407,6 +439,7 @@ impl LiveTracker {
             correlated_last: 0,
             refused_last: 0,
             manual_last: 0,
+            snapshot_sink: None,
             latest_data_time: None,
             plots_ingested: 0,
         }
@@ -431,6 +464,113 @@ impl LiveTracker {
     pub fn with_manual_overrides(mut self, overrides: ManualOverrides) -> Self {
         self.manual_overrides = Some(overrides);
         self
+    }
+
+    /// Attach the periodic state-snapshot sink (HA.1, ADR 0040): the live
+    /// task then persists the working state to `config.path` at most every
+    /// `config.period`, stamped with `fingerprint`.
+    pub fn with_snapshots(
+        mut self,
+        config: crate::snapshot::SnapshotConfig,
+        fingerprint: String,
+    ) -> Self {
+        self.snapshot_sink = Some(SnapshotSink {
+            config,
+            fingerprint,
+            last_attempt: None,
+            last_success_unix_s: None,
+            writes_total: 0,
+            errors_total: 0,
+        });
+        self
+    }
+
+    /// Restore the working state from a validated snapshot envelope (HA.1):
+    /// the tracker (tracks, filter states, wire-number pool, clutter maps),
+    /// the latest data time (so the very next output tick publishes the
+    /// restored picture) and the manual correlation pins. Call **after**
+    /// `with_manual_overrides`, or the pins have no map to land in.
+    pub fn restore(&mut self, envelope: crate::snapshot::SnapshotEnvelope) {
+        self.tracker = envelope.tracker;
+        self.latest_data_time = envelope.data_time;
+        if let Some(overrides) = &self.manual_overrides {
+            let mut map = overrides
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            map.clear();
+            map.extend(envelope.manual_overrides);
+        } else if !envelope.manual_overrides.is_empty() {
+            warn!(
+                pins = envelope.manual_overrides.len(),
+                "snapshot carries manual correlation pins but no flight plans are \
+                 configured; the pins are dropped"
+            );
+        }
+    }
+
+    /// Write a state snapshot if a sink is attached and its cadence has
+    /// elapsed (called once per output tick). A write failure is non-fatal
+    /// (availability over persistence): it is logged, counted and retried
+    /// on the next due tick — a full disk may recover.
+    pub fn maybe_write_snapshot(&mut self) {
+        let Some(sink) = self.snapshot_sink.as_mut() else {
+            return;
+        };
+        let due = sink
+            .last_attempt
+            .is_none_or(|t| t.elapsed() >= sink.config.period);
+        if !due {
+            return;
+        }
+        sink.last_attempt = Some(std::time::Instant::now());
+        let now_unix_s = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let empty = std::collections::BTreeMap::new();
+        let overrides_guard = self
+            .manual_overrides
+            .as_ref()
+            .map(|o| o.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        let view = crate::snapshot::SnapshotView {
+            format_version: crate::snapshot::SNAPSHOT_FORMAT_VERSION,
+            written_unix_s: now_unix_s,
+            config_fingerprint: &sink.fingerprint,
+            data_time: self.latest_data_time,
+            tracker: &self.tracker,
+            manual_overrides: overrides_guard.as_deref().unwrap_or(&empty),
+        };
+        match crate::snapshot::write_atomic(&sink.config.path, &view) {
+            Ok(()) => {
+                sink.writes_total += 1;
+                sink.last_success_unix_s = Some(now_unix_s);
+            }
+            Err(error) => {
+                sink.errors_total += 1;
+                warn!(
+                    %error,
+                    path = %sink.config.path.display(),
+                    "state snapshot write failed; live picture continues, retrying next period"
+                );
+            }
+        }
+    }
+
+    /// Snapshot bookkeeping for the `on_tick` callback (HA.1 metrics
+    /// export). `None` without a configured sink.
+    pub fn snapshot_tick(&self) -> Option<SnapshotTick> {
+        let sink = self.snapshot_sink.as_ref()?;
+        let now_unix_s = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        Some(SnapshotTick {
+            writes_total: sink.writes_total,
+            errors_total: sink.errors_total,
+            age_seconds: sink
+                .last_success_unix_s
+                .map_or(0, |t| now_unix_s.saturating_sub(t)),
+        })
     }
 
     /// The metrics surface: loaded plans, plus the latest snapshot's
@@ -707,11 +847,14 @@ impl LiveTracker {
 ///   time + tracks) is published over `snapshot_tx`. A send error (no receivers
 ///   yet) is ignored — the snapshot is the latest value any future reader sees.
 ///   Before the first poll the snapshot carries the empty sentinel.
+///   The tick also drives the periodic **state snapshot** (HA.1) when a
+///   sink is attached ([`LiveTracker::with_snapshots`]).
 ///   `on_tick` is called after each tick with `(plots_ingested,
-///   records_written, registration_tick, clutter_cells, correlation_stats)`
-///   so callers can update Prometheus
+///   records_written, registration_tick, clutter_cells, correlation_stats,
+///   snapshot_tick)` so callers can update Prometheus
 ///   counters (AP9.4c-4; the registration snapshot is `None` without a
-///   shadow monitor, REG.2a).
+///   shadow monitor, REG.2a; the snapshot bookkeeping is `None` without a
+///   sink, HA.1).
 ///
 /// When every sender on `plots_rx` is dropped the recorder is flushed and the
 /// task returns, so a clean shutdown loses no recorded plots.
@@ -722,7 +865,7 @@ pub async fn run_live_tracker<F>(
     output_period: Duration,
     on_tick: F,
 ) where
-    F: Fn(u64, u64, Option<RegistrationTick>, u64, (u64, u64, u64, u64)),
+    F: Fn(u64, u64, Option<RegistrationTick>, u64, (u64, u64, u64, u64), Option<SnapshotTick>),
 {
     let mut ticker = tokio::time::interval(output_period);
     // A delayed tick should not fire a burst of catch-up ticks afterwards.
@@ -751,12 +894,14 @@ pub async fn run_live_tracker<F>(
                 let time = live.latest_data_time().unwrap_or(Timestamp(0.0));
                 let tracks = live.snapshot();
                 let _ = snapshot_tx.send(LiveSnapshot { time, tracks: Arc::new(tracks) });
+                live.maybe_write_snapshot();
                 on_tick(
                     live.plots_ingested(),
                     live.records_written(),
                     live.registration_tick(),
                     live.clutter_cells(),
                     live.correlation_stats(),
+                    live.snapshot_tick(),
                 );
             }
         }
@@ -1058,6 +1203,91 @@ mod tests {
             !overrides.lock().unwrap().contains_key(&number),
             "the override dies with the track (wire numbers are reused)"
         );
+    }
+
+    /// A restart restores the air picture (HA.1, ADR 0040): the successor
+    /// tracker's very first output — before any plot has arrived — carries
+    /// the confirmed track under its old wire number, with the manual
+    /// correlation pin re-applied. The negative check (no restore ⇒ empty
+    /// picture) guards that the test bites. REQ: FR-TRK-049
+    #[test]
+    fn restore_brings_back_tracks_and_manual_pins() {
+        use firefly_fpl::FlightPlan;
+        let path = std::env::temp_dir().join(format!(
+            "firefly-live-restore-test-{}.json",
+            std::process::id()
+        ));
+        let plans = || {
+            CorrelationService::new(vec![FlightPlan {
+                callsign: "BAW22".into(),
+                squawk: None,
+                departure: None,
+                destination: None,
+                expected_time: None,
+            }])
+        };
+        let overrides = ManualOverrides::default();
+        let mut live = LiveTracker::new(build_live_tracker(&config()), None)
+            .with_flight_plans(plans())
+            .with_manual_overrides(Arc::clone(&overrides))
+            .with_snapshots(
+                crate::snapshot::SnapshotConfig {
+                    path: path.clone(),
+                    period: Duration::ZERO,
+                    max_age_s: 300.0,
+                },
+                "fp".into(),
+            );
+        for k in 0..8 {
+            live.ingest(
+                &[adsb(k as f64 * 10.0, 51.0, 10.5, 0x3C_AB_CD)],
+                now_unix_ns(),
+            );
+        }
+        let number = live.snapshot()[0].track_number;
+        overrides
+            .lock()
+            .unwrap()
+            .insert(number, Some("BAW22".into()));
+        live.maybe_write_snapshot();
+        assert_eq!(live.snapshot_tick().map(|t| t.writes_total), Some(1));
+
+        // A "restarted process": same configuration, fresh tracker.
+        let overrides2 = ManualOverrides::default();
+        let mut fresh = LiveTracker::new(build_live_tracker(&config()), None)
+            .with_flight_plans(plans())
+            .with_manual_overrides(Arc::clone(&overrides2));
+        assert!(
+            fresh.snapshot().is_empty(),
+            "negative check: without restore the picture is empty"
+        );
+
+        let now_unix_s = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let envelope = match crate::snapshot::load(&path, "fp", 300.0, now_unix_s) {
+            crate::snapshot::RestoreDecision::Restored(e) => e,
+            other => panic!("expected a restorable snapshot, got {other:?}"),
+        };
+        fresh.restore(*envelope);
+
+        let restored = fresh.snapshot();
+        let track = restored
+            .iter()
+            .find(|t| t.track_number == number)
+            .expect("the confirmed track survives the restart under its wire number");
+        assert!(track.confirmed);
+        assert_eq!(
+            track.flight_plan.as_ref().map(|p| p.callsign.as_str()),
+            Some("BAW22"),
+            "the manual pin survives the restart"
+        );
+        assert_eq!(
+            overrides2.lock().unwrap().get(&number),
+            Some(&Some("BAW22".to_string()))
+        );
+        let _ = std::fs::remove_file(&path);
     }
 
     /// The QNH correction applies only where a regional QNH is **observed**;
@@ -1380,7 +1610,7 @@ mod tests {
             plots_rx,
             snapshot_tx,
             Duration::from_millis(100),
-            |_, _, _, _, _| {},
+            |_, _, _, _, _, _| {},
         ));
 
         // Feed enough hits to confirm a track.
