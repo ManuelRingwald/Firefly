@@ -32,6 +32,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use firefly_asterix::Cat062Encoder;
 use firefly_core::{Plot, SensorId, SystemTrack, Timestamp};
+use firefly_fpl::{CorrelationOutcome, CorrelationService};
 use firefly_geo::{LocalFrame, Wgs84};
 use firefly_meteo::QnhService;
 use firefly_opensky::OpenSkyConfig;
@@ -304,6 +305,29 @@ pub struct RegistrationTick {
 /// (VERT.2). Only an **observed** regional QNH corrects; the
 /// standard-atmosphere fallback leaves the pressure altitude untouched and
 /// the flag cleared — I062/135 then honestly reports an uncorrected value.
+/// Correlate one output track against the flight plans (FPL.1, ADR 0038) —
+/// the central output-stage function: one association for every consumer.
+/// Returns the outcome so the caller can count (observability, rule 4).
+fn apply_correlation(
+    track: &mut SystemTrack,
+    correlation: &CorrelationService,
+    now: f64,
+) -> CorrelationOutcome {
+    let outcome = correlation.correlate(
+        track.callsign.as_ref().map(|c| c.as_str()),
+        track.mode_3a,
+        track.identity_conflict,
+        now,
+    );
+    match &outcome {
+        CorrelationOutcome::ByCallsign(r) | CorrelationOutcome::BySquawk(r) => {
+            track.flight_plan = Some(r.clone());
+        }
+        CorrelationOutcome::SquawkRefused | CorrelationOutcome::None => {}
+    }
+    outcome
+}
+
 fn apply_qnh(track: &mut SystemTrack, meteo: &QnhService) {
     let Some(pressure_altitude_ft) = track.barometric_altitude_ft else {
         return;
@@ -338,6 +362,15 @@ pub struct LiveTracker {
     /// service) leaves the pressure altitudes uncorrected — with the I062/135
     /// QNH bit honestly cleared.
     meteo: Option<QnhService>,
+    /// Flight plans + correlation rules (FPL.1, ADR 0038), applied at the
+    /// output stage like the QNH.
+    correlation: Option<CorrelationService>,
+    /// Tracks correlated in the most recent snapshot (gauge semantics).
+    correlated_last: u64,
+    /// Squawk-refusal decisions in the most recent snapshot (duplicate /
+    /// conspicuity / identity conflict) — the "needs manual correlation"
+    /// signal (gauge semantics).
+    refused_last: u64,
     /// The freshest plot data-time seen, the instant snapshots are projected to.
     latest_data_time: Option<f64>,
     /// Total plots handed to the tracker (for metrics, AP9.4c-4).
@@ -353,6 +386,9 @@ impl LiveTracker {
             registration: None,
             applier: None,
             meteo: None,
+            correlation: None,
+            correlated_last: 0,
+            refused_last: 0,
             latest_data_time: None,
             plots_ingested: 0,
         }
@@ -371,6 +407,24 @@ impl LiveTracker {
     /// where one is **observed**; otherwise the pressure altitude passes
     /// through with the QNH flag cleared (never a silent standard-atmosphere
     /// claim).
+    /// Attach the flight-plan correlation service (FPL.1).
+    pub fn with_flight_plans(mut self, service: CorrelationService) -> Self {
+        self.correlation = Some(service);
+        self
+    }
+
+    /// Correlated tracks / squawk refusals of the latest snapshot, and the
+    /// number of loaded plans — the metrics surface.
+    pub fn correlation_stats(&self) -> (u64, u64, u64) {
+        (
+            self.correlation
+                .as_ref()
+                .map_or(0, |c| c.plans_total() as u64),
+            self.correlated_last,
+            self.refused_last,
+        )
+    }
+
     pub fn with_meteo(mut self, service: QnhService) -> Self {
         self.meteo = Some(service);
         self
@@ -505,6 +559,20 @@ impl LiveTracker {
                 apply_qnh(track, meteo);
             }
         }
+        if let Some(correlation) = &self.correlation {
+            let (mut correlated, mut refused) = (0u64, 0u64);
+            for track in &mut tracks {
+                match apply_correlation(track, correlation, t) {
+                    CorrelationOutcome::ByCallsign(_) | CorrelationOutcome::BySquawk(_) => {
+                        correlated += 1;
+                    }
+                    CorrelationOutcome::SquawkRefused => refused += 1,
+                    CorrelationOutcome::None => {}
+                }
+            }
+            self.correlated_last = correlated;
+            self.refused_last = refused;
+        }
         tracks
     }
 
@@ -584,7 +652,8 @@ impl LiveTracker {
 ///   yet) is ignored — the snapshot is the latest value any future reader sees.
 ///   Before the first poll the snapshot carries the empty sentinel.
 ///   `on_tick` is called after each tick with `(plots_ingested,
-///   records_written, registration_tick, clutter_cells)` so callers can update Prometheus
+///   records_written, registration_tick, clutter_cells, correlation_stats)`
+///   so callers can update Prometheus
 ///   counters (AP9.4c-4; the registration snapshot is `None` without a
 ///   shadow monitor, REG.2a).
 ///
@@ -597,7 +666,7 @@ pub async fn run_live_tracker<F>(
     output_period: Duration,
     on_tick: F,
 ) where
-    F: Fn(u64, u64, Option<RegistrationTick>, u64),
+    F: Fn(u64, u64, Option<RegistrationTick>, u64, (u64, u64, u64)),
 {
     let mut ticker = tokio::time::interval(output_period);
     // A delayed tick should not fire a burst of catch-up ticks afterwards.
@@ -631,6 +700,7 @@ pub async fn run_live_tracker<F>(
                     live.records_written(),
                     live.registration_tick(),
                     live.clutter_cells(),
+                    live.correlation_stats(),
                 );
             }
         }
@@ -807,6 +877,50 @@ mod tests {
         assert!(live.snapshot().is_empty());
     }
 
+    /// Correlation at the output stage: a matching callsign labels the track
+    /// with its flight plan, while the Weeze failure modes (the same squawk
+    /// filed on two plans, an identity-conflicted track) are refused visibly
+    /// instead of guessed (ADR 0038).
+    /// REQ: FR-TRK-047
+    #[test]
+    fn apply_correlation_labels_by_callsign_and_refuses_weeze_duplicates() {
+        use firefly_core::Callsign;
+        let service = CorrelationService::new(
+            firefly_fpl::FplConfig::parse(
+                r#"[{"callsign":"DLH123","squawk":1234,"departure":"EDDF","destination":"EDDM"},
+                    {"callsign":"KLM88","squawk":2000},
+                    {"callsign":"RYR9X","squawk":2000}]"#,
+            )
+            .unwrap()
+            .plans,
+        );
+
+        // Callsign correlation carries the display fields.
+        let mut by_callsign = sample_track_at(50.0, 8.6, None);
+        by_callsign.callsign = Some(Callsign::new("DLH123"));
+        let outcome = apply_correlation(&mut by_callsign, &service, 0.0);
+        assert!(matches!(outcome, CorrelationOutcome::ByCallsign(_)));
+        let plan = by_callsign.flight_plan.expect("correlated");
+        assert_eq!(plan.destination.as_deref(), Some("EDDM"));
+
+        // The Weeze constellation: the same squawk filed twice — the code
+        // path refuses visibly, the track stays honestly unlabelled.
+        let mut weeze = sample_track_at(51.6, 6.15, None);
+        weeze.mode_3a = Some(0o2000);
+        let outcome = apply_correlation(&mut weeze, &service, 0.0);
+        assert_eq!(outcome, CorrelationOutcome::SquawkRefused);
+        assert!(weeze.flight_plan.is_none(), "no double label");
+
+        // A unique squawk on an identity-conflicted track (SPEC.1) is
+        // refused too — duplicated identities never auto-correlate by code.
+        let mut conflicted = sample_track_at(50.0, 8.6, None);
+        conflicted.mode_3a = Some(0o1234);
+        conflicted.identity_conflict = true;
+        let outcome = apply_correlation(&mut conflicted, &service, 0.0);
+        assert_eq!(outcome, CorrelationOutcome::SquawkRefused);
+        assert!(conflicted.flight_plan.is_none());
+    }
+
     /// The QNH correction applies only where a regional QNH is **observed**;
     /// outside every region (or without a barometric estimate) the track
     /// passes through untouched with the flag honestly cleared (VERT.2).
@@ -871,6 +985,8 @@ mod tests {
             rocd_ft_min: None,
             acceleration_mps2: None,
             mode_of_movement: None,
+            identity_conflict: false,
+            flight_plan: None,
         }
     }
 
@@ -1125,7 +1241,7 @@ mod tests {
             plots_rx,
             snapshot_tx,
             Duration::from_millis(100),
-            |_, _, _, _| {},
+            |_, _, _, _, _| {},
         ));
 
         // Feed enough hits to confirm a track.

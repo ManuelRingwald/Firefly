@@ -261,6 +261,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "firefly-fpl"
+version = "0.1.0"
+dependencies = [
+ "firefly-core",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "firefly-geo"
 version = "0.1.0"
 dependencies = [
@@ -365,6 +375,7 @@ dependencies = [
  "firefly-asterix",
  "firefly-core",
  "firefly-flarm",
+ "firefly-fpl",
  "firefly-geo",
  "firefly-io",
  "firefly-meteo",

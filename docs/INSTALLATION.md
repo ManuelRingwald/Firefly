@@ -386,6 +386,30 @@ export FIREFLY_METEO_QNH='[
 Die Werte werden vom Betreiber extern im Wetter-Zyklus aktualisiert; ein
 automatischer METAR-Abruf ist ein dokumentiertes Folge-Häppchen.
 
+### Schritt 4g (optional): Flugpläne (FPL.1)
+
+Für die **Flugplan-Korrelation** (Track ↔ Flugplan, ADR 0038) kann Firefly
+eine Liste gefileter Flugpläne mitgegeben werden. Ohne Konfiguration läuft
+der Tracker unverändert — kein Track trägt dann ein Flugplan-Label.
+
+```bash
+export FIREFLY_FLIGHT_PLANS='[
+  {"callsign":"DLH123","squawk":1234,"departure":"EDDF",
+   "destination":"EDDM","expected_time":1752580800},
+  {"callsign":"BAW22","squawk":"7500"}
+]'
+```
+
+Nur `callsign` ist Pflicht (Primärschlüssel, doppelte Callsigns brechen den
+Start ab). `squawk` wird **oktal wie geschrieben** gelesen — `1234` und
+`"1234"` bedeuten beide Oktal 1234; eine Ziffer 8/9 bricht den Start ab
+(nie stille Dezimal-Uminterpretation). `expected_time` ist Unix-Epoche in
+Sekunden (Mitte des ±45-min-Plausibilitätsfensters; fehlt = zeitlich immer
+plausibel). Malformes JSON oder implausible Werte brechen den Start ab;
+unset heißt schlicht „keine Flugpläne" (INFO im Log). Der Feldsatz wächst
+additiv (EFS-Bedarf, Wayfinder #244); eine Live-FDPS-Anbindung ist ein
+dokumentiertes Folge-Häppchen.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den

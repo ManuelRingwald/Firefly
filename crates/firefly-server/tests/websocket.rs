@@ -45,6 +45,8 @@ fn track(id: u32, time: f64) -> SystemTrack {
         rocd_ft_min: None,
         acceleration_mps2: None,
         mode_of_movement: None,
+        identity_conflict: false,
+        flight_plan: None,
     }
 }
 

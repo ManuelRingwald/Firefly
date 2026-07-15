@@ -10,6 +10,39 @@
 
 ---
 
+## 🎯 Stand 2026-07-15 (FPL.1 — Flugplan-Eingang + Auto-Korrelation)
+
+- **Zuletzt aktualisiert:** 2026-07-15
+- **FPL.1 (FR-TRK-047, ADR 0038 als Code):** Neue Crate **`firefly-fpl`** —
+  env-Provider `FIREFLY_FLIGHT_PLANS` (Meteo-Ehrlichkeits-Muster:
+  Kaputt-Konfiguration = **Start-Fehler**, unset = leere Planliste + INFO;
+  Duplikat-Callsign, leeres Callsign, nicht-endliche Zeit = harte Fehler;
+  **Squawk oktal wie geschrieben** — `1234`/`"1234"` = Oktal 1234, eine
+  Ziffer 8/9 bricht laut ab statt still dezimal umzudeuten) und
+  `CorrelationService` mit den verbindlichen ADR-0038-Regeln
+  (Callsign-first normalisiert — greift auch bei Identitätskonflikt, der
+  Konflikt sperrt nur den Code-Fallback; Squawk nur eindeutig unter allen
+  Plänen + nie Conspicuity 1000 + nie bei `identity_conflict` +
+  Zeitfenster ±45 min; jede Verweigerung sichtbar). Anwendung
+  **zustandslos je Output-Tick** am Ausgabe-Rand
+  (`live::apply_correlation`, nach der QNH-Korrektur; Tracker-Kern bleibt
+  flugplan-frei). **WS-JSON additiv:** `SystemTrack.identity_conflict`
+  (SPEC.1-Flag jetzt exportiert) + `flight_plan`
+  (`{callsign, departure?, destination?}`); **CAT062/ICD unberührt**
+  (I062/390 = FPL.2). Metriken `firefly_flight_plans`/
+  `firefly_tracks_correlated`/`firefly_correlation_refused` über die
+  On-Tick-Kette. 7 neue Tests (Config/Korrelation/Live-Rand), Gates grün.
+  Ehrliche Grenzen: gehaltener Korrelations-Zustand + manuelle
+  Übersteuerung = FPL.2; räumliche Plausibilität braucht Routen-Geometrie;
+  Live-FDPS-Provider = Folge-ADR; Feldsatz wächst additiv nach
+  Wayfinder #244 (Feedback steht noch aus — ADR 0038 bleibt
+  „vorgeschlagen"). Roadmap: **76 %**.
+- **Nächster Schritt:** **FPL.2** ankündigen — I062/390-Encoding
+  (ICD-Bump) + manuelle Korrelations-Kommandos via API (S3–S4, 78 %) —
+  und Freigabe abwarten. Dabei die additiven WS-JSON-Felder
+  (`identity_conflict`, `flight_plan`) im selben `from-firefly`-Issue an
+  Wayfinder kommunizieren.
+
 ## 🎯 Stand 2026-07-15 (FPL.0 — Korrelations-ADR + Wayfinder-Abstimmung)
 
 - **Zuletzt aktualisiert:** 2026-07-15
