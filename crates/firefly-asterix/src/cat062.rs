@@ -79,6 +79,8 @@ mod uap {
     pub const BAROMETRIC_ALTITUDE: u8 = 19;
     /// I062/220 — Calculated Rate of Climb/Descent (VERT.2).
     pub const RATE_OF_CLIMB_DESCENT: u8 = 20;
+    /// I062/390 — Flight Plan Related Data (FPL.2).
+    pub const FLIGHT_PLAN_RELATED_DATA: u8 = 21;
     /// I062/500 — Estimated Accuracies.
     pub const ESTIMATED_ACCURACIES: u8 = 27;
 }
@@ -169,6 +171,20 @@ const MAX_ADD_SPEC_OCTETS: usize = 4;
 /// The remaining six bits of octet 1 are spare and stay zero. Verified
 /// against SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.9.
 const STI_DOWNLINKED_TARGET_IDENTIFICATION: u8 = 0x00;
+
+/// I062/390 primary-subfield octet 1, bit 7: **CSN** — Callsign (subfield #2,
+/// 7 octets ASCII, left-adjusted, space-padded) — the flight plan's identity.
+/// Verified against SUR.ET1.ST05.2000-STD-09-01 Ed. 1.10 §5.2.23.
+const FPL_CSN_PRESENT: u8 = 0x40;
+/// I062/390 octet 1, bit 2: **DEP** — Departure Airport (subfield #7,
+/// 4 octets, ICAO four-letter locator).
+const FPL_DEP_PRESENT: u8 = 0x02;
+/// I062/390 octet 2, bit 8: **DST** — Destination Airport (subfield #8,
+/// 4 octets, ICAO four-letter locator).
+const FPL_DST_PRESENT: u8 = 0x80;
+/// Longest I062/390 subfield-spec chain we accept: 3 octets cover all 18
+/// defined subfields; a longer chain is malformed.
+const MAX_FPL_SPEC_OCTETS: usize = 3;
 
 /// The field-extension bit (lowest bit of an octet): "another octet follows".
 /// Used both by the FSPEC and, here, *inside* the variable-length I062/080.
@@ -354,6 +370,11 @@ impl Cat062Encoder {
         }
         if let Some(mom) = track.mode_of_movement {
             builder = builder.item(uap::MODE_OF_MOVEMENT, encode_mode_of_movement(&mom));
+        }
+        // Flight-plan correlation result (FPL.2, ICD 3.7.0): only a correlated
+        // track carries I062/390 — absence over an invented association.
+        if let Some(plan) = &track.flight_plan {
+            builder = builder.item(uap::FLIGHT_PLAN_RELATED_DATA, encode_flight_plan(plan));
         }
 
         builder.finish()
@@ -566,6 +587,59 @@ fn encode_mode_of_movement(mom: &firefly_core::ModeOfMovement) -> Vec<u8> {
         VerticalTrend::Undetermined => 3,
     };
     vec![(trans << MOM_TRANS_SHIFT) | (long << MOM_LONG_SHIFT) | (vert << MOM_VERT_SHIFT)]
+}
+
+/// I062/390 — Flight Plan Related Data (FPL.2, ICD 3.7.0): the central
+/// correlation's result on the wire, so every CAT062 consumer sees the same
+/// track ↔ flight-plan association (ADR 0038/0039). A compound item; we emit
+/// the minimal subfields our flight-plan set carries — **CSN** (#2, the plan
+/// callsign, 7 ASCII octets, left-adjusted and space-padded), **DEP** (#7)
+/// and **DST** (#8, ICAO four-letter locators). The subfield-spec chain is a
+/// single octet unless DST is present (then two, chained via FX). Emitted
+/// only for a correlated track — an uncorrelated record stays byte-identical
+/// to its pre-3.7.0 form.
+fn encode_flight_plan(plan: &firefly_core::FlightPlanRef) -> Vec<u8> {
+    let mut spec1 = FPL_CSN_PRESENT;
+    let mut spec2 = 0u8;
+    if plan.departure.is_some() {
+        spec1 |= FPL_DEP_PRESENT;
+    }
+    if plan.destination.is_some() {
+        spec2 |= FPL_DST_PRESENT;
+    }
+    let mut out = Vec::with_capacity(2 + 7 + 4 + 4);
+    if spec2 != 0 {
+        out.extend_from_slice(&[spec1 | FX, spec2]);
+    } else {
+        out.push(spec1);
+    }
+    out.extend_from_slice(&ascii_fixed::<7>(&plan.callsign));
+    if let Some(dep) = &plan.departure {
+        out.extend_from_slice(&ascii_fixed::<4>(dep));
+    }
+    if let Some(dst) = &plan.destination {
+        out.extend_from_slice(&ascii_fixed::<4>(dst));
+    }
+    out
+}
+
+/// One fixed-width ASCII wire field, the I062/390 text convention (CSN 7
+/// octets, DEP/DST 4): uppercased, left-adjusted, space-padded, truncated at
+/// `N`. Non-ASCII/non-printable characters are dropped defensively — the
+/// flight-plan input is validated at the config edge, this is the last line.
+fn ascii_fixed<const N: usize>(text: &str) -> [u8; N] {
+    let mut out = [b' '; N];
+    let mut i = 0;
+    for c in text.trim().chars() {
+        if i == N {
+            break;
+        }
+        if c.is_ascii_graphic() {
+            out[i] = (c as u8).to_ascii_uppercase();
+            i += 1;
+        }
+    }
+    out
 }
 
 /// I062/130 — Calculated Track Geometric Altitude: a signed 16-bit count of
@@ -816,6 +890,9 @@ pub struct DecodedRecord {
     pub acceleration_mps2: Option<(f64, f64)>,
     /// I062/200 Mode of Movement, if present (VERT.3).
     pub mode_of_movement: Option<firefly_core::ModeOfMovement>,
+    /// I062/390 Flight Plan Related Data (CSN, DEP, DST), if the track is
+    /// correlated with a flight plan (FPL.2, ICD 3.7.0).
+    pub flight_plan: Option<firefly_core::FlightPlanRef>,
 }
 
 /// Errors that can occur while decoding a CAT062 data block.
@@ -908,6 +985,7 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
     let mut rocd_ft_min = None;
     let mut acceleration_mps2 = None;
     let mut mode_of_movement = None;
+    let mut flight_plan = None;
     let mut magnetic_heading_deg = None;
     let mut selected_altitude_ft = None;
     let mut ias_kt = None;
@@ -1022,6 +1100,48 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
                 let octet = cursor.take(1)?[0];
                 mode_of_movement = Some(decode_mode_of_movement(octet));
             }
+            uap::FLIGHT_PLAN_RELATED_DATA => {
+                // I062/390 is compound (like I062/380): an FX-chained subfield
+                // spec, then the present subfields in ascending order. We
+                // decode the three Firefly emits (CSN #2, DEP #7, DST #8); any
+                // other present subfield cannot be safely skipped without its
+                // length and is rejected rather than mis-parsed.
+                let mut specs: Vec<u8> = Vec::new();
+                loop {
+                    let octet = cursor.take(1)?[0];
+                    specs.push(octet);
+                    if octet & FX == 0 {
+                        break;
+                    }
+                    if specs.len() >= MAX_FPL_SPEC_OCTETS {
+                        return Err(DecodeError::UnknownItem(frn));
+                    }
+                }
+                let mut plan_callsign = None;
+                let mut departure = None;
+                let mut destination = None;
+                for (i, &spec) in specs.iter().enumerate() {
+                    for bit in 0..7u8 {
+                        if spec & (0x80 >> bit) == 0 {
+                            continue;
+                        }
+                        match i * 7 + bit as usize + 1 {
+                            2 => plan_callsign = Some(decode_ascii_trimmed(cursor.take(7)?)),
+                            7 => departure = Some(decode_ascii_trimmed(cursor.take(4)?)),
+                            8 => destination = Some(decode_ascii_trimmed(cursor.take(4)?)),
+                            _ => return Err(DecodeError::UnknownItem(frn)),
+                        }
+                    }
+                }
+                // CSN is the identity of the association; an I062/390 without
+                // it carries no meaningful flight-plan reference.
+                let callsign = plan_callsign.ok_or(DecodeError::MissingItem(frn))?;
+                flight_plan = Some(firefly_core::FlightPlanRef {
+                    callsign,
+                    departure,
+                    destination,
+                });
+            }
             uap::ESTIMATED_ACCURACIES => {
                 position_uncertainty = Some(decode_accuracies(cursor.take(5)?))
             }
@@ -1065,12 +1185,20 @@ fn decode_record(cursor: &mut Cursor) -> Result<DecodedRecord, DecodeError> {
         rocd_ft_min,
         acceleration_mps2,
         mode_of_movement,
+        flight_plan,
     })
 }
 
 /// I062/010 — the inverse of [`encode_data_source`].
 fn decode_data_source(bytes: &[u8]) -> DataSourceId {
     DataSourceId::new(bytes[0], bytes[1])
+}
+
+/// One fixed-width ASCII wire field — the inverse of [`ascii_fixed`]: trailing
+/// padding spaces are trimmed, the characters themselves pass through.
+fn decode_ascii_trimmed(bytes: &[u8]) -> String {
+    let text: String = bytes.iter().map(|&b| b as char).collect();
+    text.trim_end().to_string()
 }
 
 /// I062/070 — the inverse of [`encode_time_of_track`]. The result is a
@@ -2009,6 +2137,66 @@ mod tests {
         let records = decode_data_block(&plain).unwrap();
         assert_eq!(records[0].acceleration_mps2, None);
         assert_eq!(records[0].mode_of_movement, None);
+    }
+
+    /// I062/390 (FRN 21, FPL.2, ICD 3.7.0) encodes the correlated flight plan
+    /// byte-exactly — subfield spec `[CSN|DEP|FX, DST]`, then CSN (7 ASCII
+    /// octets, space-padded), DEP and DST (4 octets each) — and the round trip
+    /// recovers it. A track without a flight plan stays byte-identical to its
+    /// pre-3.7.0 form. REQ: FR-TRK-048
+    #[test]
+    fn flight_plan_item_encodes_byte_exactly_and_round_trips() {
+        let plan = firefly_core::FlightPlanRef {
+            callsign: "DLH123".into(),
+            departure: Some("EDDF".into()),
+            destination: Some("EDDM".into()),
+        };
+        assert_eq!(
+            encode_flight_plan(&plan),
+            vec![
+                FPL_CSN_PRESENT | FPL_DEP_PRESENT | FX, // spec octet 1 = 0x43
+                FPL_DST_PRESENT,                        // spec octet 2 = 0x80
+                b'D',
+                b'L',
+                b'H',
+                b'1',
+                b'2',
+                b'3',
+                b' ', // CSN, space-padded
+                b'E',
+                b'D',
+                b'D',
+                b'F', // DEP
+                b'E',
+                b'D',
+                b'D',
+                b'M', // DST
+            ]
+        );
+        // Callsign only: a single spec octet, no FX.
+        let minimal = firefly_core::FlightPlanRef {
+            callsign: "BAW22".into(),
+            departure: None,
+            destination: None,
+        };
+        assert_eq!(
+            encode_flight_plan(&minimal),
+            vec![FPL_CSN_PRESENT, b'B', b'A', b'W', b'2', b'2', b' ', b' ']
+        );
+
+        let encoder =
+            Cat062Encoder::new(DataSourceId::new(0x19, 0x02), system_reference_point(), 0.0);
+        let mut t = track(1);
+        t.flight_plan = Some(plan.clone());
+        let block = encoder.encode(Timestamp(12.0), std::slice::from_ref(&t));
+        let records = decode_data_block(&block).unwrap();
+        assert_eq!(records[0].flight_plan, Some(plan));
+
+        // Absence: an uncorrelated track carries no I062/390 and its record is
+        // byte-identical to the pre-3.7.0 wire form (additive change).
+        let plain = encoder.encode(Timestamp(12.0), &[track(1)]);
+        let records = decode_data_block(&plain).unwrap();
+        assert_eq!(records[0].flight_plan, None);
     }
 
     /// I062/245 packs 8 characters as 8 × 6-bit IA-5 codes (48 bits = 6

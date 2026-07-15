@@ -70,6 +70,15 @@ impl CorrelationService {
         self.plans.len()
     }
 
+    /// Resolve a plan by its (normalised) callsign — the lookup behind the
+    /// **manual** correlation command path (FPL.2): the controller names a
+    /// plan, the service answers with its display reference or `None` when no
+    /// such plan is filed.
+    pub fn reference_by_callsign(&self, callsign: &str) -> Option<FlightPlanRef> {
+        let key = callsign.trim().to_ascii_uppercase();
+        self.by_callsign.get(&key).map(|&i| self.reference(i))
+    }
+
     /// Apply the ADR 0038 rules to one track's identity at data time `now`.
     ///
     /// 1. **Callsign first:** a (normalised) callsign match correlates —

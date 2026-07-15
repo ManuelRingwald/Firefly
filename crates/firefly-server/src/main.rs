@@ -342,9 +342,21 @@ async fn build_live_state(
     if !meteo.regions.is_empty() {
         live = live.with_meteo(meteo.into_service());
     }
+    // FPL.1/FPL.2: the correlation service labels each snapshot; the shared
+    // override map lets the HTTP command edge pin/clear associations manually
+    // (manual beats automatic, ADR 0039).
+    let mut correlation_api = None;
     if !fpl.plans.is_empty() {
         tracing::info!(plans = fpl.plans.len(), "flight-plan correlation active");
-        live = live.with_flight_plans(firefly_fpl::CorrelationService::new(fpl.plans.clone()));
+        let service = firefly_fpl::CorrelationService::new(fpl.plans.clone());
+        let overrides = firefly_server::ManualOverrides::default();
+        correlation_api = Some(firefly_server::CorrelationApi {
+            service: Arc::new(service.clone()),
+            overrides: Arc::clone(&overrides),
+        });
+        live = live
+            .with_flight_plans(service)
+            .with_manual_overrides(overrides);
     }
     match (registration, apply) {
         (Some(monitor), true) => {
@@ -369,13 +381,15 @@ async fn build_live_state(
             snapshot_tx,
             output_period,
             move |plots, records, registration, clutter_cells, correlation| {
-                let (plans, correlated, refused) = correlation;
+                let (plans, correlated, refused, manual) = correlation;
                 m.flight_plans
                     .store(plans, std::sync::atomic::Ordering::Relaxed);
                 m.tracks_correlated
                     .store(correlated, std::sync::atomic::Ordering::Relaxed);
                 m.correlation_refused
                     .store(refused, std::sync::atomic::Ordering::Relaxed);
+                m.correlation_manual
+                    .store(manual, std::sync::atomic::Ordering::Relaxed);
                 m.live_plots_ingested_total
                     .store(plots, std::sync::atomic::Ordering::Relaxed);
                 m.plot_records_written_total
@@ -487,6 +501,7 @@ async fn build_live_state(
         metrics,
         ws_token,
         ws_allowed_origin,
+        correlation: correlation_api,
     }
 }
 
