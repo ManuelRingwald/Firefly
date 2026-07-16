@@ -22,8 +22,14 @@ use tokio::net::UdpSocket;
 /// Send one CAT065 SDPS-Status heartbeat to `destination` every `period`.
 ///
 /// `now_time_of_day` returns the current time of day in seconds since UTC
-/// midnight; it is called once per heartbeat to stamp I065/030. The SDPS is
-/// reported as operational (a degraded report would set the NOGO field).
+/// midnight; it is called once per heartbeat to stamp I065/030.
+///
+/// `operational` is asked before **every** heartbeat whether the SDPS may
+/// honestly report itself operational; `false` sets the NOGO field of
+/// I065/040 (degraded). This is the delivery edge of the tracker-progress
+/// watchdog (SAFE.4, FHA H-F1-02): a heartbeat that keeps saying "alive"
+/// while the tracker task is stuck would be the most dangerous kind of
+/// status — misleading and undetected.
 ///
 /// The loop runs until a send fails — the caller (a spawned task) decides how
 /// to react. It does not return on its own, so in practice it lives as long as
@@ -35,12 +41,13 @@ pub async fn run_heartbeat(
     encoder: &Cat065Encoder,
     period: Duration,
     mut now_time_of_day: impl FnMut() -> f64,
+    mut operational: impl FnMut() -> bool,
     mut on_sent: impl FnMut(),
 ) -> std::io::Result<()> {
     let mut ticker = tokio::time::interval(period);
     loop {
         ticker.tick().await;
-        let block = encoder.encode_status(now_time_of_day(), true);
+        let block = encoder.encode_status(now_time_of_day(), operational());
         match socket.send_to(&block, destination).await {
             Ok(bytes) => {
                 tracing::debug!(bytes, %destination, "sent CAT065 heartbeat");
@@ -82,6 +89,7 @@ mod tests {
                 &encoder,
                 Duration::from_millis(5),
                 || 3600.0,
+                || true,
                 move || {
                     sent_in_task.fetch_add(1, Ordering::Relaxed);
                 },
@@ -102,5 +110,39 @@ mod tests {
             sent.load(Ordering::Relaxed) >= 2,
             "on_sent fired per heartbeat"
         );
+    }
+
+    /// The `operational` callback is honoured per heartbeat: when it says
+    /// `false`, the wire carries NOGO = degraded (SAFE.4 — a stuck tracker
+    /// must not be reported as a healthy service). REQ: FR-OPS-009
+    #[tokio::test]
+    async fn degraded_answer_sets_nogo_on_the_wire() {
+        let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let destination = receiver.local_addr().unwrap();
+        let sender = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+
+        let encoder = Cat065Encoder::new(DataSourceId::new(0x19, 0x02), 1);
+        let handle = tokio::spawn(async move {
+            let _ = run_heartbeat(
+                &sender,
+                destination,
+                &encoder,
+                Duration::from_millis(5),
+                || 3600.0,
+                || false,
+                || {},
+            )
+            .await;
+        });
+
+        let mut buf = [0u8; 64];
+        let (n, _) = receiver.recv_from(&mut buf).await.unwrap();
+        let reports = decode_status_block(&buf[..n]).expect("decodes");
+        assert_eq!(reports.len(), 1);
+        assert!(
+            !reports[0].operational,
+            "a false answer must reach the wire as NOGO/degraded"
+        );
+        handle.abort();
     }
 }

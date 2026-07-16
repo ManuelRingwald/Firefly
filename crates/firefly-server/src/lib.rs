@@ -35,9 +35,9 @@ pub use config::ServerConfig;
 pub use firefly_io::Frame;
 pub use live::{
     build_live_tracker, build_live_tracker_multi, live_system_reference_point,
-    registration_enabled, resolve_plot_recorder, run_live_cat062, run_live_tracker, LiveSnapshot,
-    LiveTracker, ManualOverrides, PlotRecorder, RadarSensor, RegistrationTick, SensorGate,
-    SnapshotRx, SnapshotTick,
+    registration_enabled, resolve_plot_recorder, run_live_cat062, run_live_tracker,
+    tracker_progress_stalled, LiveSnapshot, LiveTracker, ManualOverrides, PlotRecorder,
+    RadarSensor, RegistrationTick, SensorGate, SnapshotRx, SnapshotTick,
 };
 pub use metrics::Metrics;
 pub use snapshot::{config_fingerprint, RestoreDecision, SnapshotConfig};
