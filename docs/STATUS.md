@@ -10,6 +10,32 @@
 
 ---
 
+## 🎯 Stand 2026-07-16 (CAP.2 — JPDA-Cluster-Kappe + Auslegungsgrenzen)
+
+- **Zuletzt aktualisiert:** 2026-07-16
+- **CAP.2 (FR-TRK-052; kein Wire-/ICD-Bezug):** Der **JPDA-Worst-Case
+  ist entschärft und die Auslegungsgrenzen sind dokumentiert.** Gemessen
+  (dichte 120-m-Kolonne = ein Konflikt-Cluster, 60-s-Szenario, Release):
+  8 Ziele 149 ms, 10 Ziele **27,8 s** — die exakte Enumeration
+  explodiert exponentiell, der Tracker wäre live hinter die Echtzeit
+  gefallen. Jetzt gilt eine **Cluster-Kappe** (`MAX_CLUSTER_TRACKS=8` /
+  `MAX_CLUSTER_PLOTS=10` in `jpda.rs`): Ein Cluster darüber degradiert
+  auf **Pro-Track-PDA** (exakte Einzeltrack-Formel, nur die
+  Cross-Track-Exklusivität entfällt; SPEC.1-Koaleszenz-Schutz bleibt
+  aktiv) — 10er-Kolonne: **0,75 ms**, bestätigte Tracks unverändert
+  (Kolonne für den Sensor physikalisch unauflösbar: 2 vorher wie
+  nachher). Sichtbar via `firefly_jpda_cluster_cap_hits_total` + WARN
+  (1. und jeder 100. Treffer); Zähler snapshot-kompatibel
+  (`serde(default)`). Bench-Gruppe `dense_cluster` (4/6/8/12 Ziele;
+  teuerster exakter Fall ≈ 160 ms an der Kappe); Auslegungsgrenzen
+  (CAP.1-Baseline + Worst-Case + Kappen-Semantik) in **TECHNICAL §11**.
+  Doku: `docs/milestones/CAP2-JPDA-Cluster-Kappe.md`. Roadmap: **94 %**.
+- **Nächster Schritt:** **SRV.1** ankündigen (ADR „Arbeitsteilung
+  Firefly+Wayfinder = SDPS-Server-Funktion" (CAT252-Ersatz) + optionale
+  adressierte Dienste; S3, 96 %) — und Freigabe abwarten. Offen beim
+  Betreiber: erster COMPASS-Bericht (HA.5-Abnahme). Weiter offen:
+  Wayfinder #244/#245.
+
 ## 🎯 Stand 2026-07-15 (CAP.1 — Benchmark-Harness)
 
 - **Zuletzt aktualisiert:** 2026-07-15
