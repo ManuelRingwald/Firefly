@@ -10,6 +10,27 @@
 
 ---
 
+## 🎯 Stand 2026-07-16 (SAFE.4 — Tracker-Fortschritts-Watchdog; FHA-L1 geschlossen)
+
+- **Zuletzt aktualisiert:** 2026-07-16
+- **SAFE.4 (FR-OPS-009; ICD 3.7.1 dokumentarisch):** Das FHA-Finding L1
+  ist **auf Betreiber-Anweisung sofort geschlossen**: Der
+  CAT065-Heartbeat fragt vor jedem Senden `tracker_progress_stalled` —
+  bleibt der Output-Tick des Live-Trackers länger als 3 Ausgabeperioden
+  (min 3 s) aus, meldet er ehrlich **NOGO/degradiert** statt „lebendig"
+  (scharf erst nach dem ersten Tick; automatische Erholung; ERROR-/
+  INFO-Log; Gauge `firefly_heartbeat_degraded`). Draht-Wirkung
+  testbelegt; NOGO-Werte seit ICD 2.3.0 spezifiziert ⇒ Konsumenten
+  unverändert (Wayfinder-Info-Issue folgt dem ICD-Prozess). Zudem
+  Betreiber-Vorgabe umgesetzt: **FHA-Pflege ist jetzt Qualitäts-Gate**
+  (CLAUDE.md §5). FHA §3/§6 fortgeschrieben (L1 ✅ mit Audit-Spur).
+  Ehrliche Grenze: erkennt ausbleibende Ticks, nicht falsch rechnende;
+  Standby promotet weiterhin nur bei *verstummtem* Heartbeat
+  (ADR-0041-Semantik — Änderung wäre eigenes Häppchen).
+- **Nächster Schritt:** unverändert **ASSUR.2** ankündigen (Coverage +
+  Property-Tests + Genauigkeits-Nachweisdossier; S3, **100 %**) — nach
+  Merge von PR #97, Freigabe abwarten.
+
 ## 🎯 Stand 2026-07-16 (ASSUR.1 — FHA / Hazard-Analyse)
 
 - **Zuletzt aktualisiert:** 2026-07-16

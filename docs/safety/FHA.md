@@ -72,7 +72,7 @@ mit Trace) · **Rest** (Restrisiko/Verweis §6).
 | ID | Fehlerbedingung | Typ | SK | Barrieren (Trace) | Rest |
 |----|-----------------|-----|----|-------------------|------|
 | H-F1-01 | Bild fällt komplett aus, Konsument **merkt es** | V/e | SK3 | CAT065-Heartbeat unabhängig vom Bildinhalt (ADR 0018); Wayfinder-Staleness + Feed-Banner + `/ready`-Kopplung (externe Barriere); K8s-Restart-Policy + Standby-Übernahme (ADR 0041, NFR-OPS-002) | akzeptiert (Rückfall-Verfahren = Betreiber) |
-| H-F1-02 | **Eingefrorenes Bild**: Tracker-Task hängt, Heartbeat-Task lebt weiter — Konsument sieht „Dienst ok" + stehende Tracks | I/u | **SK1–2** | Teilweise: Datenzeit im Strom (I062/070) altert sichtbar; Wayfinder-Track-Alterung. **Keine Firefly-interne Kopplung Heartbeat ↔ Tracker-Fortschritt** | **Lücke L1 (§6)** |
+| H-F1-02 | **Eingefrorenes Bild**: Tracker-Task hängt, Heartbeat-Task lebt weiter — Konsument sieht „Dienst ok" + stehende Tracks | I/u | **SK1–2** | **Tracker-Fortschritts-Watchdog (SAFE.4, FR-OPS-009):** der CAT065-Heartbeat prüft vor jedem Senden den Output-Tick-Fortschritt und meldet **NOGO/degradiert**, wenn > 3 Output-Perioden kein Tick kam (`tracker_progress_stalled`, ERROR-Log + `firefly_heartbeat_degraded`; ICD 3.7.1); zusätzlich altert die Datenzeit im Strom (I062/070) sichtbar, Wayfinder-Track-Alterung | geschlossen (L1 ✅) |
 | H-F1-03 | Systematisch **falsche Positionen** (Sensor-Bias, falscher Site-Standort in `FIREFLY_SOURCES`, falscher Referenzpunkt) | I/u | **SK1–2** | Registrierungs-Monitor + gegatete, geglättete Korrektur (REG.2a/b, ADR 0034); Konfig-Fingerprint verhindert Restore auf fremde Konfiguration (ADR 0040); Mess-Harness gegen Simulator-Wahrheit (FR-TRK-051); COMPASS-Fremd-Decoder-Gegen-Check als Verfahren (NFR-SAFE-003) | Verfahren statt Automatik: falscher, in sich konsistenter Site-Eintrag bleibt unerkannt bis zum Gegen-Check → **L2** |
 | H-F1-04 | **Geister-Tracks** (Clutter, Multipath-Reflexionen, Duplikate) | I/e–I/u | SK2–3 | Bestätigungslogik (M-of-N, ADR 0012-Lebenszyklus); räumliche Clutter-Karte + Reflexions-Heuristik (ADR 0037, FR-TRK-046); Duplikat-/Koaleszenz-Wächter (ADR 0036); Falsch-Track-Metrik im Harness (FR-TRK-051, Instrument-Test) | akzeptiert, überwacht |
 | H-F1-05 | **Track-Verlust einzelner Ziele** ohne Ende-Meldung (Ziel fliegt weiter, Track verschwindet still) | V/u | SK2 | TSE-Ende-Signalisierung — jeder gelöschte Track meldet sein Ende explizit (ADR 0016); adaptiver Lebenszyklus verhindert vorschnelles Löschen zwischen langsamen Scans (ADR 0012/0013) | akzeptiert |
@@ -102,7 +102,7 @@ mit Trace) · **Rest** (Restrisiko/Verweis §6).
 |----|-----------------|-----|----|-------------------|------|
 | H-F4-01 | „Leerer Himmel" nicht von „totem Feed" unterscheidbar | V/u | SK2 | Genau dafür gebaut: CAT065-Heartbeat (ADR 0018) + Wayfinder-Staleness | akzeptiert |
 | H-F4-02 | Einzelner **Sensor-Ausfall unbemerkt** (Bild wird still dünner) | V/u | SK2–3 | CAT063 je Sensor (ADR 0022/0032, FR-IO-007) inkl. Ausfallgrund SRC-REASON (ADR 0033); `firefly_sensors_active` vs. `_total`; gemessene Scan-Periode speist die Staleness-Schwelle (FEP.1) | Alarm auf die Metrik = MON.1 |
-| H-F4-03 | Heartbeat lügt (behauptet Leben trotz defektem Kern) | I/u | SK1–2 | = H-F1-02 | **L1 (§6)** |
+| H-F4-03 | Heartbeat lügt (behauptet Leben trotz defektem Kern) | I/u | SK1–2 | = H-F1-02 (SAFE.4-Watchdog) | geschlossen (L1 ✅) |
 
 ### F5 — Verfügbarkeit
 
@@ -157,7 +157,7 @@ verdeckt.
 
 | ID | Lücke | Abgeleitete Maßnahme | Nachverfolgung |
 |----|-------|----------------------|----------------|
-| **L1** | Heartbeat ist vom Tracker-Fortschritt entkoppelt: ein hängender Tracker-Task sendet weiter „lebendig" (H-F1-02/H-F4-03) | **Tracker-Fortschritts-Watchdog:** CAT065 auf NOGO/degradiert schalten (oder Heartbeat stoppen), wenn der Output-Tick ausbleibt; S2–S3, kleines Code-Häppchen | Roadmap-Zeile **SAFE.4** (neu, ⏳) |
+| **L1** | Heartbeat ist vom Tracker-Fortschritt entkoppelt: ein hängender Tracker-Task sendet weiter „lebendig" (H-F1-02/H-F4-03) | **Tracker-Fortschritts-Watchdog:** CAT065 auf NOGO/degradiert schalten, wenn der Output-Tick ausbleibt | **✅ geschlossen (2026-07-16, SAFE.4/FR-OPS-009):** `tracker_progress_stalled` (> 3 Output-Perioden Stille, min 3 s, scharf erst nach dem ersten Tick), Draht-Wirkung per Test belegt (`degraded_answer_sets_nogo_on_the_wire`), ERROR-/Recovery-Log, `firefly_heartbeat_degraded`; ICD 3.7.1 (dokumentarisch) |
 | **L2** | Konsistent falscher Site-/Referenz-Eintrag bleibt bis zum Gegen-Check unerkannt (H-F1-03) | Verfahren: COMPASS-Gegen-Check je Konfigurations-Änderung wiederholen (steht in `docs/verification/compass-gegen-check.md`); erster Betreiber-Lauf weiterhin offen | HA.5-Abnahme (Betreiber) |
 | **L3** | Falscher, plausibler QNH-Wert (H-F3-02) | Verfahren: QNH-Eingabe gegen zweite Quelle (METAR) prüfen — als Betriebs-Hinweis in INSTALLATION §4f ergänzen, sobald eine Live-Meteo-Anbindung (eigener ADR) kommt | offen, geringe Priorität |
 | **L4** | Detektions-Barrieren (Zähler/Metriken) alarmieren niemanden aktiv | Alertmanager-Regeln + Runbooks | **MON.1** (Roadmap, nach 100 %) |

@@ -149,6 +149,11 @@ Ein Schritt gilt erst als fertig, wenn:
 - [ ] **`docs/TECHNICAL.md` auf Aktualität geprüft** — neue Metriken,
       geänderte Env-Variablen, neue Betriebsmodi oder Einschränkungen müssen
       dokumentiert sein.
+- [ ] **`docs/safety/FHA.md` auf Aktualität geprüft** (Betreiber-Vorgabe
+      2026-07-16, NFR-SAFE-004) — bei Sicherheits- oder Schnittstellen-Wirkung:
+      neue Funktion → §2, neue Fehlerbedingung oder Barriere → §3 (mit
+      Trace auf ADR/Anforderung/Test), geschlossene Lücke → §6 als erledigt
+      markieren (Audit-Spur, nie löschen).
 - [ ] Die zugehörige Doku wurde aktualisiert.
 - [ ] Der Commit hat eine klare, beschreibende Nachricht.
 
