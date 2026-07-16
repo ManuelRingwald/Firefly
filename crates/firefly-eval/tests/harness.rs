@@ -108,6 +108,34 @@ fn load_grid_scenario_tracks_all_aircraft() {
     assert_eq!(report.aggregate.id_switches, 0);
 }
 
+/// The JPDA cluster cap bounds the worst case (CAP.2): a 12-target dense
+/// column — which un-capped enumerates for HOURS (measured: 10 targets
+/// already took 28 s per 60-s scenario) — completes promptly, the cap
+/// hits are counted, and the tracker still produces a stable picture.
+/// REQ: FR-TRK-052
+#[test]
+fn dense_column_is_bounded_by_the_cluster_cap() {
+    let scenario = scenarios::dense_column(12, 60.0);
+    let plots = firefly_sim::run(&scenario);
+    let started = std::time::Instant::now();
+    let mut tracker = firefly_eval::tracker_for(&scenario);
+    tracker.process_plots(&plots);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "the cap must bound the dense-column runtime (took {:?})",
+        started.elapsed()
+    );
+    assert!(
+        tracker.jpda_cluster_cap_hits_total() > 0,
+        "a 12-target column must trip the cluster cap"
+    );
+    let confirmed = tracker.confirmed_tracks().count();
+    assert!(
+        (1..=12).contains(&confirmed),
+        "the degraded association still yields a stable picture ({confirmed} tracks)"
+    );
+}
+
 /// Determinism (NFR-CLOUD-001): the same scenario produces a byte-identical
 /// JSON report — the property that makes CI trend lines meaningful.
 /// REQ: FR-TRK-051

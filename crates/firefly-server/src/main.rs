@@ -669,7 +669,9 @@ async fn build_live_state(
             plots_rx,
             snapshot_tx,
             output_period,
-            move |plots, records, registration, clutter_cells, correlation, snapshot| {
+            move |plots, records, registration, clutter_cells, correlation, snapshot, cap_hits| {
+                m.jpda_cluster_cap_hits_total
+                    .store(cap_hits, std::sync::atomic::Ordering::Relaxed);
                 if let Some(tick) = snapshot {
                     m.snapshot_writes_total
                         .store(tick.writes_total, std::sync::atomic::Ordering::Relaxed);

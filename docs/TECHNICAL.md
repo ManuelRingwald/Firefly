@@ -569,6 +569,7 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_sources_adsb021` | gauge | Anzahl konfigurierter `adsb_asterix`-Quellen (CAT021-Bodenstation, FEP.3) |
 | `firefly_sources_mlat` | gauge | Anzahl konfigurierter `mlat_asterix`-Quellen (WAM/MLAT, FEP.5) |
 | `firefly_clutter_cells` | gauge | **SPEC.2b:** Gelernte Zellen der räumlichen Clutter-Karten über alle Sensoren (wachsender Wert = der Tracker kartiert Hotspots) |
+| `firefly_jpda_cluster_cap_hits_total` | counter | **CAP.2:** JPDA-Cluster, die über der Enumerations-Kappe lagen (> 8 Tracks oder > 10 Plots) und auf Pro-Track-PDA degradiert wurden. Dauerhaft > 0 wachsend = extrem dichtes Szenario, Abschnitt 11 lesen. |
 | `firefly_flight_plans` | gauge | **FPL.1:** Anzahl geladener Flugpläne (`FIREFLY_FLIGHT_PLANS`) |
 | `firefly_tracks_correlated` | gauge | **FPL.1:** Tracks mit Flugplan-Korrelation im letzten Output-Tick |
 | `firefly_correlation_refused` | gauge | **FPL.1:** sichtbar verweigerte Squawk-Korrelationen im letzten Output-Tick (Duplikat unter Plänen, Conspicuity 1000, Identitätskonflikt) |
@@ -901,13 +902,80 @@ spec:
 
 ---
 
-## 11. Bekannte Einschränkungen (Stand 2026-07-10)
+## 11. Auslegungsgrenzen — Kapazität & JPDA-Worst-Case (CAP.1/CAP.2)
+
+Dieser Abschnitt dokumentiert die **gemessenen** Kapazitätsgrenzen des
+Trackers und den Schutzmechanismus gegen den kombinatorischen
+JPDA-Worst-Case. Alle Zahlen stammen aus `cargo bench -p firefly-eval`
+(criterion, Release-Build) auf einem Sandbox-Entwicklungshost — **auf der
+Zielhardware wiederholen**, bevor sie in eine Betriebsauslegung eingehen
+(die *Verhältnisse* sind übertragbar, die Absolutwerte nicht).
+
+### 11.1 Durchsatz-Basislinie (CAP.1, NFR-CAP-001)
+
+Voller Produktions-Hot-Path (`Tracker::process_plots`, Tracker exakt wie
+im Live-Betrieb konfiguriert), Szenario: separierter 5-km-Raster
+(`load_grid`), 60 s:
+
+| Konstellation | Durchsatz | Echtzeit-Reserve¹ |
+|---------------|-----------|-------------------|
+| 1 Radar × 10 Ziele | ≈ 221 000 Plots/s | > 1500× |
+| 1 Radar × 50 Ziele | ≈ 160 000 Plots/s | > 1500× |
+| 2 Radare × 50 Ziele | ≈ 151 000 Plots/s | > 1500× |
+| 3 Radare × 100 Ziele | ≈ 114 000 Plots/s | > 1500× |
+
+¹ Bezogen auf die reale Plot-Rate der Konstellation (z. B. 3 Radare ×
+100 Ziele ≈ 75 Plots/s bei 4-s-Umlauf). Der Tracker ist in normalem,
+auch dichtem Verkehr **nicht** CPU-gebunden.
+
+### 11.2 Der JPDA-Worst-Case und die Cluster-Kappe (CAP.2, FR-TRK-052)
+
+Die JPDA-Assoziation enumeriert **alle zulässigen Zuordnungen** eines
+Konflikt-Clusters — im Worst Case O((Plots+1)^Tracks). Normale Szenarien
+zerfallen per Gating in kleine Cluster; ein **dichter Pulk**, in dem
+jeder Track jeden Plot sieht, kettet aber zu *einem* Cluster zusammen
+und explodiert. Gemessen (120-m-Kolonne, ein Cluster, 60-s-Szenario,
+Release):
+
+| Kolonnen-Größe | ohne Kappe | mit Kappe |
+|----------------|-----------|-----------|
+| 8 Ziele | 149 ms | 149 ms (exakt, unter der Kappe) |
+| 10 Ziele | **27,8 s** | 0,75 ms |
+| 12 Ziele | (Stunden, extrapoliert) | 0,57 ms |
+
+**Mechanismus:** Übersteigt ein Cluster **8 Tracks oder 10 Plots**
+(`MAX_CLUSTER_TRACKS`/`MAX_CLUSTER_PLOTS` in `firefly-track/src/jpda.rs`),
+degradiert genau dieser Cluster auf **Pro-Track-PDA**: jede Track-Zeile
+wird unabhängig normalisiert — das ist die exakte Einzeltrack-JPDA-Formel;
+aufgegeben wird nur die Track-übergreifende Exklusivität („ein Plot gehört
+nur einem Track"). Der Koaleszenz-Schutz (SPEC.1) läuft unverändert
+danach. Kleine Cluster (die Regel) rechnen weiterhin exakt; der teuerste
+exakte Fall liegt jetzt **an** der Kappe (8er-Kolonne ≈ 160 ms je
+60-s-Szenario im Bench).
+
+**Sichtbarkeit:** Jeder degradierte Cluster zählt
+`firefly_jpda_cluster_cap_hits_total` hoch; der erste Treffer und jeder
+100. erzeugen ein WARN-Log. Im normalen Betrieb (auch `load_grid` mit
+100 Zielen) bleibt der Zähler 0.
+
+**Ehrliche Grenze:** In einem Pulk oberhalb der Kappe ist die Zuordnung
+messbar gröber (Plots können mehreren Tracks zugleich Gewicht geben).
+Das gemessene dichte-Kolonnen-Szenario ist mit einem 50-m/0,08°-Sensor
+allerdings ohnehin **physikalisch unauflösbar** — der Tracker bestätigt
+vor wie nach der Kappe 2 Tracks; die Kappe tauscht dort also
+unbeobachtbare Genauigkeit gegen begrenzte Latenz. Reproduzieren:
+`cargo bench -p firefly-eval` (Gruppe `dense_cluster`).
+
+---
+
+## 12. Bekannte Einschränkungen (Stand 2026-07-16)
 
 | Einschränkung | ADR / Issue | Geplante Lösung |
 |---------------|-------------|-----------------|
 | Multicast ohne Authentifizierung | ADR 0017 | Netz-Isolation + anwendungsseitige Absicherung |
 | OpenSky-OAuth2-Credentials (`FIREFLY_OPENSKY_CLIENT_ID`/`_CLIENT_SECRET`) nur via Env-Variable | ADR 0024/0003 | Kubernetes Secret (bereits empfohlen) |
 | Track-Nummernraum (I062/040): max. 65 535 gleichzeitige Tracks inkl. 60-s-Quarantäne gelöschter Nummern; darüber wird die Track-Initiierung abgelehnt (Warn-Log) | FR-TRK-035, ICD 3.1.1 | Bewusste, ehrliche Grenze — weit jenseits realer Kapazität; keine Änderung geplant |
+| JPDA-Cluster > 8 Tracks oder > 10 Plots werden auf Pro-Track-PDA degradiert (Abschnitt 11.2); Zuordnung dort gröber, dafür begrenzte Latenz | FR-TRK-052 | Bewusste Auslegungsgrenze; Zähler + WARN machen den Fall sichtbar |
 
 ---
 

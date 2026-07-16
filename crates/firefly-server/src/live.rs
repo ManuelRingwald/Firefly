@@ -787,6 +787,13 @@ impl LiveTracker {
         self.tracker.clutter_cells_total() as u64
     }
 
+    /// JPDA clusters degraded to per-track PDA because they exceeded the
+    /// enumeration cap (CAP.2) — exported as
+    /// `firefly_jpda_cluster_cap_hits_total`.
+    pub fn jpda_cap_hits(&self) -> u64 {
+        self.tracker.jpda_cluster_cap_hits_total()
+    }
+
     /// Total plots handed to the tracker so far.
     pub fn plots_ingested(&self) -> u64 {
         self.plots_ingested
@@ -865,7 +872,7 @@ pub async fn run_live_tracker<F>(
     output_period: Duration,
     on_tick: F,
 ) where
-    F: Fn(u64, u64, Option<RegistrationTick>, u64, (u64, u64, u64, u64), Option<SnapshotTick>),
+    F: Fn(u64, u64, Option<RegistrationTick>, u64, (u64, u64, u64, u64), Option<SnapshotTick>, u64),
 {
     let mut ticker = tokio::time::interval(output_period);
     // A delayed tick should not fire a burst of catch-up ticks afterwards.
@@ -902,6 +909,7 @@ pub async fn run_live_tracker<F>(
                     live.clutter_cells(),
                     live.correlation_stats(),
                     live.snapshot_tick(),
+                    live.jpda_cap_hits(),
                 );
             }
         }
@@ -1610,7 +1618,7 @@ mod tests {
             plots_rx,
             snapshot_tx,
             Duration::from_millis(100),
-            |_, _, _, _, _, _| {},
+            |_, _, _, _, _, _, _| {},
         ));
 
         // Feed enough hits to confirm a track.

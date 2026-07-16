@@ -535,6 +535,18 @@ gewohnt (PDA bzw. „sicher kein Treffer") behandelt. In der realen Luftlage sin
 Cluster meist klein (eine Handvoll Tracks), was die Aufzählung aller Ereignisse
 praktikabel hält.
 
+**JPDA-Cluster-Kappe** (CAP.2, FR-TRK-052)
+Die Schutzgrenze gegen den kombinatorischen JPDA-Worst-Case: Die exakte
+Aufzählung aller gemeinsamen Zuordnungen wächst mit O((Plots+1)^Tracks) — ein
+dichter Pulk, der zu *einem* Cluster verkettet, explodiert (gemessen: eine
+10er-Kolonne kostete 27,8 s Rechenzeit je 60-s-Szenario). Übersteigt ein
+Cluster **8 Tracks oder 10 Plots**, rechnet Firefly genau diesen Cluster mit
+**Pro-Track-PDA** weiter (jede Track-Zeile unabhängig normalisiert — die exakte
+Einzeltrack-Formel; aufgegeben wird nur die Cluster-weite Exklusivität), meldet
+das über `firefly_jpda_cluster_cap_hits_total` und ein WARN-Log und bleibt
+dadurch in jedem Verkehr echtzeitfähig. Alle anderen Cluster rechnen weiterhin
+exakt; der Koaleszenz-Wächter (SPEC.1) wirkt unverändert.
+
 **Track-Koaleszenz (*Track Coalescence*)**
 Eine bekannte Eigenheit von PDA/JPDA bei eng benachbarten Zielen: Weil jeder
 Plot *weich* (mit `β<1`) auf mehrere Tracks verteilt wird statt ihn fest einem
