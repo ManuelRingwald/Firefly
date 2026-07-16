@@ -973,6 +973,19 @@ selbst-gehosteter Stil für volle Souveränität bleibt ein späterer Schritt.
 
 ## Cloud & Betrieb
 
+**Sensor-Gate / Laufzeit-Steuerung (SRV.2)**
+Der Eingriffs-Hebel des Betreibers im laufenden Betrieb (FR-OPS-008,
+ARTAS-CMD-/SNMP-Ersatz): Ein störender Sensor wird per Kommando
+(`POST /sensors/{id}/disable`) **aus der Fusion genommen** — seine Plots
+werden am Eingang verworfen, bevor sie Aufzeichnung, Registrierung oder
+Tracker erreichen — und mit `/enable` wieder hereingeholt, ohne Neustart
+und ohne Unterbrechung für die übrigen Quellen. Das Gate ist bewusst
+**flüchtig** (Neustart/Failover = alle Sensoren aktiv; fail-open zur
+Seite „mehr Daten") und **pro Instanz**; sichtbar über `GET /sensors`,
+`GET /status`, `firefly_sensors_disabled` und ein WARN-Log. Der
+CAT063-Strom bleibt davon unberührt — er meldet weiterhin, ob die
+Quelle *liefert*, nicht ob Firefly sie verwertet.
+
 **Main/Standby (HA.2)**
 Zwei Firefly-Instanzen, eine Rolle: Der **Main** rechnet und sendet; der
 **Standby** bedient nur seine Probes, sendet nichts und beobachtet den

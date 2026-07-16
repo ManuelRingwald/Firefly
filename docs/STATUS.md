@@ -10,6 +10,33 @@
 
 ---
 
+## 🎯 Stand 2026-07-16 (SRV.2 — Laufzeit-Steuerung + Supervision)
+
+- **Zuletzt aktualisiert:** 2026-07-16
+- **SRV.2 (FR-OPS-008; kein Wire-/ICD-Bezug):** Der Betreiber kann jetzt
+  **zur Laufzeit eingreifen**, nicht nur beobachten: Ein störender Sensor
+  (defektes Radar, müllflutende ADS-B-Quelle) wird per Kommando **aus der
+  Fusion genommen** und wieder hereingeholt — ohne Neustart, das Lagebild
+  läuft mit den übrigen Quellen unterbrechungsfrei weiter (ARTAS-CMD-/
+  SNMP-Ersatz). Technik: `SensorGate` ganz vorn in `LiveTracker::ingest`
+  (deaktivierter Sensor erreicht weder `.ffplots`-Aufzeichnung noch
+  REG-Monitor noch Tracker), Kommando-API `GET /sensors` (Inventar mit
+  CAT063-Liveness + Gate-Zustand), `POST /sensors/{id}/disable`/`enable`
+  (422 unbekannt, 409 Standby, idempotent) und `GET /status`
+  (Supervision-JSON auf einen Blick); Auth wie FPL.2 (Bearer-only,
+  `FIREFLY_WS_TOKEN`); Metriken `firefly_sensors_disabled` +
+  `firefly_sensor_disabled_plots_dropped_total`, WARN bei Disable.
+  **Bewusst:** Gate flüchtig + pro Instanz (fail-open zur Seite „mehr
+  Daten"), CAT063 bleibt Quell-Wahrheit; kein Config-Reload,
+  Polled-Adapter pollen weiter (ehrliche Grenzen in
+  `docs/milestones/SRV2-Laufzeit-Steuerung-Supervision.md`).
+  Doku: TECHNICAL §1 (neuer Unterabschnitt + 2 Metrik-Zeilen),
+  INSTALLATION §4j. Roadmap: **97,5 %**.
+- **Nächster Schritt:** **ASSUR.1** ankündigen (FHA/Hazard-Analyse;
+  S4, 99 %) — und Freigabe abwarten. Offen beim Betreiber: erster
+  COMPASS-Bericht (HA.5-Abnahme). Weiter offen: Wayfinder
+  #244/#245/#257.
+
 ## 🎯 Stand 2026-07-16 (SRV.1 — ADR 0042 Arbeitsteilung SDPS-Server-Funktion)
 
 - **Zuletzt aktualisiert:** 2026-07-16

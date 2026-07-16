@@ -399,6 +399,39 @@ Selbst-Adresse bleibt die Wache aus (laut geloggt).
 > Begründungen in `deploy/README.md`, Installation in
 > `docs/INSTALLATION.md` §6a.
 
+#### Laufzeit-Steuerung — Sensor an/aus + Supervision (`/sensors`, `/status`, SRV.2)
+
+Der SNMP-/CMD-Ersatz aus der ARTAS-Roadmap (FR-OPS-008): Der Betreiber
+kann einen störenden Sensor (defektes Radar mit systematisch falschen
+Positionen, müllflutende ADS-B-Quelle) **zur Laufzeit aus der Fusion
+nehmen** — und wieder hereinholen — ohne Neustart und ohne
+Lagebild-Unterbrechung für die übrigen Quellen. Ein deaktivierter Sensor
+wird **am Eingang verworfen**, bevor seine Plots Aufzeichnung,
+Registrierung oder Tracker erreichen. Keine neuen Env-Variablen; Auth wie
+bei `/correlation` (Bearer-Header-only, `FIREFLY_WS_TOKEN`).
+
+| Endpunkt | Wirkung |
+|----------|---------|
+| `GET /sensors` | Sensor-Inventar: `[{sensor_id, kind, active, disabled}]` — konfigurierte Quelle, CAT063-Liveness, Gate-Zustand |
+| `POST /sensors/{id}/disable` | Sensor aus der Fusion nehmen (422 bei unbekannter Sensor-ID, 409 auf einem Standby); idempotent, Antwort meldet `changed` |
+| `POST /sensors/{id}/enable` | Sensor wieder hereinnehmen (idempotent) |
+| `GET /status` | Supervision-Übersicht als JSON: Rolle (active/standby), Readiness, Restore-Flag, Failover-Zähler, Track-/Plot-Zähler, Sensoren (gesamt/aktiv/deaktiviert + verworfene Plots), Korrelation, Snapshot-Buchführung, JPDA-Kappen-Zähler |
+
+**Bewusste Eigenschaften (ehrlich dokumentiert):**
+
+- **Flüchtig, fail-open:** Neustart/Failover startet mit **allen Sensoren
+  aktiv**. Ein vergessenes, still persistiertes Gate, das das Lagebild
+  dauerhaft ausdünnt, ist der schlimmere Fehlerfall als ein nach Neustart
+  wieder aktiver Störsensor (der erneut deaktiviert werden kann — der
+  WARN-Log und `firefly_sensors_disabled` machen den Zustand sichtbar).
+- **Pro Instanz:** Ein Standby übernimmt das Gate **nicht** — nach einem
+  Failover sind alle Sensoren aktiv (gleiche fail-open-Logik).
+- **CAT063 bleibt Quell-Wahrheit:** Der Sensor-Status auf dem Draht meldet
+  weiterhin, ob die Quelle **Daten liefert** — ein manuell deaktivierter
+  Sensor sendet ja weiter und bleibt dort „active". Der Gate-Zustand ist
+  in `/sensors`, `/status` und den Metriken sichtbar, nicht im
+  CAT063-Strom (kein stiller Semantik-Wechsel des ICD).
+
 ### 1.5.1 Quell-Eingangs-Kontrakt (`FIREFLY_SOURCES`, ADR 0023)
 
 Maßgeblich: `docs/source-input-contract.md` v1.7.0. Im **Live-Modus** liest Firefly
@@ -584,6 +617,8 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_cat063_status_sent_total` | counter | Gesendete CAT063-Sensor-Status-Blöcke |
 | `firefly_sensors_total` | gauge | Anzahl registrierter Sensoren (statisch) |
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |
+| `firefly_sensors_disabled` | gauge | **SRV.2:** Sensoren, die der Betreiber per Kommando aus der Fusion genommen hat (`POST /sensors/{id}/disable`) |
+| `firefly_sensor_disabled_plots_dropped_total` | counter | **SRV.2:** am Eingang verworfene Plots deaktivierter Sensoren — wächst nur, solange ein Gate in Kraft ist |
 | `firefly_registration_estimates_total` | counter | **Registrierung (REG.2a):** Bias-Schätzläufe des Schatten-Monitors. Bleibt 0 ohne `FIREFLY_REGISTRATION_ENABLED` bzw. ohne ausreichende Radar↔Referenz-Korrespondenzen. |
 | `firefly_registration_correspondences` | gauge | **Registrierung:** Korrespondenzen des letzten Schätzversuchs (auch bei Ablehnung wegen zu dünner Evidenz gesetzt — zeigt dem Operator, *warum* keine Schätzung erscheint) |
 | `firefly_registration_observable` | gauge | **Registrierung:** 1 = letzte Schätzung voll beobachtbar, 0 = (noch) keine Schätzung oder rangdefiziente Geometrie |
