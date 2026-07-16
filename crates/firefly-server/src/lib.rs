@@ -30,14 +30,14 @@ pub mod snapshot;
 pub mod sources;
 pub mod standby;
 
-pub use app::{router, AppState, CorrelationApi, FrameSource};
+pub use app::{router, AppState, CorrelationApi, FrameSource, SensorControl};
 pub use config::ServerConfig;
 pub use firefly_io::Frame;
 pub use live::{
     build_live_tracker, build_live_tracker_multi, live_system_reference_point,
     registration_enabled, resolve_plot_recorder, run_live_cat062, run_live_tracker, LiveSnapshot,
-    LiveTracker, ManualOverrides, PlotRecorder, RadarSensor, RegistrationTick, SnapshotRx,
-    SnapshotTick,
+    LiveTracker, ManualOverrides, PlotRecorder, RadarSensor, RegistrationTick, SensorGate,
+    SnapshotRx, SnapshotTick,
 };
 pub use metrics::Metrics;
 pub use snapshot::{config_fingerprint, RestoreDecision, SnapshotConfig};

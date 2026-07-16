@@ -519,6 +519,30 @@ geheilten Netz-Partition), weicht deterministisch genau eine Seite und
 **Restart-Policy** (Kubernetes `restartPolicy`, systemd `Restart=`,
 Docker `--restart`); der Neustart landet automatisch im Standby.
 
+### Schritt 4j (optional): Sensor zur Laufzeit aus der Fusion nehmen (SRV.2)
+
+Macht eine Quelle Ärger (defektes Radar mit falschen Positionen,
+müllflutende ADS-B-Quelle), lässt sie sich **ohne Neustart** aus der
+Fusion nehmen und später wieder hereinholen — das Lagebild läuft mit den
+übrigen Quellen unterbrechungsfrei weiter. Keine Env-Variablen; Auth wie
+bei der Korrelations-API (Token nur nötig, wenn `FIREFLY_WS_TOKEN`
+gesetzt ist):
+
+```bash
+# Inventar ansehen (welche Sensoren, wer liefert, wer ist deaktiviert):
+curl localhost:8080/sensors -H 'Authorization: Bearer <token>'
+# Sensor 301 aus der Fusion nehmen (Plots werden am Eingang verworfen):
+curl -X POST localhost:8080/sensors/301/disable -H 'Authorization: Bearer <token>'
+# ... und wieder hereinholen:
+curl -X POST localhost:8080/sensors/301/enable -H 'Authorization: Bearer <token>'
+# Supervision-Übersicht (Rolle, Sensoren, Zähler) auf einen Blick:
+curl localhost:8080/status -H 'Authorization: Bearer <token>'
+```
+
+Das Gate ist bewusst **flüchtig**: Nach Neustart oder Failover sind alle
+Sensoren wieder aktiv (fail-open zur Seite „mehr Daten") — Details und
+Begründung in `docs/TECHNICAL.md`.
+
 ### Schritt 5 (optional): System-Referenzpunkt setzen
 
 Der **System-Referenzpunkt** (ADR 0021) ist der gemeinsame Ursprung für den

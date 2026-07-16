@@ -83,6 +83,12 @@ pub struct Metrics {
     /// Number of sensors currently active — received a plot within their
     /// staleness window (gauge, updated on each CAT063 send).
     pub sensors_active: AtomicU64,
+    /// Sensors currently taken out of the fusion by an operator command
+    /// (SRV.2 sensor gate; gauge, follows every `/sensors/{id}` command).
+    pub sensors_disabled: AtomicU64,
+    /// Total plots dropped at ingest because their sensor was operator-
+    /// disabled (SRV.2; counter). Grows only while a gate is in force.
+    pub sensor_disabled_plots_dropped_total: AtomicU64,
 
     // --- Live-pipeline hardening (Betriebs-Härtung: Lastfestigkeit) ---
     /// Total number of plot batches **dropped** because the source→tracker channel
@@ -507,6 +513,22 @@ pub fn render(metrics: &Metrics) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_sensors_disabled",
+        "gauge",
+        "Sensors currently taken out of the fusion by operator command (SRV.2).",
+        metrics.sensors_disabled.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
+        "firefly_sensor_disabled_plots_dropped_total",
+        "counter",
+        "Plots dropped at ingest because their sensor was operator-disabled (SRV.2).",
+        metrics
+            .sensor_disabled_plots_dropped_total
+            .load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
         "firefly_registration_estimates_total",
         "counter",
         "Total registration bias estimates produced by the shadow monitor (REG.2a).",
@@ -699,6 +721,10 @@ mod tests {
         metrics.cat063_status_sent_total.store(7, Ordering::Relaxed);
         metrics.sensors_total.store(3, Ordering::Relaxed);
         metrics.sensors_active.store(2, Ordering::Relaxed);
+        metrics.sensors_disabled.store(1, Ordering::Relaxed);
+        metrics
+            .sensor_disabled_plots_dropped_total
+            .store(42, Ordering::Relaxed);
         metrics
             .registration_estimates_total
             .store(9, Ordering::Relaxed);
@@ -777,6 +803,8 @@ mod tests {
         assert!(text.contains("firefly_cat063_status_sent_total 7"));
         assert!(text.contains("firefly_sensors_total 3"));
         assert!(text.contains("firefly_sensors_active 2"));
+        assert!(text.contains("firefly_sensors_disabled 1"));
+        assert!(text.contains("firefly_sensor_disabled_plots_dropped_total 42"));
         assert!(text.contains("# TYPE firefly_ws_clients_connected gauge"));
         assert!(text.contains("# TYPE firefly_cat062_scans_sent_total counter"));
         assert!(text.contains("# TYPE firefly_tracks_active gauge"));

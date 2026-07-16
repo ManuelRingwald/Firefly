@@ -229,6 +229,7 @@ async fn run_standby_phase(
         ws_token,
         ws_allowed_origin,
         correlation: None,
+        sensors: None,
     };
     let listener = bind_listener(config.port).await;
     tracing::info!(
@@ -458,6 +459,38 @@ async fn build_live_state(
         .chain(radar.iter().map(|c| (c.sensor_id, c.scan_period_secs)))
         .collect();
 
+    // The sensor inventory for the runtime control surface (SRV.2): every
+    // configured sensor with its contract source type — the authority for
+    // "does this sensor exist" behind `/sensors/{id}` commands.
+    let known_sensors: Vec<(u16, String)> = opensky
+        .iter()
+        .map(|c| (c.sensor_id.0, "adsb_opensky".to_string()))
+        .chain(
+            adsbagg
+                .iter()
+                .map(|c| (c.sensor_id.0, "adsb_aggregator".to_string())),
+        )
+        .chain(
+            flarm
+                .iter()
+                .map(|c| (c.sensor_id.0, "flarm_aprs".to_string())),
+        )
+        .chain(
+            radar
+                .iter()
+                .map(|c| (c.sensor_id.0, "radar_asterix".to_string())),
+        )
+        .chain(
+            adsb021
+                .iter()
+                .map(|c| (c.sensor_id.0, "adsb_asterix".to_string())),
+        )
+        .chain(
+            mlat.iter()
+                .map(|c| (c.sensor_id.0, "mlat_asterix".to_string())),
+        )
+        .collect();
+
     tracing::info!(
         opensky_sources = opensky.len(),
         adsbagg_sources = adsbagg.len(),
@@ -571,6 +604,10 @@ async fn build_live_state(
     // the fusion path is opted into explicitly, never implied.
     let apply = registration_enabled(std::env::var("FIREFLY_REGISTRATION_APPLY").ok().as_deref());
     let mut live = LiveTracker::new(tracker, recorder);
+    // SRV.2: the runtime sensor gate, shared between the HTTP command edge
+    // (writes) and the ingest path (drops gated plots before fusion).
+    let sensor_gate = firefly_server::SensorGate::default();
+    live = live.with_sensor_gate(sensor_gate.clone());
     // VERT.2: attach the QNH service so published barometric altitudes are
     // corrected where a regional QNH is observed (I062/135 QNH bit).
     if !meteo.regions.is_empty() {
@@ -669,9 +706,18 @@ async fn build_live_state(
             plots_rx,
             snapshot_tx,
             output_period,
-            move |plots, records, registration, clutter_cells, correlation, snapshot, cap_hits| {
+            move |plots,
+                  records,
+                  registration,
+                  clutter_cells,
+                  correlation,
+                  snapshot,
+                  cap_hits,
+                  dropped_disabled| {
                 m.jpda_cluster_cap_hits_total
                     .store(cap_hits, std::sync::atomic::Ordering::Relaxed);
+                m.sensor_disabled_plots_dropped_total
+                    .store(dropped_disabled, std::sync::atomic::Ordering::Relaxed);
                 if let Some(tick) = snapshot {
                     m.snapshot_writes_total
                         .store(tick.writes_total, std::sync::atomic::Ordering::Relaxed);
@@ -734,6 +780,14 @@ async fn build_live_state(
 
     // Sensor health monitor over all source sensors (CAT063 per-sensor liveness).
     let sensor_monitor = Arc::new(SensorHealthMonitor::new_live(monitored_sensors));
+
+    // The runtime sensor-control surface (SRV.2): inventory + shared gate +
+    // liveness, handed to the HTTP command edge.
+    let sensor_control = firefly_server::SensorControl {
+        known: Arc::new(known_sensors),
+        gate: sensor_gate,
+        health: Arc::clone(&sensor_monitor),
+    };
 
     // Spawn one adapter per source, all feeding the shared plot channel and
     // notifying the sensor monitor for their own sensor.
@@ -801,6 +855,7 @@ async fn build_live_state(
         ws_token,
         ws_allowed_origin,
         correlation: correlation_api,
+        sensors: Some(sensor_control),
     }
 }
 

@@ -73,6 +73,7 @@ async fn websocket_streams_parseable_frames_in_order() {
         ws_token: None,
         ws_allowed_origin: None,
         correlation: None,
+        sensors: None,
     };
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
