@@ -306,6 +306,13 @@ pub struct Tracker {
     /// `None` before the first input. Updated by both [`process_scan`] and
     /// [`process_plots`].
     data_time_watermark: Option<f64>,
+    /// How many JPDA clusters exceeded the enumeration cap and were degraded
+    /// to per-track PDA (CAP.2, `jpda::MAX_CLUSTER_TRACKS`/`_PLOTS`) — the
+    /// "your traffic is denser than the exact math can afford" signal,
+    /// exported as `firefly_jpda_cluster_cap_hits_total`. `serde(default)`
+    /// keeps pre-CAP.2 state snapshots restorable (HA.1).
+    #[serde(default)]
+    jpda_cap_hits: u64,
 }
 
 impl Tracker {
@@ -321,12 +328,19 @@ impl Tracker {
             sensor_period: BTreeMap::new(),
             ended_tracks: Vec::new(),
             data_time_watermark: None,
+            jpda_cap_hits: 0,
         }
     }
 
     /// All tracks the tracker currently maintains (tentative and confirmed).
     pub fn tracks(&self) -> &[Track] {
         &self.tracks
+    }
+
+    /// Total JPDA clusters degraded to per-track PDA because they exceeded
+    /// the enumeration cap (CAP.2) — 0 in ordinary traffic.
+    pub fn jpda_cluster_cap_hits_total(&self) -> u64 {
+        self.jpda_cap_hits
     }
 
     /// The tracker's configuration, including per-sensor geometry
@@ -971,13 +985,25 @@ impl Tracker {
                     _ => clutter.density,
                 })
                 .collect();
-            let mut betas = crate::jpda::joint_association_probabilities_local(
+            let (mut betas, cap_hits) = crate::jpda::joint_association_probabilities_local_counted(
                 &reference,
                 &measurements,
                 &gate,
                 &clutter,
                 &local_b,
             );
+            if cap_hits > 0 {
+                self.jpda_cap_hits += cap_hits as u64;
+                // Loud on first occurrence, then sampled — a persistent dense
+                // cluster would otherwise log every fusion opportunity.
+                if self.jpda_cap_hits == cap_hits as u64 || self.jpda_cap_hits.is_multiple_of(100) {
+                    tracing::warn!(
+                        total = self.jpda_cap_hits,
+                        "JPDA cluster cap hit: oversized cluster degraded to per-track \
+                         PDA (bounded latency over exact exclusivity, CAP.2)"
+                    );
+                }
+            }
             // SPEC.1 (FR-TRK-045): prune the shared-plot hypotheses of
             // statistically unresolvable track pairs before folding — the
             // guard against JPDA track coalescence.

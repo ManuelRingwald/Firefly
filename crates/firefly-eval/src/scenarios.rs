@@ -85,6 +85,30 @@ pub fn builtin() -> Vec<(&'static str, Scenario)> {
     vec![("single", single_target()), ("pair", parallel_pair())]
 }
 
+/// The JPDA **worst-case** scenario (CAP.2): `targets` aircraft flying in
+/// a tight column (120 m spacing — inside each other's association gates),
+/// so the union-find chains them into ONE persistent cluster. This is the
+/// shape where joint-event enumeration grows combinatorially: holding
+/// stacks, formations, tight parallel approaches. The load benchmarks
+/// sweep the column length to make the blow-up (and the cluster cap that
+/// bounds it) visible as a number.
+pub fn dense_column(targets: usize, duration: f64) -> Scenario {
+    let mut scenario = Scenario::new(origin())
+        .with_duration(duration)
+        .with_seed(20260715)
+        .add_radar(radar(4.0));
+    for k in 0..targets {
+        scenario = scenario.add_target(cruiser(
+            1 + k as u32,
+            20_000.0,
+            k as f64 * 120.0,
+            0.0,
+            duration,
+        ));
+    }
+    scenario
+}
+
 /// A synthetic **load** scenario (CAP.1): `radars` sensors around the
 /// origin observe `targets` aircraft laid out on a wide grid, all
 /// cruising. Grid spacing (5 km) keeps association clusters small and

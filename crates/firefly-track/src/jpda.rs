@@ -92,15 +92,49 @@ pub fn joint_association_probabilities_local(
     clutter: &ClutterModel,
     local_density: &[f64],
 ) -> Vec<Vec<f64>> {
+    joint_association_probabilities_local_counted(
+        tracks,
+        measurements,
+        gate,
+        clutter,
+        local_density,
+    )
+    .0
+}
+
+/// The **cluster cap** (CAP.2): above this many tracks (or plots) in one
+/// cluster, exact joint-event enumeration is abandoned for that cluster.
+///
+/// The enumeration is `O((plots+1)^tracks)` — measured on the dense-column
+/// benchmark (release build): 8 targets ≈ 0.15 s per 60-s scenario, **10
+/// targets ≈ 28 s** — latency spikes of seconds per scan, exactly in the
+/// operationally hottest picture. A surveillance output must have bounded
+/// latency: beyond the cap the cluster falls back to per-track PDA (see
+/// below), which is `O(tracks · plots)`.
+pub const MAX_CLUSTER_TRACKS: usize = 8;
+/// Companion cap on the plot side: the enumeration branches over gated,
+/// unused plots per track, so a plot-heavy cluster explodes the same way.
+pub const MAX_CLUSTER_PLOTS: usize = 10;
+
+/// [`joint_association_probabilities_local`], additionally reporting how
+/// many clusters exceeded the cap and were degraded to per-track PDA —
+/// the observability hook behind `firefly_jpda_cluster_cap_hits_total`.
+pub fn joint_association_probabilities_local_counted(
+    tracks: &[LinearKalman],
+    measurements: &[CartesianMeasurement],
+    gate: &Gate,
+    clutter: &ClutterModel,
+    local_density: &[f64],
+) -> (Vec<Vec<f64>>, usize) {
     let t = tracks.len();
     let m = measurements.len();
     assert_eq!(local_density.len(), t, "one local density per track");
 
     if t == 0 {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
     if m == 0 {
-        return vec![vec![1.0]; t];
+        return (vec![vec![1.0]; t], 0);
     }
 
     let p_gate = 1.0 - (-gate.threshold / 2.0).exp();
@@ -152,11 +186,42 @@ pub fn joint_association_probabilities_local(
     }
 
     let mut result = vec![vec![0.0; m + 1]; t];
+    let mut cap_hits = 0usize;
     for (track_idxs, meas_idxs) in clusters.into_values() {
         if meas_idxs.is_empty() {
             // No track in this cluster has any plot in its gate.
             for &i in &track_idxs {
                 result[i][0] = 1.0;
+            }
+            continue;
+        }
+
+        // CAP.2 guard: an oversized cluster is degraded to per-track PDA —
+        // each track normalises over ITS gated plots independently (the
+        // exact single-track JPDA case), dropping only the cross-track
+        // exclusivity constraint. Bounded O(tracks · plots) instead of a
+        // combinatorial enumeration; deterministic; the coalescence guard
+        // (SPEC.1) still prunes shared-plot hypotheses downstream. The
+        // measured accuracy trade lives in the CAP.2 milestone doc.
+        if track_idxs.len() > MAX_CLUSTER_TRACKS || meas_idxs.len() > MAX_CLUSTER_PLOTS {
+            cap_hits += 1;
+            for &i in &track_idxs {
+                let mut denom = b[i];
+                for &j in &meas_idxs {
+                    if valid[i][j] {
+                        denom += lambda[i][j];
+                    }
+                }
+                if denom > 0.0 {
+                    result[i][0] = b[i] / denom;
+                    for &j in &meas_idxs {
+                        if valid[i][j] {
+                            result[i][1 + j] = lambda[i][j] / denom;
+                        }
+                    }
+                } else {
+                    result[i][0] = 1.0;
+                }
             }
             continue;
         }
@@ -186,7 +251,7 @@ pub fn joint_association_probabilities_local(
         }
     }
 
-    result
+    (result, cap_hits)
 }
 
 /// Enumerates every feasible joint event for one cluster by backtracking over
@@ -349,6 +414,67 @@ mod tests {
             let total: f64 = row.iter().sum();
             assert!((total - 1.0).abs() < 1e-9, "row sums to {total}: {row:?}");
         }
+    }
+
+    /// The cluster cap (CAP.2): an oversized cluster is degraded to
+    /// per-track PDA — counted, instantaneous, rows still summing to 1 and
+    /// matching the per-track PDA math exactly; a cluster at the cap still
+    /// gets the exact joint enumeration (count 0, unchanged behavior).
+    /// Uncapped, the 12-track full-validity enumeration would evaluate
+    /// ~10^9 joint events — the measured seconds-per-scan latency spike
+    /// this cap exists to prevent. REQ: FR-TRK-052
+    #[test]
+    fn oversized_cluster_degrades_to_counted_bounded_pda() {
+        // 12 tracks and 12 plots in ONE mutual gate region: every pair is
+        // valid, so union-find chains everything into a single cluster.
+        let n = MAX_CLUSTER_TRACKS + 4;
+        let tracks: Vec<LinearKalman> = (0..n).map(|k| track_at(k as f64 * 10.0, 0.0)).collect();
+        let measurements: Vec<CartesianMeasurement> =
+            (0..n).map(|k| meas_at(k as f64 * 10.0, 5.0)).collect();
+        let gate = Gate::from_probability(0.99);
+        let clutter = ClutterModel::new(1.0e-6, 0.9);
+        let densities = vec![clutter.density; tracks.len()];
+
+        let started = std::time::Instant::now();
+        let (betas, cap_hits) = joint_association_probabilities_local_counted(
+            &tracks,
+            &measurements,
+            &gate,
+            &clutter,
+            &densities,
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "the cap must bound the runtime"
+        );
+        assert_eq!(cap_hits, 1, "one oversized cluster, counted once");
+        for (i, row) in betas.iter().enumerate() {
+            let total: f64 = row.iter().sum();
+            assert!((total - 1.0).abs() < 1e-9, "row {i} sums to {total}");
+            // The degraded row IS the per-track PDA answer.
+            let solo = association_probabilities(&tracks[i], &measurements, &gate, &clutter);
+            for (a, b) in row.iter().zip(&solo) {
+                assert!((a - b).abs() < 1e-12, "row {i}: capped ≠ per-track PDA");
+            }
+        }
+
+        // At (not above) the track cap the exact enumeration still runs: no
+        // hit. (Six plots keep the debug-build enumeration quick — the
+        // boundary under test is the TRACK count.)
+        let small: Vec<LinearKalman> = (0..MAX_CLUSTER_TRACKS)
+            .map(|k| track_at(k as f64 * 10.0, 0.0))
+            .collect();
+        let small_meas: Vec<CartesianMeasurement> =
+            (0..6).map(|k| meas_at(k as f64 * 10.0, 5.0)).collect();
+        let densities = vec![clutter.density; small.len()];
+        let (_, hits) = joint_association_probabilities_local_counted(
+            &small,
+            &small_meas,
+            &gate,
+            &clutter,
+            &densities,
+        );
+        assert_eq!(hits, 0, "at the cap the exact joint math still applies");
     }
 
     /// A single track with a single gated plot reduces exactly to the

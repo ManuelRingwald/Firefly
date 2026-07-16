@@ -110,6 +110,11 @@ pub struct Metrics {
     /// Learned spatial clutter-map cells across all sensors (SPEC.2b,
     /// FR-TRK-046) — a growing value means the tracker is mapping hotspots.
     pub clutter_cells: AtomicU64,
+    /// JPDA clusters degraded to per-track PDA because they exceeded the
+    /// enumeration cap (CAP.2, FR-TRK-052) — 0 in ordinary traffic; a
+    /// growing value means the traffic is denser than exact joint
+    /// association can afford.
+    pub jpda_cluster_cap_hits_total: AtomicU64,
     /// Loaded flight plans (FPL.1, FR-TRK-047).
     pub flight_plans: AtomicU64,
     /// Tracks correlated to a flight plan in the latest snapshot.
@@ -467,6 +472,13 @@ pub fn render(metrics: &Metrics) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_jpda_cluster_cap_hits_total",
+        "counter",
+        "JPDA clusters degraded to per-track PDA above the enumeration cap (CAP.2).",
+        metrics.jpda_cluster_cap_hits_total.load(Ordering::Relaxed) as f64,
+    );
+    write_metric(
+        &mut out,
         "firefly_sources_mlat",
         "gauge",
         "Number of configured mlat_asterix (WAM/MLAT) sources for this instance.",
@@ -720,6 +732,9 @@ mod tests {
             .unwrap()
             .insert("EDDF".into(), 1008.0);
         metrics.clutter_cells.store(64, Ordering::Relaxed);
+        metrics
+            .jpda_cluster_cap_hits_total
+            .store(3, Ordering::Relaxed);
         metrics.flight_plans.store(3, Ordering::Relaxed);
         metrics.tracks_correlated.store(2, Ordering::Relaxed);
         metrics.correlation_refused.store(1, Ordering::Relaxed);
@@ -788,6 +803,8 @@ mod tests {
         assert!(text.contains("firefly_meteo_qnh_hpa{region=\"EDDF\"} 1008"));
         assert!(text.contains("# TYPE firefly_meteo_qnh_hpa gauge"));
         assert!(text.contains("firefly_clutter_cells 64"));
+        assert!(text.contains("firefly_jpda_cluster_cap_hits_total 3"));
+        assert!(text.contains("# TYPE firefly_jpda_cluster_cap_hits_total counter"));
         assert!(text.contains("firefly_flight_plans 3"));
         assert!(text.contains("firefly_tracks_correlated 2"));
         assert!(text.contains("firefly_correlation_refused 1"));
