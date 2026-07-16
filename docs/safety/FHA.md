@@ -139,6 +139,13 @@ Nicht an eine einzelne Gefährdung gebunden, aber tragend für viele:
 - **Mess- statt Meinungs-Kultur:** Auswertungs-Harness mit
   Instrument-Tests („beißt die Metrik?", FR-TRK-051), Benchmarks mit
   dokumentierten Auslegungsgrenzen (NFR-CAP-001, FR-TRK-052, TECHNICAL §11).
+- **Property-Tests auf den Kern-Invarianten** (NFR-ASSUR-001, ASSUR.2):
+  Geodäsie-Roundtrip, LSB-genauer Draht-Roundtrip, Decoder-Totalität und
+  Squawk-Parser werden je Testlauf gegen hunderte Zufallsfälle geprüft —
+  wertgenau, nicht nur absturzfrei (Komplement zum Fuzzing NFR-SAFE-002).
+  Deckt insbesondere die I/u-Zeilen H-F1-03/H-F1-07 zusätzlich ab
+  (falsche Werte durch Encode/Decode-Fehler sind so praktisch
+  ausgeschlossen; Coverage-Stand im Dossier §1).
 - **Regression-Gates in CI:** PD/RMSE/Kontinuität als harte Asserts —
   eine Verschlechterung des Trackings fällt beim Commit auf, nicht im
   Betrieb.
