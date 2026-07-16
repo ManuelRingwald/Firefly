@@ -1026,6 +1026,11 @@ unbeobachtbare Genauigkeit gegen begrenzte Latenz. Reproduzieren:
 
 ## Weiterführend
 
+- **Genauigkeits-Dossier** (`docs/verification/genauigkeits-dossier.md`):
+  jede Genauigkeits-/Robustheits-/Kapazitäts-Behauptung mit Beleg und
+  Reproduktions-Befehl (Coverage: `cargo llvm-cov --workspace`; einmalig
+  `rustup component add llvm-tools-preview && cargo install cargo-llvm-cov`).
+- **FHA** (`docs/safety/FHA.md`): Gefährdungen, Barrieren, Lücken-Register.
 - **Installationshandbuch** (`docs/INSTALLATION.md`): Erstinbetriebnahme.
 - **ICD CAT062** (`docs/ICD-CAT062.md`): Byte-genauer Draht-Vertrag mit Wayfinder.
 - **ADR-Verzeichnis** (`docs/decisions/`): Alle Architekturentscheide.

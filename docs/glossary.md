@@ -1115,6 +1115,28 @@ Luftlage soft-echtzeitkritisch — sie muss klein *und vorhersagbar* sein.
 
 ## Zertifizierung & Assurance
 
+**Property-Test** (Eigenschafts-Test, bei uns via `proptest`)
+Ein Test, der nicht *ein Beispiel* prüft, sondern eine **Eigenschaft für
+tausende zufällig erzeugte Eingaben** — z. B. „`decode(encode(x)) = x`
+für *beliebige* gültige Tracks" statt für den einen Referenz-Track.
+Schlägt ein Fall fehl, **schrumpft** das Werkzeug ihn automatisch auf das
+minimale Gegenbeispiel. Bei uns haben die Properties schon beim Einbau
+(ASSUR.2) zwei Dinge gefunden, an die kein Beispiel-Test gedacht hätte:
+die reale f64-Präzisionsgrenze der Geodäsie in großer Höhe und die
+Antimeridian-Normalisierung (−180,58° ↔ +179,42°). Komplementär zum
+**Fuzzing** (NFR-SAFE-002): Fuzzing fragt „stürzt es ab?", Properties
+fragen „stimmen die *Werte*?".
+
+**Coverage (Test-Abdeckung)**
+Der gemessene Anteil des Codes, den die Test-Suite tatsächlich ausführt
+(bei uns via `cargo llvm-cov`; Stand ASSUR.2: 88 % der Zeilen, Tracker-Kern
+98,4 %). Wichtig fürs richtige Lesen: Coverage misst **Ausführung, nicht
+Korrektheit** — sie zeigt ungetestete Ecken, beweist aber nichts über die
+getesteten. Aussagekraft entsteht erst zusammen mit inhaltlichen Prüfungen
+(Referenz-Dumps, Properties, Regression-Gates) und Instrument-Tests, die
+belegen, dass die Prüfungen *beißen*. Deshalb ist die Zahl bei uns
+Dossier-Inhalt, **kein** CI-Schwellwert (Prozent-Gates erzeugen Kosmetik).
+
 **FHA** (*Functional Hazard Analysis*)
 Der erste Schritt jedes Sicherheits-Nachweises (ED-153/SAM-Systematik):
 systematisch durchdeklinieren, **welche Funktionen** ein System erbringt,

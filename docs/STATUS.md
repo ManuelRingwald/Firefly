@@ -10,6 +10,31 @@
 
 ---
 
+## 🎯 Stand 2026-07-16 (ASSUR.2 — Coverage + Properties + Dossier · **ROADMAP 100 %**)
+
+- **Zuletzt aktualisiert:** 2026-07-16
+- **ASSUR.2 (NFR-ASSUR-001; kein Wire-Bezug) — das 100-%-Häppchen:**
+  (a) **Coverage gemessen** statt behauptet: `cargo llvm-cov` lief in
+  dieser Umgebung — **88 % Zeilen** über den Workspace, Tracker-Kern
+  `firefly-track` **98,4 %**, `firefly-asterix` 93 %; Ausreißer ehrlich
+  analysiert (Binary-/CLI-Einstiege 0 %, Logik in getestete Module
+  extrahiert); bewusst **kein** CI-Prozent-Gate. (b) **7 Property-Tests**
+  (proptest, dev-dep in geo/asterix/fpl): Geodäsie-Roundtrip < 0,1 mm,
+  CAT062 `decode(encode(x)) = x` LSB-genau für beliebige Tracks,
+  Decoder-Totalität über beliebige Bytes, Squawk-Oktal über alle 4 096
+  Codes. **Sofort zwei Funde** (beide gegen die Test-Entwürfe, als
+  Kalibrier-Protokoll dokumentiert): reale f64-Präzisionsgrenze der
+  Geodäsie in Höhe (~1,4 µm @ 12,8 km) und Antimeridian-Normalisierung.
+  (c) **Genauigkeits-Dossier** `docs/verification/genauigkeits-dossier.md`:
+  jede Behauptung → Beleg → Reproduktions-Befehl, inkl. §6 „Was dieses
+  Dossier NICHT belegt". Roadmap: **100 %** 🎉 (Fähigkeits-Abdeckung
+  gemäß Messlatte §1; ±3-Punkte-Unsicherheit gilt weiter).
+- **Nächste Schritte (Reihenfolge = Betreiber):** beschlossene
+  Nachzügler **MON.1** (Monitoring-Paket, Bestands-Tooling); offene
+  Betreiber-Punkte: FHA-Review + Kontext-Einstufung (NFR-SAFE-004),
+  erster COMPASS-Lauf (HA.5-Abnahme, auch Dossier §3). Cross-Project
+  offen: Wayfinder #244/#245/#257/#261.
+
 ## 🎯 Stand 2026-07-16 (SAFE.4 — Tracker-Fortschritts-Watchdog; FHA-L1 geschlossen)
 
 - **Zuletzt aktualisiert:** 2026-07-16
