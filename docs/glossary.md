@@ -216,6 +216,30 @@ trägt die **SDPS-Identität** (SAC/SIC, Default 25/2 — *wer* meldet), das sep
 ist ein einzelner ausgefallener Sensor erkennbar, obwohl das SDPS selbst
 ungestört weiterläuft.
 
+**ARTAS** (*ATM suRveillance Tracker And Server*)
+EUROCONTROLs operatives Referenz-SDPS und unser funktionales Vorbild
+(`docs/design/artas-gap-roadmap.md`). Der Name benennt die zwei Hälften:
+der **Tracker** rechnet aus den Sensor-Meldungen das Luftlagebild; der
+**Server** verwaltet die Konsumenten-Systeme („User") und liefert jedem
+einen **zugeschnittenen** Track-Dienst (eigenes Liefergebiet, eigene
+Filter) über das Anmelde-Protokoll CAT252. Bei uns ist die Server-Hälfte
+eine **Verbund-Leistung**: Firefly sendet ein Bild an alle
+(Fire-and-Forget-Multicast), Wayfinder übernimmt Konsumenten-Verwaltung
+und Zuschnitt (ADR 0042).
+
+**CAT252 / SDPS-Server-Funktion**
+Das ARTAS-Protokoll, über das sich ein Konsument beim Server **anmeldet**
+und einen Track-Dienst **abonniert** (session-behaftet, adressiert,
+je User zugeschnitten). Firefly implementiert CAT252 **bewusst nicht**
+(ADR 0042): Konsumenten-Zustand gehört nicht in den sicherheitskritischen
+Track-Rechenpfad, und der Multicast-Fanout skaliert im Netz statt im
+Prozess. Die gleichwertige Leistung erbringt die Arbeitsteilung —
+direkter Multicast-Beitritt (ICD), Ingest-Gateway über Netzgrenzen
+(Wayfinder ADR 0007), mandanten-gescopter Zuschnitt am Wayfinder-Rand
+(WF2-21.2) und Sensor-Mix je Konsument über eine eigene Firefly-Instanz
+(Wayfinder ADR 0012). Ein echtes CAT252 bliebe als Rand-Adapter
+nachrüstbar, ohne den Tracker-Kern anzufassen.
+
 **RE / SP** (*Reserved Expansion Field / Special Purpose Field*)
 Zwei im ASTERIX-UAP vorgesehene **Erweiterungs-Slots** am Ende eines Records, über
 die ein Hersteller **eigene** Zusatzfelder mitschicken darf, ohne den Standard zu

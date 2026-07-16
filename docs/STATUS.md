@@ -10,6 +10,30 @@
 
 ---
 
+## 🎯 Stand 2026-07-16 (SRV.1 — ADR 0042 Arbeitsteilung SDPS-Server-Funktion)
+
+- **Zuletzt aktualisiert:** 2026-07-16
+- **SRV.1 (ADR 0042; rein dokumentarisch, kein Code/Wire-Bezug):** Die
+  **ARTAS-Server-Funktion ist als Verbund-Leistung festgeschrieben** —
+  die Roadmap-Messlatte verlangt für bewusste Abweichungen genau das
+  (Abweichung + ADR = erfüllt). Kern: Firefly kennt **keine Konsumenten**
+  (Fire-and-Forget-Multicast, ein Bild an alle), Wayfinder erbringt
+  Konsumenten-Verwaltung + Zuschnitt (Mandanten/Feeds/Abos, fail-closed
+  AOI/FL-Filter WF2-21.2, Auth-WS je Client, Ingest-Gateway ADR 0007
+  dort, Sensor-Mix via Instanz-je-Feed ADR 0012 dort). Dazu die
+  **Konsumenten-Matrix K1–K5** (direkter Multicast · Gateway über
+  Netzgrenzen · Wayfinder-Serving · Instanz-je-Feed · CAT252-Legacy =
+  bewusst nicht bedienbar) und die Verwerfung von CAT252 in Firefly
+  (Konsumenten-Zustand gehört nicht in den Track-Rechenpfad;
+  Rand-Adapter bliebe per neuem ADR möglich). Nebenbefund behoben:
+  ADR-Index (`docs/decisions/README.md`) hatte 0034–0041 nie erhalten —
+  nachgezogen. Spiegel-Issue Wayfinder#257 (`from-firefly`, S1–S2).
+  Glossar: ARTAS, CAT252/SDPS-Server-Funktion. Roadmap: **96 %**.
+- **Nächster Schritt:** **SRV.2** ankündigen (Laufzeit-Steuerung: Sensor
+  an/aus, Service-Kommandos via API + Supervision-Ausbau; S3, 97,5 %) —
+  und Freigabe abwarten. Offen beim Betreiber: erster COMPASS-Bericht
+  (HA.5-Abnahme). Weiter offen: Wayfinder #244/#245/#257.
+
 ## 🎯 Stand 2026-07-16 (CAP.2 — JPDA-Cluster-Kappe + Auslegungsgrenzen)
 
 - **Zuletzt aktualisiert:** 2026-07-16
