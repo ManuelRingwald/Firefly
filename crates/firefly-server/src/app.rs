@@ -7,14 +7,16 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
-    routing::{delete, get},
+    routing::{delete, get, post},
     Json, Router,
 };
 use firefly_core::SensorId;
 use firefly_fpl::CorrelationService;
 use firefly_io::Frame;
 
-use crate::live::{ManualOverrides, SnapshotRx};
+use firefly_multicast::SensorHealthMonitor;
+
+use crate::live::{ManualOverrides, SensorGate, SnapshotRx};
 use crate::metrics::{ConnectedClientGuard, Metrics};
 
 /// How the server obtains the frame stream served to WebSocket clients.
@@ -55,6 +57,26 @@ pub struct AppState {
     /// 409, so a misconfigured consumer learns the feature is off instead of
     /// writing into a void.
     pub correlation: Option<CorrelationApi>,
+    /// The runtime sensor-control surface (SRV.2). `None` on a standby (no
+    /// live stack yet) — the sensor command endpoints then answer 409.
+    pub sensors: Option<SensorControl>,
+}
+
+/// The runtime sensor-control surface (SRV.2): the configured sensor
+/// inventory, the shared gate the live tracker filters against, and the
+/// health monitor that knows each sensor's liveness. Handed to the HTTP
+/// command edge so an operator can take a sensor out of the fusion (and
+/// bring it back) without a restart.
+#[derive(Clone)]
+pub struct SensorControl {
+    /// Every configured source sensor: `(sensor_id, source type)` — the
+    /// authority for "does this sensor exist" (422 gate on commands).
+    pub known: Arc<Vec<(u16, String)>>,
+    /// The shared gate: sensors in this set are dropped at ingest. Written
+    /// here, read by [`LiveTracker::ingest`](crate::live::LiveTracker).
+    pub gate: SensorGate,
+    /// Per-sensor liveness (CAT063 source), for the `/sensors` listing.
+    pub health: Arc<SensorHealthMonitor>,
 }
 
 /// The manual-correlation command surface (FPL.2, ADR 0039): the immutable
@@ -90,6 +112,10 @@ pub fn router(state: AppState) -> Router {
         .route("/ws", get(ws_handler))
         .route("/correlation", get(list_correlation).post(set_correlation))
         .route("/correlation/{track_number}", delete(clear_correlation))
+        .route("/sensors", get(list_sensors))
+        .route("/sensors/{sensor_id}/disable", post(disable_sensor))
+        .route("/sensors/{sensor_id}/enable", post(enable_sensor))
+        .route("/status", get(status))
         .with_state(state)
 }
 
@@ -310,6 +336,178 @@ async fn list_correlation(State(state): State<AppState>, headers: HeaderMap) -> 
     Json(serde_json::Value::Array(entries)).into_response()
 }
 
+/// Flip a sensor's gate state (SRV.2): the shared implementation behind
+/// `POST /sensors/{id}/disable` and `/enable`. 409 without a live sensor
+/// inventory (a standby has none yet), 422 for an unknown sensor id.
+/// Idempotent — the response reports whether anything changed; the
+/// `firefly_sensors_disabled` gauge follows every successful command.
+fn set_sensor_gate(
+    state: &AppState,
+    headers: &HeaderMap,
+    sensor_id: u16,
+    disable: bool,
+) -> Response {
+    if let Err(status) = authorize_command(headers, state) {
+        return status.into_response();
+    }
+    let Some(control) = &state.sensors else {
+        return (
+            StatusCode::CONFLICT,
+            "no live sensor inventory (standby instance?)",
+        )
+            .into_response();
+    };
+    if !control.known.iter().any(|(id, _)| *id == sensor_id) {
+        return (StatusCode::UNPROCESSABLE_ENTITY, "no such sensor").into_response();
+    }
+    let mut gate = control
+        .gate
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let changed = if disable {
+        gate.insert(SensorId(sensor_id))
+    } else {
+        gate.remove(&SensorId(sensor_id))
+    };
+    let disabled_now = gate.len() as u64;
+    drop(gate);
+    state
+        .metrics
+        .sensors_disabled
+        .store(disabled_now, std::sync::atomic::Ordering::Relaxed);
+    if disable {
+        // An operator taking a sensor out of the fusion is an operational
+        // event worth a loud log line — the picture is thinner from now on.
+        tracing::warn!(
+            sensor_id,
+            changed,
+            "sensor DISABLED by operator command (SRV.2): its plots are dropped before fusion"
+        );
+    } else {
+        tracing::info!(
+            sensor_id,
+            changed,
+            "sensor enabled by operator command (SRV.2)"
+        );
+    }
+    Json(serde_json::json!({
+        "sensor_id": sensor_id,
+        "disabled": disable,
+        "changed": changed,
+    }))
+    .into_response()
+}
+
+/// `POST /sensors/{sensor_id}/disable` — take a sensor out of the fusion at
+/// runtime (SRV.2): its plots are dropped at ingest from the next batch on.
+async fn disable_sensor(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(sensor_id): Path<u16>,
+) -> Response {
+    set_sensor_gate(&state, &headers, sensor_id, true)
+}
+
+/// `POST /sensors/{sensor_id}/enable` — bring a gated sensor back into the
+/// fusion (SRV.2). Idempotent: enabling an already-active sensor is a no-op.
+async fn enable_sensor(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(sensor_id): Path<u16>,
+) -> Response {
+    set_sensor_gate(&state, &headers, sensor_id, false)
+}
+
+/// `GET /sensors` — the sensor inventory with liveness and gate state
+/// (SRV.2): one row per configured sensor with its source type, whether it
+/// currently delivers plots (CAT063 liveness) and whether an operator has
+/// gated it. A standby (no inventory) answers an empty list — a read is
+/// never an error.
+async fn list_sensors(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(status) = authorize_command(&headers, &state) {
+        return status.into_response();
+    }
+    let entries: Vec<serde_json::Value> = state
+        .sensors
+        .as_ref()
+        .map(|control| {
+            let health = control.health.snapshot(std::time::Instant::now());
+            let gate = control
+                .gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            control
+                .known
+                .iter()
+                .map(|(id, kind)| {
+                    serde_json::json!({
+                        "sensor_id": id,
+                        "kind": kind,
+                        "active": health
+                            .per_sensor
+                            .get(&SensorId(*id))
+                            .is_some_and(|h| h.active),
+                        "disabled": gate.contains(&SensorId(*id)),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Json(serde_json::Value::Array(entries)).into_response()
+}
+
+/// `GET /status` — the one-glance supervision summary (SRV.2): role, feed
+/// readiness, sensor counts (incl. operator-gated ones), correlation and
+/// state-snapshot bookkeeping — the numbers otherwise scattered across
+/// `/metrics`, probes and logs, in one operator-readable JSON document.
+async fn status(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(status) = authorize_command(&headers, &state) {
+        return status.into_response();
+    }
+    use std::sync::atomic::Ordering::Relaxed;
+    let m = &state.metrics;
+    let disabled: Vec<u16> = state
+        .sensors
+        .as_ref()
+        .map(|control| {
+            control
+                .gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .map(|s| s.0)
+                .collect()
+        })
+        .unwrap_or_default();
+    let standby = m.standby.load(Relaxed);
+    Json(serde_json::json!({
+        "role": if standby { "standby" } else { "active" },
+        "ready": !standby && m.live_ready.load(Relaxed),
+        "restored": m.restore.load(Relaxed),
+        "failovers_total": m.failovers_total.load(Relaxed),
+        "tracks_active": m.tracks_active.load(Relaxed),
+        "plots_ingested_total": m.live_plots_ingested_total.load(Relaxed),
+        "sensors": {
+            "total": m.sensors_total.load(Relaxed),
+            "active": m.sensors_active.load(Relaxed),
+            "disabled": disabled,
+            "disabled_plots_dropped_total": m.sensor_disabled_plots_dropped_total.load(Relaxed),
+        },
+        "correlation": {
+            "flight_plans": m.flight_plans.load(Relaxed),
+            "tracks_correlated": m.tracks_correlated.load(Relaxed),
+            "manual_overrides": m.correlation_manual.load(Relaxed),
+        },
+        "snapshot": {
+            "writes_total": m.snapshot_writes_total.load(Relaxed),
+            "errors_total": m.snapshot_errors_total.load(Relaxed),
+            "age_seconds": m.snapshot_age_seconds.load(Relaxed),
+        },
+        "jpda_cluster_cap_hits_total": m.jpda_cluster_cap_hits_total.load(Relaxed),
+    }))
+    .into_response()
+}
+
 /// Upgrade the connection and start pumping frames to this client.
 ///
 /// Auth is checked before the WebSocket upgrade via [`authorize_ws`]:
@@ -398,6 +596,7 @@ mod tests {
             ws_token: None,
             ws_allowed_origin: None,
             correlation: None,
+            sensors: None,
         }
     }
 
@@ -441,6 +640,7 @@ mod tests {
             ws_token: None,
             ws_allowed_origin: None,
             correlation: None,
+            sensors: None,
         };
         let response = router(live_state)
             .oneshot(
@@ -471,6 +671,7 @@ mod tests {
             ws_token: None,
             ws_allowed_origin: None,
             correlation: None,
+            sensors: None,
         };
         let response = router(live_state)
             .oneshot(
@@ -828,5 +1029,183 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Runtime sensor control + supervision (SRV.2)
+    // ---------------------------------------------------------------------------
+
+    fn state_with_sensors() -> AppState {
+        let mut s = state();
+        s.sensors = Some(SensorControl {
+            known: Arc::new(vec![
+                (200, "adsb_opensky".to_string()),
+                (301, "radar_asterix".to_string()),
+            ]),
+            gate: SensorGate::default(),
+            health: Arc::new(SensorHealthMonitor::new_live([
+                (SensorId(200), 10.0),
+                (SensorId(301), 4.0),
+            ])),
+        });
+        s
+    }
+
+    async fn body_json(resp: axum::http::Response<Body>) -> serde_json::Value {
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    /// The full sensor-gate cycle over HTTP (SRV.2): disable a sensor (entry
+    /// in the shared gate + gauge follows), list shows it disabled, enable
+    /// clears it again (idempotence reported via `changed`).
+    /// REQ: FR-OPS-008
+    #[tokio::test]
+    async fn sensor_commands_disable_list_and_enable() {
+        let state = state_with_sensors();
+        let control = state.sensors.as_ref().unwrap().clone();
+        let metrics = Arc::clone(&state.metrics);
+
+        let resp = send(state.clone(), "POST", "/sensors/301/disable", None, None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_json(resp).await["changed"], true);
+        assert!(control.gate.lock().unwrap().contains(&SensorId(301)));
+        assert_eq!(
+            metrics
+                .sensors_disabled
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the gauge follows the command"
+        );
+
+        // Disabling again is an idempotent no-op — reported, not an error.
+        let resp = send(state.clone(), "POST", "/sensors/301/disable", None, None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_json(resp).await["changed"], false);
+
+        let resp = send(state.clone(), "GET", "/sensors", None, None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let listed = body_json(resp).await;
+        let rows = listed.as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        let radar = rows.iter().find(|r| r["sensor_id"] == 301).unwrap();
+        assert_eq!(radar["kind"], "radar_asterix");
+        assert_eq!(radar["disabled"], true);
+        assert_eq!(radar["active"], false, "no plot recorded yet");
+
+        let resp = send(state.clone(), "POST", "/sensors/301/enable", None, None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_json(resp).await["changed"], true);
+        assert!(control.gate.lock().unwrap().is_empty());
+        assert_eq!(
+            metrics
+                .sensors_disabled
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+    }
+
+    /// Command validation (SRV.2): an unknown sensor id is 422 (never a
+    /// silent gate on nothing) and an instance without a live inventory
+    /// (standby) answers 409 to mutations. REQ: FR-OPS-008
+    #[tokio::test]
+    async fn sensor_commands_validate_inventory_and_configuration() {
+        let resp = send(
+            state_with_sensors(),
+            "POST",
+            "/sensors/999/disable",
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let resp = send(state(), "POST", "/sensors/200/disable", None, None).await;
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+
+        // Reads are never an error: no inventory → empty list.
+        let resp = send(state(), "GET", "/sensors", None, None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_json(resp).await.as_array().map(Vec::len), Some(0));
+    }
+
+    /// The sensor commands sit behind the same Bearer gate as the
+    /// correlation edge: no token → 401, header token → accepted; the
+    /// query fallback is NOT honoured. REQ: FR-OPS-008, NFR-SEC-001
+    #[tokio::test]
+    async fn sensor_commands_require_the_bearer_token() {
+        let mut with_token = state_with_sensors();
+        with_token.ws_token = Some("secret".into());
+
+        let resp = send(
+            with_token.clone(),
+            "POST",
+            "/sensors/200/disable",
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let resp = send(
+            with_token.clone(),
+            "POST",
+            "/sensors/200/disable?token=secret",
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let resp = send(with_token.clone(), "GET", "/status", None, None).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "the supervision summary is operational data — token-gated too"
+        );
+
+        let resp = send(
+            with_token,
+            "POST",
+            "/sensors/200/disable",
+            None,
+            Some("secret"),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// `GET /status` summarises the supervision picture (SRV.2): role,
+    /// readiness, sensor counts including the operator-gated list, and the
+    /// bookkeeping blocks. REQ: FR-OPS-008
+    #[tokio::test]
+    async fn status_reports_role_sensors_and_gates() {
+        let state = state_with_sensors();
+        use std::sync::atomic::Ordering;
+        state.metrics.sensors_total.store(2, Ordering::Relaxed);
+        state.metrics.sensors_active.store(1, Ordering::Relaxed);
+        state.metrics.tracks_active.store(5, Ordering::Relaxed);
+        let _ = send(state.clone(), "POST", "/sensors/200/disable", None, None).await;
+
+        let resp = send(state.clone(), "GET", "/status", None, None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let status = body_json(resp).await;
+        assert_eq!(status["role"], "active");
+        assert_eq!(status["ready"], true);
+        assert_eq!(status["tracks_active"], 5);
+        assert_eq!(status["sensors"]["total"], 2);
+        assert_eq!(status["sensors"]["disabled"], serde_json::json!([200]));
+
+        // A standby reports its role and is never "ready".
+        state
+            .metrics
+            .standby
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let resp = send(state, "GET", "/status", None, None).await;
+        let status = body_json(resp).await;
+        assert_eq!(status["role"], "standby");
+        assert_eq!(status["ready"], false);
     }
 }

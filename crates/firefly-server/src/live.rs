@@ -310,6 +310,14 @@ pub struct RegistrationTick {
 /// the next aircraft that inherits the number.
 pub type ManualOverrides = Arc<std::sync::Mutex<std::collections::BTreeMap<u16, Option<String>>>>;
 
+/// The runtime sensor gate (SRV.2): the set of sensors an operator has taken
+/// **out of the fusion**, shared between the HTTP command edge (which writes
+/// it) and the live-tracker task (which drops gated plots before they reach
+/// the tracker). Deliberately **volatile**: a restart or failover starts with
+/// every sensor enabled — fail-open toward "more data", because a forgotten
+/// stale gate silently thinning the air picture is the worse failure mode.
+pub type SensorGate = Arc<std::sync::Mutex<std::collections::BTreeSet<SensorId>>>;
+
 /// The periodic snapshot sink (HA.1, ADR 0040): where and how often the
 /// live tracker persists its working state, plus the write bookkeeping the
 /// metrics export reads. Attached via [`LiveTracker::with_snapshots`].
@@ -423,6 +431,11 @@ pub struct LiveTracker {
     latest_data_time: Option<f64>,
     /// Total plots handed to the tracker (for metrics, AP9.4c-4).
     plots_ingested: u64,
+    /// The runtime sensor gate (SRV.2), shared with the HTTP command edge.
+    /// `None` (or an empty set) gates nothing.
+    sensor_gate: Option<SensorGate>,
+    /// Total plots dropped because their sensor was gated (SRV.2 metrics).
+    plots_dropped_disabled: u64,
 }
 
 impl LiveTracker {
@@ -442,7 +455,23 @@ impl LiveTracker {
             snapshot_sink: None,
             latest_data_time: None,
             plots_ingested: 0,
+            sensor_gate: None,
+            plots_dropped_disabled: 0,
         }
+    }
+
+    /// Attach the shared runtime sensor gate (SRV.2): the HTTP command edge
+    /// writes it, every ingested batch is filtered against it — plots from a
+    /// gated sensor are dropped **before** recording, registration and
+    /// tracking, so a disabled sensor is out of the fusion entirely.
+    pub fn with_sensor_gate(mut self, gate: SensorGate) -> Self {
+        self.sensor_gate = Some(gate);
+        self
+    }
+
+    /// Total plots dropped by the sensor gate so far (SRV.2 metrics).
+    pub fn plots_dropped_disabled(&self) -> u64 {
+        self.plots_dropped_disabled
     }
 
     /// Attach a registration shadow monitor (REG.2a). The monitor observes
@@ -616,6 +645,26 @@ impl LiveTracker {
     /// air picture must not stop when the disk fills (availability over
     /// recording).
     pub fn ingest(&mut self, plots: &[Plot], recv_unix_ns: u64) {
+        // Runtime sensor gate (SRV.2): drop plots from operator-disabled
+        // sensors before recording, registration and tracking — a gated
+        // sensor is out of the fusion entirely, not merely down-weighted.
+        let gated: Vec<Plot>;
+        let mut plots = plots;
+        if let Some(gate) = self.sensor_gate.clone() {
+            let disabled = gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !disabled.is_empty() {
+                gated = plots
+                    .iter()
+                    .filter(|p| !disabled.contains(&p.sensor))
+                    .cloned()
+                    .collect();
+                drop(disabled);
+                self.plots_dropped_disabled += (plots.len() - gated.len()) as u64;
+                plots = &gated;
+            }
+        }
         if plots.is_empty() {
             return;
         }
@@ -858,10 +907,11 @@ impl LiveTracker {
 ///   sink is attached ([`LiveTracker::with_snapshots`]).
 ///   `on_tick` is called after each tick with `(plots_ingested,
 ///   records_written, registration_tick, clutter_cells, correlation_stats,
-///   snapshot_tick)` so callers can update Prometheus
-///   counters (AP9.4c-4; the registration snapshot is `None` without a
-///   shadow monitor, REG.2a; the snapshot bookkeeping is `None` without a
-///   sink, HA.1).
+///   snapshot_tick, jpda_cap_hits, plots_dropped_disabled)` so callers can
+///   update Prometheus counters (AP9.4c-4; the registration snapshot is
+///   `None` without a shadow monitor, REG.2a; the snapshot bookkeeping is
+///   `None` without a sink, HA.1; the last two are the CAP.2 cluster-cap
+///   and SRV.2 sensor-gate counters).
 ///
 /// When every sender on `plots_rx` is dropped the recorder is flushed and the
 /// task returns, so a clean shutdown loses no recorded plots.
@@ -872,7 +922,16 @@ pub async fn run_live_tracker<F>(
     output_period: Duration,
     on_tick: F,
 ) where
-    F: Fn(u64, u64, Option<RegistrationTick>, u64, (u64, u64, u64, u64), Option<SnapshotTick>, u64),
+    F: Fn(
+        u64,
+        u64,
+        Option<RegistrationTick>,
+        u64,
+        (u64, u64, u64, u64),
+        Option<SnapshotTick>,
+        u64,
+        u64,
+    ),
 {
     let mut ticker = tokio::time::interval(output_period);
     // A delayed tick should not fire a burst of catch-up ticks afterwards.
@@ -910,6 +969,7 @@ pub async fn run_live_tracker<F>(
                     live.correlation_stats(),
                     live.snapshot_tick(),
                     live.jpda_cap_hits(),
+                    live.plots_dropped_disabled(),
                 );
             }
         }
@@ -1388,6 +1448,44 @@ mod tests {
         assert_eq!(live.plots_ingested(), 8);
     }
 
+    /// The runtime sensor gate (SRV.2) bites: with the sensor disabled every
+    /// batch is dropped **before** the tracker (no track appears, the drop
+    /// counter grows, `plots_ingested` stays 0), and re-enabling resumes
+    /// ingestion without a restart. REQ: FR-OPS-008
+    #[test]
+    fn sensor_gate_drops_and_resumes() {
+        let gate = SensorGate::default();
+        let mut live =
+            LiveTracker::new(build_live_tracker(&config()), None).with_sensor_gate(gate.clone());
+
+        gate.lock().unwrap().insert(SensorId(200));
+        for k in 0..4 {
+            let t = k as f64 * 10.0;
+            live.ingest(&[adsb(t, 51.0, 10.5, 0x3C_AB_CD)], now_unix_ns());
+        }
+        assert!(
+            live.snapshot().is_empty(),
+            "a gated sensor must not feed the picture"
+        );
+        assert_eq!(live.plots_ingested(), 0);
+        assert_eq!(live.plots_dropped_disabled(), 4);
+
+        gate.lock().unwrap().clear();
+        for k in 0..8 {
+            let t = 40.0 + k as f64 * 10.0;
+            let lon = 10.5 + k as f64 * 0.01;
+            live.ingest(&[adsb(t, 51.0, lon, 0x3C_AB_CD)], now_unix_ns());
+        }
+        let snapshot = live.snapshot();
+        assert_eq!(snapshot.len(), 1, "re-enabled sensor feeds the picture");
+        assert_eq!(live.plots_ingested(), 8);
+        assert_eq!(
+            live.plots_dropped_disabled(),
+            4,
+            "no further drops once re-enabled"
+        );
+    }
+
     /// Two distinct ICAO addresses produce two separate tracks.
     #[test]
     fn two_aircraft_make_two_tracks() {
@@ -1618,7 +1716,7 @@ mod tests {
             plots_rx,
             snapshot_tx,
             Duration::from_millis(100),
-            |_, _, _, _, _, _, _| {},
+            |_, _, _, _, _, _, _, _| {},
         ));
 
         // Feed enough hits to confirm a track.
