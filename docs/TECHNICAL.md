@@ -43,6 +43,15 @@
 | `FIREFLY_CAT065_PERIOD` | f64 | `1.0` | Heartbeat-Intervall in Wanduhrsekunden |
 | `FIREFLY_CAT065_SERVICE_ID` | u8 | `1` | Service-ID in I065/015 |
 
+> **Tracker-Fortschritts-Watchdog (SAFE.4, FR-OPS-009):** Der Heartbeat
+> meldet **NOGO/degradiert** (I065/040 = `0x40`), wenn der Live-Tracker
+> länger als **3 Ausgabeperioden** (min. 3 s) keinen Output-Tick gemacht
+> hat — ein hängender Kern darf nicht als gesunder Dienst broadcasten
+> (FHA H-F1-02). Scharf erst nach dem ersten Tick; automatische Rückkehr
+> zu operationell, sobald Ticks wieder laufen. Sichtbar: ERROR-Log beim
+> Anschlagen, INFO bei Erholung, Gauge `firefly_heartbeat_degraded`.
+> Keine Konfiguration — die Schwelle folgt der Ausgabeperiode.
+
 ### 1.4 CAT063-Sensor-Status (Per-Sensor-Liveness)
 
 CAT063 meldet je registriertem Sensor, ob er noch Plots liefert (operationell)
@@ -619,6 +628,7 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_sensors_active` | gauge | Anzahl aktuell aktiver Sensoren (Plot innerhalb `2.5 × scan_period`) |
 | `firefly_sensors_disabled` | gauge | **SRV.2:** Sensoren, die der Betreiber per Kommando aus der Fusion genommen hat (`POST /sensors/{id}/disable`) |
 | `firefly_sensor_disabled_plots_dropped_total` | counter | **SRV.2:** am Eingang verworfene Plots deaktivierter Sensoren — wächst nur, solange ein Gate in Kraft ist |
+| `firefly_heartbeat_degraded` | gauge | **SAFE.4:** 1 = der CAT065-Heartbeat meldet NOGO/degradiert, weil der Tracker-Task > 3 Ausgabeperioden keinen Output-Tick gemacht hat (hängender Kern; ERROR-Log beim Übergang) |
 | `firefly_registration_estimates_total` | counter | **Registrierung (REG.2a):** Bias-Schätzläufe des Schatten-Monitors. Bleibt 0 ohne `FIREFLY_REGISTRATION_ENABLED` bzw. ohne ausreichende Radar↔Referenz-Korrespondenzen. |
 | `firefly_registration_correspondences` | gauge | **Registrierung:** Korrespondenzen des letzten Schätzversuchs (auch bei Ablehnung wegen zu dünner Evidenz gesetzt — zeigt dem Operator, *warum* keine Schätzung erscheint) |
 | `firefly_registration_observable` | gauge | **Registrierung:** 1 = letzte Schätzung voll beobachtbar, 0 = (noch) keine Schätzung oder rangdefiziente Geometrie |

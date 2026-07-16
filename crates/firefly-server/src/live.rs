@@ -1021,6 +1021,21 @@ pub async fn run_live_cat062<F: Fn(usize)>(
     }
 }
 
+/// The tracker-progress watchdog decision (SAFE.4, FHA H-F1-02): has the
+/// live-tracker task stopped making output ticks?
+///
+/// `last_tick_unix_s` is the Unix time of the most recent output tick (0 =
+/// none yet), `threshold_s` the allowed silence (0 = watchdog unarmed). The
+/// watchdog only bites once BOTH are set: during startup — before the live
+/// stack runs or before its first tick — the heartbeat stays operational,
+/// because "not yet started" is visible via `/ready` and is not the hazard
+/// this guards against (a tracker that stalls AFTER working).
+pub fn tracker_progress_stalled(last_tick_unix_s: u64, threshold_s: u64, now_unix_s: u64) -> bool {
+    threshold_s > 0
+        && last_tick_unix_s > 0
+        && now_unix_s.saturating_sub(last_tick_unix_s) > threshold_s
+}
+
 /// The current wall-clock time as Unix nanoseconds (0 if the clock predates the
 /// epoch, which cannot happen in practice).
 fn now_unix_ns() -> u64 {
@@ -1446,6 +1461,27 @@ mod tests {
         // The track sits near the latest reported position.
         assert!((snapshot[0].position.lat_deg() - 51.0).abs() < 0.2);
         assert_eq!(live.plots_ingested(), 8);
+    }
+
+    /// The tracker-progress watchdog decision (SAFE.4): unarmed before the
+    /// threshold is set AND before the first tick; bites only when a
+    /// once-working tracker falls silent longer than the threshold.
+    /// REQ: FR-OPS-009
+    #[test]
+    fn tracker_progress_watchdog_bites_only_after_progress_then_silence() {
+        // Unarmed: no threshold yet (live stack not built).
+        assert!(!tracker_progress_stalled(0, 0, 1_000));
+        assert!(!tracker_progress_stalled(990, 0, 1_000));
+        // Unarmed: threshold set, but no tick yet (startup).
+        assert!(!tracker_progress_stalled(0, 30, 1_000));
+        // Fresh tick → healthy.
+        assert!(!tracker_progress_stalled(995, 30, 1_000));
+        // Exactly at the threshold → still healthy (strictly greater bites).
+        assert!(!tracker_progress_stalled(970, 30, 1_000));
+        // Silence beyond the threshold → stalled.
+        assert!(tracker_progress_stalled(969, 30, 1_000));
+        // Clock skew backwards must not underflow into "stalled".
+        assert!(!tracker_progress_stalled(2_000, 30, 1_000));
     }
 
     /// The runtime sensor gate (SRV.2) bites: with the sensor disabled every

@@ -21,7 +21,18 @@
 
 ## Version
 
-**3.7.0** (2026-07-15) — **Additiv (FR-TRK-048, ARTAS-Roadmap FPL.2):**
+**3.7.1** (2026-07-16) — **Dokumentarisch (FR-OPS-009, ARTAS-Roadmap
+SAFE.4; kein Wire-Format-Bezug):** Präzisiert, **wann** der
+CAT065-Heartbeat das NOGO-Feld (I065/040) auf **degradiert** (`0x40`)
+setzt: zusätzlich zum bisher dokumentierten Format meldet Firefly
+degradiert, wenn der **Tracker-Fortschritts-Watchdog** anschlägt — der
+Live-Tracker hat länger als **3 Ausgabeperioden** (min. 3 s) keinen
+Output-Tick gemacht (hängender Kern; FHA H-F1-02). Beide Oktett-Werte
+waren seit 2.3.0 spezifiziert; ein Konsument, der NOGO bereits auswertet
+(Wayfinder-Feed-Banner), braucht **keine Änderung** — er sieht den Fall
+jetzt nur tatsächlich. Details: Abschnitt 8.
+
+Vorgänger **3.7.0** (2026-07-15) — **Additiv (FR-TRK-048, ARTAS-Roadmap FPL.2):**
 Das Ergebnis der **zentralen Flugplan-Korrelation** (ADR 0038/0039) kommt
 auf den Draht — ein neues optionales Compound-Item an seiner
 Standard-UAP-Position:
@@ -154,6 +165,7 @@ Vorgänger **2.5.0** (2026-06-25) — **Additiv:** Neue Kategorie **CAT063** (Se
 
 | Version | Datum | Änderung |
 |---------|-------|----------|
+| 3.7.1 | 2026-07-16 | **Dokumentarisch (FR-OPS-009, SAFE.4; kein Wire-Format-Bezug).** I065/040-NOGO wird jetzt auch tatsächlich **degradiert** (`0x40`) gesendet, wenn der Tracker-Fortschritts-Watchdog anschlägt (> 3 Ausgabeperioden ohne Output-Tick, min. 3 s; scharf erst nach dem ersten Tick) — ein hängender Tracker darf nicht als gesunder Dienst broadcasten (FHA H-F1-02). Werte seit 2.3.0 spezifiziert; NOGO-auswertende Konsumenten unverändert. |
 | 3.7.0 | 2026-07-15 | **Additiv (FR-TRK-048, FPL.2; ADR 0038/0039).** **I062/390** (Flight Plan Related Data, FRN 21) trägt das Ergebnis der **zentralen Flugplan-Korrelation**: Compound-Item, Primary Subfield 1–2 Oktette (FX-Kette), belegt sind **CSN** (#2, Oktett 1 Bit 7; Plan-Callsign, 7 Oktette ASCII, linksbündig leerzeichen-gepolstert), **DEP** (#7, Oktett 1 Bit 2) und **DST** (#8, Oktett 2 Bit 8; je 4 Oktette ICAO-Locator). Nur bei **korreliertem** Track gesendet (automatisch nach ADR-0038-Regeln oder manuell via Kommando-API); unkorrelierter Track byte-identisch alt. FRN 21 liegt im bereits vorhandenen 3. FSPEC-Oktett — kein FSPEC-Wachstum. Referenz-Bytes in 4.10. Konsument: subfeld-getrieben lesen (Reihenfolge/Präsenz aus dem Primary Subfield), kein Lockstep. |
 | 3.6.0 | 2026-07-11 | **Additiv (FR-TRK-043, VERT.3).** Kinematik-Kette: **I062/210** (FRN 8, Ax/Ay je i8 × 0,25 m/s², geclampt) und **I062/200** (FRN 15, TRANS aus IMM-Kurvenmodellen \| LONG aus Längs-Beschleunigung \| VERT aus der RoCD; ADF immer 0). I062/200 entfällt bei komplett unbestimmter Lage, I062/210 bei fehlendem/stalem Schätzwert; Track ohne Kinematik byte-identisch alt. Referenz-Bytes in 4.9. Konsument: zwei feste Items an Standard-UAP-Positionen, kein Lockstep. |
 | 3.5.0 | 2026-07-11 | **Additiv (FR-TRK-042, VERT.2).** Vertikal-Kette auf dem Draht: **I062/130** (FRN 18, geometrische Höhe, i16 × 6,25 ft), **I062/135** (FRN 19, gefilterte barometrische Höhe; **QNH-Bit** nur bei Korrektur auf beobachtetes regionales QNH, sonst Druckhöhe mit Bit 0; 15-Bit-ZK × 25 ft), **I062/220** (FRN 20, Steig-/Sinkrate, i16 × 6,25 ft/min, positiv = steigen). Jedes Item nur bei frischem Schätzwert (≤ 30 s); Track ohne Vertikal-Daten byte-identisch alt; I062/136 bleibt daneben. Referenz-Bytes in 4.8. Konsument: drei feste 2-Oktett-Items an Standard-UAP-Positionen, kein Lockstep. |
@@ -622,7 +634,7 @@ einzelnes FSPEC-Oktett `0xF4`.
 | 2 | I065/000 | 1 | Message Type. **`1` = SDPS Status** (der Heartbeat). |
 | 3 | I065/015 | 1 | Service Identification (`FIREFLY_CAT065_SERVICE_ID`, Default 1). |
 | 4 | I065/030 | 3 | Time of Day, 24-Bit, **1/128 s** seit UTC-Mitternacht (wie I062/070). **Wall-clock-Aussendezeit**, nicht Datenzeit. |
-| 6 | I065/040 | 1 | SDPS Configuration & Status. **NOGO-Feld** (Bits 8/7): `00` = operationell (`0x00`), sonst degradiert (wir senden `0x40`). |
+| 6 | I065/040 | 1 | SDPS Configuration & Status. **NOGO-Feld** (Bits 8/7): `00` = operationell (`0x00`), sonst degradiert (wir senden `0x40`). **Degradiert wird gemeldet** (seit 3.7.1), wenn der Tracker-Fortschritts-Watchdog anschlägt: > 3 Ausgabeperioden (min. 3 s) kein Output-Tick des Live-Trackers — der Heartbeat-Task lebt, aber der Kern liefert nicht (SAFE.4, FHA H-F1-02). Operationell kehrt automatisch zurück, sobald Ticks wieder laufen. |
 
 > FRN 5 (I065/020 Batch Number) und FRN 7 (I065/050 Service Status Report) sind
 > Teil der CAT065-UAP, gehören aber zu anderen Message-Types und werden vom

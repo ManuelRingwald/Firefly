@@ -699,6 +699,14 @@ async fn build_live_state(
         .restore
         .store(restored, std::sync::atomic::Ordering::Relaxed);
 
+    // Arm the tracker-progress watchdog (SAFE.4): the CAT065 heartbeat
+    // reports NOGO once output ticks stay silent for 3 periods (min 3 s) —
+    // the same "three missed beats" convention as the failover timeout.
+    metrics.tracker_watchdog_threshold_s.store(
+        (3 * output_period.as_secs()).max(3),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
     {
         let m = Arc::clone(&metrics);
         tokio::spawn(run_live_tracker(
@@ -714,6 +722,13 @@ async fn build_live_state(
                   snapshot,
                   cap_hits,
                   dropped_disabled| {
+                m.tracker_last_tick_unix_s.store(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 m.jpda_cluster_cap_hits_total
                     .store(cap_hits, std::sync::atomic::Ordering::Relaxed);
                 m.sensor_disabled_plots_dropped_total
@@ -1478,6 +1493,34 @@ async fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) -> Option<u16> {
     };
     let port = socket.local_addr().ok().map(|a| a.port());
 
+    // Tracker-progress watchdog (SAFE.4, FHA H-F1-02): before every
+    // heartbeat, check whether the live tracker still makes output ticks.
+    // A stuck tracker must not be broadcast as a healthy service — the
+    // heartbeat then reports NOGO/degraded until ticks resume. Transitions
+    // are logged loudly and mirrored in `firefly_heartbeat_degraded`.
+    let watchdog_metrics = Arc::clone(&metrics);
+    let operational = move || {
+        use std::sync::atomic::Ordering::Relaxed;
+        let now_unix_s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let stalled = firefly_server::tracker_progress_stalled(
+            watchdog_metrics.tracker_last_tick_unix_s.load(Relaxed),
+            watchdog_metrics.tracker_watchdog_threshold_s.load(Relaxed),
+            now_unix_s,
+        );
+        let was = watchdog_metrics.heartbeat_degraded.swap(stalled, Relaxed);
+        if stalled && !was {
+            tracing::error!(
+                threshold_s = watchdog_metrics.tracker_watchdog_threshold_s.load(Relaxed),
+                "tracker output ticks stopped: CAT065 heartbeat now reports NOGO/degraded (SAFE.4)"
+            );
+        } else if !stalled && was {
+            tracing::info!("tracker output ticks resumed: CAT065 heartbeat operational again");
+        }
+        !stalled
+    };
     tokio::spawn(async move {
         let result = firefly_multicast::run_heartbeat(
             &socket,
@@ -1485,6 +1528,7 @@ async fn spawn_cat065_heartbeat(metrics: Arc<Metrics>) -> Option<u16> {
             &encoder,
             period,
             utc_time_of_day_secs,
+            operational,
             || {
                 metrics
                     .cat065_heartbeats_sent_total

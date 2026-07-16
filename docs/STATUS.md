@@ -10,6 +10,55 @@
 
 ---
 
+## 🎯 Stand 2026-07-16 (SAFE.4 — Tracker-Fortschritts-Watchdog; FHA-L1 geschlossen)
+
+- **Zuletzt aktualisiert:** 2026-07-16
+- **SAFE.4 (FR-OPS-009; ICD 3.7.1 dokumentarisch):** Das FHA-Finding L1
+  ist **auf Betreiber-Anweisung sofort geschlossen**: Der
+  CAT065-Heartbeat fragt vor jedem Senden `tracker_progress_stalled` —
+  bleibt der Output-Tick des Live-Trackers länger als 3 Ausgabeperioden
+  (min 3 s) aus, meldet er ehrlich **NOGO/degradiert** statt „lebendig"
+  (scharf erst nach dem ersten Tick; automatische Erholung; ERROR-/
+  INFO-Log; Gauge `firefly_heartbeat_degraded`). Draht-Wirkung
+  testbelegt; NOGO-Werte seit ICD 2.3.0 spezifiziert ⇒ Konsumenten
+  unverändert (Wayfinder-Info-Issue folgt dem ICD-Prozess). Zudem
+  Betreiber-Vorgabe umgesetzt: **FHA-Pflege ist jetzt Qualitäts-Gate**
+  (CLAUDE.md §5). FHA §3/§6 fortgeschrieben (L1 ✅ mit Audit-Spur).
+  Ehrliche Grenze: erkennt ausbleibende Ticks, nicht falsch rechnende;
+  Standby promotet weiterhin nur bei *verstummtem* Heartbeat
+  (ADR-0041-Semantik — Änderung wäre eigenes Häppchen).
+- **Nächster Schritt:** unverändert **ASSUR.2** ankündigen (Coverage +
+  Property-Tests + Genauigkeits-Nachweisdossier; S3, **100 %**) — nach
+  Merge von PR #97, Freigabe abwarten.
+
+## 🎯 Stand 2026-07-16 (ASSUR.1 — FHA / Hazard-Analyse)
+
+- **Zuletzt aktualisiert:** 2026-07-16
+- **ASSUR.1 (NFR-SAFE-004; kein Code-, kein Wire-Bezug):** Die
+  **Functional Hazard Analysis** steht: `docs/safety/FHA.md` beantwortet
+  systematisch „Was kann dieses System einem Lotsen antun, wenn es
+  falsch arbeitet — und was fängt das ab?" — Funktionen F1–F7,
+  24 Gefährdungen nach **Verlust/irreführend × erkannt/unerkannt**
+  (indikative Schwere SK1–SK4; verbindlich = Betreiber-Kontext), jede
+  Barriere **rückverfolgbar** zu ADR/Anforderung/Test, Querschnitts-
+  Barrieren (Determinismus/Replay, Instrument-Tests, Regression-Gates),
+  **Lücken-Register** §6 + Pflege-Regel §7. Zentrale Befunde: **L1**
+  (Heartbeat läuft unabhängig vom Tracker-Task — ein hängender Tracker
+  sendete weiter „lebendig") ⇒ neue Roadmap-Zeile **SAFE.4**
+  (Tracker-Fortschritts-Watchdog, S2–S3); L2/L3 = Verfahrens-Lücken
+  (COMPASS je Konfig-Änderung, QNH-Zweitquelle); L4 = Alarmierung ⇒
+  MON.1 (bereits eingeplant, nach 100 %). Ehrlich: qualitativ,
+  KI-erstellt + **Betreiber-Review ausstehend**, keine unabhängige
+  Sicherheitsbewertung. Roadmap: **99 %**. Nebenher: MON.1-Zeile
+  (Monitoring-Paket auf Bestands-Tooling, Betreiber-Entscheid
+  2026-07-16) in die Roadmap aufgenommen.
+- **Nächster Schritt:** **ASSUR.2** ankündigen (Coverage-Messung +
+  Property-Tests + Genauigkeits-Nachweisdossier; S3, **100 %**) — und
+  Freigabe abwarten. Danach als Nachzügler: SAFE.4 (Reihenfolge =
+  Betreiber), MON.1. Offen beim Betreiber: FHA-Review +
+  Kontext-Einstufung; erster COMPASS-Bericht (HA.5-Abnahme). Weiter
+  offen: Wayfinder #244/#245/#257.
+
 ## 🎯 Stand 2026-07-16 (SRV.2 — Laufzeit-Steuerung + Supervision)
 
 - **Zuletzt aktualisiert:** 2026-07-16

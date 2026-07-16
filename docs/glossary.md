@@ -1115,6 +1115,21 @@ Luftlage soft-echtzeitkritisch — sie muss klein *und vorhersagbar* sein.
 
 ## Zertifizierung & Assurance
 
+**FHA** (*Functional Hazard Analysis*)
+Der erste Schritt jedes Sicherheits-Nachweises (ED-153/SAM-Systematik):
+systematisch durchdeklinieren, **welche Funktionen** ein System erbringt,
+**wie jede versagen kann** und **wie schlimm** das wäre. Entscheidende
+Unterscheidung dabei: *Verlust* (das Bild fehlt — unangenehm, aber
+Rückfall-Verfahren greifen) vs. *irreführend* (das Bild ist falsch,
+sieht aber richtig aus — der Lotse handelt auf falscher Grundlage; die
+gefährlichste Klasse ist „irreführend **unerkannt**"). Fireflys FHA
+lebt in `docs/safety/FHA.md` (NFR-SAFE-004): Funktionen F1–F7,
+Gefährdungen mit rückverfolgbaren Barrieren (ADR/Anforderung/Test) und
+einem offenen **Lücken-Register** — erkannte Schwächen stehen sichtbar
+im Dokument (und werden zu Roadmap-Zeilen wie SAFE.4), statt verschwiegen
+zu werden. Qualitativ und Betreiber-geprüft; die verbindliche
+Schwere-Einstufung braucht den Betriebs-Kontext des ANSP.
+
 **SASS-C**
 EUROCONTROLs Analyse-Werkzeugkasten zur Bewertung von
 Überwachungs-Systemleistung (Radar-/Tracker-Ketten) — der Industrie-

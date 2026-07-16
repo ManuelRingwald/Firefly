@@ -86,6 +86,17 @@ pub struct Metrics {
     /// Sensors currently taken out of the fusion by an operator command
     /// (SRV.2 sensor gate; gauge, follows every `/sensors/{id}` command).
     pub sensors_disabled: AtomicU64,
+    /// Unix time of the live tracker's most recent output tick (internal,
+    /// not rendered): the progress signal the heartbeat watchdog reads
+    /// (SAFE.4). 0 until the first tick.
+    pub tracker_last_tick_unix_s: AtomicU64,
+    /// Allowed output-tick silence in seconds before the CAT065 heartbeat
+    /// reports NOGO/degraded (internal, not rendered; SAFE.4). 0 = watchdog
+    /// unarmed (set by the live wiring to 3 × output period).
+    pub tracker_watchdog_threshold_s: AtomicU64,
+    /// 1 while the CAT065 heartbeat reports NOGO/degraded because the
+    /// tracker task stopped making output ticks (SAFE.4 watchdog; gauge).
+    pub heartbeat_degraded: AtomicBool,
     /// Total plots dropped at ingest because their sensor was operator-
     /// disabled (SRV.2; counter). Grows only while a gate is in force.
     pub sensor_disabled_plots_dropped_total: AtomicU64,
@@ -520,6 +531,17 @@ pub fn render(metrics: &Metrics) -> String {
     );
     write_metric(
         &mut out,
+        "firefly_heartbeat_degraded",
+        "gauge",
+        "1 while the CAT065 heartbeat reports NOGO because the tracker task stopped ticking (SAFE.4).",
+        if metrics.heartbeat_degraded.load(Ordering::Relaxed) {
+            1.0
+        } else {
+            0.0
+        },
+    );
+    write_metric(
+        &mut out,
         "firefly_sensor_disabled_plots_dropped_total",
         "counter",
         "Plots dropped at ingest because their sensor was operator-disabled (SRV.2).",
@@ -725,6 +747,7 @@ mod tests {
         metrics
             .sensor_disabled_plots_dropped_total
             .store(42, Ordering::Relaxed);
+        metrics.heartbeat_degraded.store(true, Ordering::Relaxed);
         metrics
             .registration_estimates_total
             .store(9, Ordering::Relaxed);
@@ -805,6 +828,7 @@ mod tests {
         assert!(text.contains("firefly_sensors_active 2"));
         assert!(text.contains("firefly_sensors_disabled 1"));
         assert!(text.contains("firefly_sensor_disabled_plots_dropped_total 42"));
+        assert!(text.contains("firefly_heartbeat_degraded 1"));
         assert!(text.contains("# TYPE firefly_ws_clients_connected gauge"));
         assert!(text.contains("# TYPE firefly_cat062_scans_sent_total counter"));
         assert!(text.contains("# TYPE firefly_tracks_active gauge"));
