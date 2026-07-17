@@ -973,6 +973,22 @@ selbst-gehosteter Stil für volle Souveränität bleibt ein späterer Schritt.
 
 ## Cloud & Betrieb
 
+**Runbook**
+Die Handlungsanweisung zu einem Alarm: *was bedeutet er, was tue ich
+zuerst, wo geht es weiter* — mit konkreten Befehlen statt Prosa. Bei uns
+je Alarmregel in `monitoring/README.md` (MON.1), aus den Regeln heraus
+verlinkt (Annotation `runbook`, maschinell geprüft). Leitsatz: **Ein
+Alarm ohne Handgriff ist nur Lärm** — er weckt jemanden, der dann erst
+recherchieren muss.
+
+**Alertmanager**
+Die Alarm-Verteilkomponente des Prometheus-Stacks: Prometheus wertet die
+Regeln (`monitoring/prometheus/alerts.yaml`) kontinuierlich aus und
+übergibt feuernde Alarme an den Alertmanager, der dedupliziert,
+gruppiert, stummschaltet und an Empfänger (Mail, Chat, Pager) zustellt.
+Firefly liefert die Regeln und Runbooks; Betrieb und Empfänger-Konfig
+sind Deployment-Sache (NFR-OBS-004).
+
 **Sensor-Gate / Laufzeit-Steuerung (SRV.2)**
 Der Eingriffs-Hebel des Betreibers im laufenden Betrieb (FR-OPS-008,
 ARTAS-CMD-/SNMP-Ersatz): Ein störender Sensor wird per Kommando

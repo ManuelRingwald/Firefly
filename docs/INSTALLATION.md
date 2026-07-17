@@ -165,6 +165,10 @@ Wichtige Punkte (Details und Begründungen in `deploy/README.md`):
 - **Validierung:** `deploy/validate.sh` (YAML-Syntax überall; `helm lint`
   + Voll-Render, wo Helm installiert ist). Der erste echte `helm install`
   gehört in die Abnahme des Zielclusters.
+- **Monitoring (MON.1):** Alarmregeln, Runbooks und Grafana-Dashboard
+  liegen unter `monitoring/` (Einbindung: `monitoring/README.md`). Mit
+  Prometheus-Operator zusätzlich `--set monitoring.serviceMonitor.enabled=true`
+  (Default aus — Cluster ohne die CRD sollen nicht am Install scheitern).
 
 ## 7. ADS-B-Echtbetrieb mit OpenSky Network
 

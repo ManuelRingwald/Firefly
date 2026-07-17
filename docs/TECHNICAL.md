@@ -572,6 +572,23 @@ RUST_LOG=debug ./target/release/firefly-server
 ./target/release/firefly-server 2>&1 | jq 'select(.message | contains("CAT062")) | .scans'
 ```
 
+### 2.5 Log-Aggregation (Loki/ELK-Rezept, MON.1)
+
+Die Logs sind bereits **strukturiertes JSON auf stdout** — für jede
+Aggregations-Lösung reicht der Standard-Sammelpfad, es ist keine
+Firefly-Konfiguration nötig:
+
+- **Loki (empfohlen im K8s-Stack):** Promtail/Grafana Alloy sammelt
+  stdout automatisch; als Pipeline nur `json`-Stage + Label auf `level`
+  setzen. Nützliche Abfragen:
+  `{app="firefly"} | json | level="ERROR"` und
+  `{app="firefly"} |= "SAFE.4"` (Watchdog-Übergänge).
+- **ELK/Filebeat:** `json.keys_under_root: true`, sonst Standard.
+- Die im Betrieb wichtigen Meldungen (Abschnitt 2.3) sind stabile
+  Marker — Alarmierung läuft aber über Metriken
+  (`monitoring/prometheus/alerts.yaml`), nicht über Log-Pattern:
+  Log-basierte Alarme brechen bei jeder Umformulierung.
+
 ---
 
 ## 3. Prometheus-Metriken
@@ -641,6 +658,19 @@ Content-Type: text/plain; version=0.0.4
 | `firefly_meteo_qnh_hpa{region="…"}` | gauge | **VERT.1:** konfiguriertes QNH je Region, hPa. Erscheint nur bei konfigurierten Regionen. |
 | `firefly_radar_north_markers_total` | counter | **FEP.1:** empfangene CAT034-Nordmarken über alle Radar-Quellen |
 | `firefly_radar_scan_period_seconds{sensor="…"}` | gauge | **FEP.1:** **gemessene** Antennen-Umlaufzeit je Radar (Sekunden, aus Nordmarken-Intervallen). Erscheint erst nach der ersten Messung; speist die CAT063-Staleness-Schwelle. |
+
+### 3.2a Alarmierung & Dashboard (MON.1)
+
+Das Monitoring-Paket liegt unter `monitoring/` (NFR-OBS-004): **12
+Alarmregeln** in drei Schweregraden (`prometheus/alerts.yaml`, kanonisch;
+`kubernetes/prometheusrule.yaml` als Operator-Verpackung — `validate.sh`
+prüft die Gleichheit), je Alarm ein **Runbook** (Alarm → Bedeutung →
+Handgriff, `monitoring/README.md`), dazu das Grafana-Dashboard in fünf
+Blöcken (Feed & Dienst · Quellen & Sensoren · Tracker · HA ·
+Korrelation). Opt-in-ServiceMonitor im Helm-Chart:
+`monitoring.serviceMonitor.enabled=true`. Schwellen sind begründete
+Startwerte (Design-Konstanten + CAP-Messungen) — nach den ersten
+Betriebswochen gegen echte Baselines kalibrieren.
 
 ### 3.3 Prometheus scrape-Konfiguration
 
