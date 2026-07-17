@@ -24,7 +24,21 @@ Dann im Browser: **http://localhost:8080**
 1. **Builder-Stage** (`rust:1.82-bookworm`): Kompiliert den ganzen Workspace im Release-Modus.
 2. **Runtime-Stage** (`debian:bookworm-slim`): Minimal-Image mit nur dem Binary und statischen Assets (~50 MB).
 
-**Healthcheck:** Der Container prüft, ob der Server auf `/health` antwortet.
+**Healthcheck:** Der Container prüft, ob der Server auf `/health` antwortet —
+über den **eingebauten Selbsttest** `firefly-server --healthcheck` (#99,
+FR-OPS-010): ein lokaler `GET /health`, Exit-Code 0 = gesund, 1 = nicht.
+Bewusst **kein** `curl` im Image (das Slim-Image enthält keins; der frühere
+curl-Aufruf scheiterte deshalb immer und meldete jeden Container dauerhaft
+`unhealthy`). Der Selbsttest respektiert `FIREFLY_PORT`.
+
+Verifizieren (Akzeptanzkriterien aus #99):
+
+```bash
+docker ps                       # Status: (healthy)
+docker inspect --format '{{json .State.Health.Log}}' <container> | jq .
+# Negativtest — der Check misst wirklich: Server-Port im Container blockieren
+# bzw. FIREFLY_PORT im Check-Kontext verstellen ⇒ Status kippt auf unhealthy.
+```
 
 ### docker-compose.yml
 

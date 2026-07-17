@@ -30,6 +30,20 @@ use tokio::sync::{mpsc, watch};
 
 #[tokio::main]
 async fn main() {
+    // Container health probe (#99, FR-OPS-010): `--healthcheck` runs one
+    // local GET /health and exits 0/1 — the Docker HEALTHCHECK calls this
+    // instead of a curl the slim runtime image never contained. Handled
+    // before any logging/server setup: the probe must stay silent and
+    // side-effect-free.
+    if std::env::args().nth(1).as_deref() == Some("--healthcheck") {
+        let port = ServerConfig::from_env().port;
+        std::process::exit(if firefly_server::probe_local_health(port) {
+            0
+        } else {
+            1
+        });
+    }
+
     init_tracing();
 
     let config = ServerConfig::from_env();
