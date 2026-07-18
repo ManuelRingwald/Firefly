@@ -22,7 +22,8 @@ services:
       # Structured logging; set to "debug" for verbose output.
       RUST_LOG: ${RUST_LOG:-info}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      # Built-in probe (#99): the slim image has no curl; the binary checks itself.
+      test: ["CMD", "/app/firefly-server", "--healthcheck"]
       interval: 10s
       timeout: 3s
       retries: 3

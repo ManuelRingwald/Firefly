@@ -103,6 +103,7 @@ mit Trace) · **Rest** (Restrisiko/Verweis §6).
 | H-F4-01 | „Leerer Himmel" nicht von „totem Feed" unterscheidbar | V/u | SK2 | Genau dafür gebaut: CAT065-Heartbeat (ADR 0018) + Wayfinder-Staleness | akzeptiert |
 | H-F4-02 | Einzelner **Sensor-Ausfall unbemerkt** (Bild wird still dünner) | V/u | SK2–3 | CAT063 je Sensor (ADR 0022/0032, FR-IO-007) inkl. Ausfallgrund SRC-REASON (ADR 0033); `firefly_sensors_active` vs. `_total`; gemessene Scan-Periode speist die Staleness-Schwelle (FEP.1) | Alarm auf die Metrik = MON.1 |
 | H-F4-03 | Heartbeat lügt (behauptet Leben trotz defektem Kern) | I/u | SK1–2 | = H-F1-02 (SAFE.4-Watchdog) | geschlossen (L1 ✅) |
+| H-F4-04 | **Container-Gesundheitsstatus lügt** (Deployment-Ebene): der Docker-Healthcheck rief ein Werkzeug auf, das das Image nicht enthält — Dauer-`unhealthy` bei gesundem Dienst, das Signal war wertlos und hätte Automatiken (Watchdog-Restarts, `service_healthy`-Gates) fehlgeleitet | I/e | SK3 | Gefunden im Wayfinder-E2E (Issue #99); behoben: **eingebauter Selbsttest** `--healthcheck` (FR-OPS-010) — das Thermometer ist im Binary und kann nicht mehr vom Image-Inhalt abweichen; Negativtest belegt, dass der Check misst | geschlossen |
 
 ### F5 — Verfügbarkeit
 

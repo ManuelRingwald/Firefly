@@ -10,6 +10,25 @@
 
 ---
 
+## 🎯 Stand 2026-07-17 (#99 — eingebauter Docker-Healthcheck)
+
+- **Zuletzt aktualisiert:** 2026-07-17
+- **#99 / FR-OPS-010 (`from-wayfinder`, bug):** Der Docker-Healthcheck
+  **log dauerhaft** — er rief `curl` auf, das im Slim-Image nie
+  existierte; jeder Container meldete `unhealthy` bei gesundem Server.
+  Jetzt ist das Thermometer **im Binary**: `firefly-server --healthcheck`
+  macht einen lokalen `GET /health` (roher `std::net`-Request, keine
+  neuen Abhängigkeiten, 2-s-Budget < Docker-Timeout, respektiert
+  `FIREFLY_PORT`) und exitet 0/1. Dockerfile + docker-compose rufen das
+  Subkommando; DOCKER.md mit Verifikation inkl. Negativtest; Tests
+  belegen, dass der Check **misst** (503/toter Port ⇒ ungesund); FHA
+  um H-F4-04 ergänzt (gefundene irreführende Statusquelle, geschlossen).
+- **Nächster Schritt:** nach Merge von PR #100 (MON.1) diesen Fix als
+  eigenen PR pushen (`Fixes #99`). Danach Kandidaten: **#76-Delta**
+  (Coverage-CI-Job, S2) · **#78** (SWAL/AL, S3–S4) — Reihenfolge =
+  Betreiber. Offen beim Betreiber: FHA-Review, COMPASS-Lauf,
+  MON.1-Aktivierung.
+
 ## 🎯 Stand 2026-07-17 (MON.1 — Monitoring-Paket · Issue-Bestandsaufnahme)
 
 - **Zuletzt aktualisiert:** 2026-07-17

@@ -26,9 +26,12 @@ COPY --from=builder /build/target/release/firefly-server /app/
 # Copy static assets (HTML, GeoJSON, etc.).
 COPY --from=builder /build/crates/firefly-server/static /app/static/
 
-# Health check: server listens on port 8080 and has a /health endpoint.
+# Health check (#99, FR-OPS-010): the binary probes its own /health —
+# the slim runtime image deliberately carries no curl, and an external
+# tool the image lacks made every container report "unhealthy" forever.
+# The built-in probe exits 0 (healthy) / 1 and honours FIREFLY_PORT.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD ["/app/firefly-server", "--healthcheck"]
 
 EXPOSE 8080
 

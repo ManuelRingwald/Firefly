@@ -23,6 +23,7 @@
 
 pub mod app;
 pub mod config;
+pub mod healthcheck;
 pub mod live;
 pub mod metrics;
 pub mod replay;
@@ -33,6 +34,7 @@ pub mod standby;
 pub use app::{router, AppState, CorrelationApi, FrameSource, SensorControl};
 pub use config::ServerConfig;
 pub use firefly_io::Frame;
+pub use healthcheck::probe_local_health;
 pub use live::{
     build_live_tracker, build_live_tracker_multi, live_system_reference_point,
     registration_enabled, resolve_plot_recorder, run_live_cat062, run_live_tracker,
