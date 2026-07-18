@@ -1,0 +1,28 @@
+{{- /*
+Opt-in ServiceMonitor (MON.1): scrapes /metrics of BOTH instances through
+the shared Service's endpoints. Note the standby IS scraped even though
+the Service does not route traffic to it (readiness gating only affects
+load-balancing, not Endpoints listed as notReady): ServiceMonitors with
+the default settings scrape ready endpoints — the standby's metrics
+(role, main-heartbeat age) arrive once it is ready after promotion; for
+standby-phase visibility use the pod annotations path instead.
+*/ -}}
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-firefly
+  labels:
+    {{- include "firefly.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "firefly.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+{{- end }}

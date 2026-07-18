@@ -10,6 +10,39 @@
 
 ---
 
+## 🎯 Stand 2026-07-17 (MON.1 — Monitoring-Paket · Issue-Bestandsaufnahme)
+
+- **Zuletzt aktualisiert:** 2026-07-17
+- **MON.1 (NFR-OBS-004; kein Code-/Wire-Bezug; schließt FHA-Lücke L4):**
+  Firefly kann sich jetzt **melden, nicht nur messen** — auf
+  Bestands-Tooling, kein Eigenbau (Betreiber-Entscheid 2026-07-16):
+  **12 Alarmregeln** in 3 Schweregraden
+  (`monitoring/prometheus/alerts.yaml`, kanonisch; critical u. a.
+  FireflyHeartbeatSilent mit `firefly_role`-Guard und
+  FireflyTrackerStalled = SAFE.4), je Alarm ein **Runbook**
+  (Bedeutung → Handgriff, `monitoring/README.md`),
+  **Dashboard-Neubau** (25 Panels in 5 Blöcken statt 5
+  SDPS-006-Panels), PrometheusRule-CRD als generierte Verpackung +
+  `validate.sh` (erzwingt Gleichheit; in dieser Umgebung grün,
+  promtool-SKIP dokumentiert), Opt-in-ServiceMonitor im Helm-Chart,
+  Loki/ELK-Rezept (TECHNICAL §2.5). Ehrlich: Aktivierung =
+  Betreiber-Schritt; Schwellen = Startwerte; kein externer Watchdog
+  (offene Design-Frage, nur nach Design-Konzept + Freigabe).
+- **Issue-Bestandsaufnahme (2026-07-17):** Firefly **#77** (FHA)
+  geschlossen — erledigt durch ASSUR.1; **#76** (Coverage in CI)
+  kommentiert: gemessen ✅, Rest-Delta = CI-Job (S2); **#78** (SWAL/AL)
+  durch die FHA entblockt (Kandidat, S3–S4); **#99** 🆕
+  (`from-wayfinder`, bug): Docker-Healthcheck ruft curl, Image hat
+  keins → dauerhaft `unhealthy`; Vorschlag eingebauter
+  `--healthcheck`-Selbsttest (S2, Kandidat direkt als Nächstes).
+  Wayfinder-seitig sind #244/#245/#257 und der ICD-Backlog
+  **geschlossen** — Cross-Project-Tabelle nachgezogen (offen nur noch
+  #261 NOGO-Sichtprüfung; #159 Test-VM, #215/#132 bewusst später).
+- **Nächster Schritt:** Betreiber-Reihenfolge für die Kandidaten
+  **#99** (Healthcheck-Bug, S2) · **#76-Delta** (Coverage-CI-Job, S2) ·
+  **#78** (SWAL/AL, S3–S4) abwarten; offene Betreiber-Punkte: FHA-Review,
+  erster COMPASS-Lauf, MON.1-Aktivierung im Stack.
+
 ## 🎯 Stand 2026-07-16 (ASSUR.2 — Coverage + Properties + Dossier · **ROADMAP 100 %**)
 
 - **Zuletzt aktualisiert:** 2026-07-16

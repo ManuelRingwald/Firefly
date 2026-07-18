@@ -1,0 +1,128 @@
+# Firefly SDPS — PrometheusRule-Verpackung der Alarmregeln (MON.1).
+#
+# GENERIERTE VERPACKUNG — die kanonische Quelle ist
+# ../prometheus/alerts.yaml; ../validate.sh prüft, dass die Gruppen hier
+# byte-gleich (semantisch) mit der Quelle sind. Änderungen IMMER dort,
+# dann diese Datei neu erzeugen (siehe ../README.md).
+#
+# Das Label `release: prometheus` matcht die Default-ruleSelector vieler
+# kube-prometheus-stack-Installationen — an die eigene Installation
+# anpassen (`kubectl get prometheus -o yaml | grep -A3 ruleSelector`).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: firefly-alerts
+  labels:
+    app.kubernetes.io/name: firefly
+    release: prometheus
+spec:
+  groups:
+  - name: firefly.critical
+    rules:
+    - alert: FireflyAbsent
+      expr: absent(firefly_cat065_heartbeats_sent_total)
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: Firefly wird nicht mehr gescrapt — Feed-Zustand unbekannt
+        description: Seit 2 Minuten liefert keine Firefly-Instanz Metriken.
+        runbook: monitoring/README.md#fireflyabsent
+    - alert: FireflyHeartbeatSilent
+      expr: rate(firefly_cat065_heartbeats_sent_total[2m]) == 0 and on(instance) firefly_role == 1
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: Aktive Firefly-Instanz sendet keine Heartbeats
+        description: CAT065-Rate der aktiven Instanz ist 0 — Konsumenten sehen einen toten Feed.
+        runbook: monitoring/README.md#fireflyheartbeatsilent
+    - alert: FireflyTrackerStalled
+      expr: firefly_heartbeat_degraded == 1
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: Tracker-Fortschritt ausgeblieben — Heartbeat meldet NOGO
+        description: Der Live-Tracker macht keine Output-Ticks mehr (SAFE.4-Watchdog aktiv).
+        runbook: monitoring/README.md#fireflytrackerstalled
+  - name: firefly.warning
+    rules:
+    - alert: FireflySensorOutage
+      expr: firefly_sensors_active < firefly_sensors_total
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $value }} Sensor(en) unter Soll — Quelle liefert nicht'
+        description: firefly_sensors_active liegt seit 5 min unter firefly_sensors_total.
+        runbook: monitoring/README.md#fireflysensoroutage
+    - alert: FireflySnapshotStale
+      expr: firefly_snapshot_age_seconds > 60 and firefly_snapshot_writes_total > 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: Zustands-Snapshot veraltet ({{ $value }} s)
+        description: Kein erfolgreicher Snapshot seit > 60 s — Neustart-Verlustfenster wächst.
+        runbook: monitoring/README.md#fireflysnapshotstale
+    - alert: FireflySnapshotWriteFailing
+      expr: increase(firefly_snapshot_errors_total[10m]) > 0
+      labels:
+        severity: warning
+      annotations:
+        summary: Zustands-Snapshots schlagen fehl
+        description: Mindestens ein Snapshot-Schreibfehler in den letzten 10 min.
+        runbook: monitoring/README.md#fireflysnapshotwritefailing
+    - alert: FireflyBackpressureLoss
+      expr: increase(firefly_live_plot_batches_dropped_total[5m]) > 0
+      labels:
+        severity: warning
+      annotations:
+        summary: Plot-Batches unter Back-Pressure verworfen
+        description: Der Tracker kommt der Quell-Rate nicht nach — Daten gehen verloren.
+        runbook: monitoring/README.md#fireflybackpressureloss
+    - alert: FireflyFailover
+      expr: increase(firefly_failovers_total[15m]) > 0
+      labels:
+        severity: warning
+      annotations:
+        summary: 'Failover: ein Standby hat übernommen'
+        description: firefly_failovers_total ist gestiegen — Ursache beim vorherigen Main klären.
+        runbook: monitoring/README.md#fireflyfailover
+    - alert: FireflyCat062SendErrors
+      expr: increase(firefly_cat062_send_errors_total[5m]) > 0
+      labels:
+        severity: warning
+      annotations:
+        summary: CAT062-Sendefehler auf dem Multicast-Pfad
+        description: Send-Fehler in den letzten 5 min — Netzpfad zum Multicast prüfen.
+        runbook: monitoring/README.md#fireflycat062senderrors
+  - name: firefly.info
+    rules:
+    - alert: FireflyJpdaCapEngaged
+      expr: increase(firefly_jpda_cluster_cap_hits_total[15m]) > 0
+      labels:
+        severity: info
+      annotations:
+        summary: JPDA-Cluster-Kappe aktiv (sehr dichter Verkehr)
+        description: Cluster über 8 Tracks/10 Plots wurden auf Pro-Track-PDA degradiert (FR-TRK-052).
+        runbook: monitoring/README.md#fireflyjpdacapengaged
+    - alert: FireflySensorGateInForce
+      expr: firefly_sensors_disabled > 0
+      for: 60m
+      labels:
+        severity: info
+      annotations:
+        summary: Sensor-Gate seit > 1 h in Kraft ({{ $value }} Sensor(en))
+        description: Manuell deaktivierte Sensoren — prüfen, ob der Grund fortbesteht.
+        runbook: monitoring/README.md#fireflysensorgateinforce
+    - alert: FireflySourceRateLimited
+      expr: increase(firefly_opensky_rate_limited_total[15m]) > 0 or increase(firefly_adsbagg_rate_limited_total[15m])
+        > 0
+      labels:
+        severity: info
+      annotations:
+        summary: ADS-B-Quelle drosselt (Rate-Limit)
+        description: OpenSky/Aggregator antworten 429 — Poll-Backoff aktiv.
+        runbook: monitoring/README.md#fireflysourceratelimited

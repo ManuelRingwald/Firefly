@@ -86,3 +86,19 @@ containerSecurityContext:
 
 # Graceful shutdown (ADR 0003): SIGTERM → recorder/snapshot flush.
 terminationGracePeriodSeconds: 20
+
+# Monitoring (MON.1, NFR-OBS-004): opt-in ServiceMonitor for the
+# Prometheus Operator / kube-prometheus-stack. Disabled by default —
+# clusters without the CRD would fail the install. Without the operator,
+# the pods' prometheus.io/* annotations (see deployment templates)
+# already serve plain-Prometheus scraping. Alert rules ship separately:
+# monitoring/kubernetes/prometheusrule.yaml (canonical source
+# monitoring/prometheus/alerts.yaml).
+monitoring:
+  serviceMonitor:
+    enabled: false
+    # Match your Prometheus's serviceMonitorSelector (kube-prometheus-stack
+    # default selects release=<prometheus release name>).
+    labels:
+      release: prometheus
+    interval: 10s
