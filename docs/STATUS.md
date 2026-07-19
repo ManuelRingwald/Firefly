@@ -10,6 +10,29 @@
 
 ---
 
+## 🐳 Stand 2026-07-19 (Docker-Build-Fix: `.dockerignore` schloss den deklarierten Bench aus)
+
+- **Zuletzt aktualisiert:** 2026-07-19
+- **Symptom (Betreiber, Mac-mini-Aufbau):** `docker compose up --build` bricht
+  im Firefly-Build ab mit
+  `error: failed to parse manifest … can't find `load` bench at benches/load.rs`.
+- **Ursache:** CAP.1 (`dbffdfd`) fügte in `crates/firefly-eval/Cargo.toml` einen
+  **explizit deklarierten** Benchmark hinzu (`[[bench]] name = "load"`,
+  `harness = false` für criterion). Die `.dockerignore` schloss aber
+  `crates/*/benches/` aus dem Build-Kontext aus — im Container fehlte
+  `benches/load.rs`, während das Manifest sie verlangt. `cargo` validiert
+  **alle** Workspace-Manifeste beim Parsen, daher Abbruch schon bei
+  `cargo build -p firefly-server` (der Bench selbst wird nie kompiliert). Lokal
+  unsichtbar, weil die Datei da ist.
+- **Fix:** `crates/*/benches/` aus `.dockerignore` entfernt (mit
+  Regression-Kommentar). `crates/*/tests/` bleibt ausgeschlossen — Integrationstests
+  sind auto-discovered, ihr Fehlen bricht das Manifest-Parsing nicht. Reiner
+  Build-Kontext-Fix, **kein** Rust-Code berührt; `cargo metadata` parst sauber.
+- **Verifikation:** Betreiber-Rebuild auf dem Mac (Sandbox kann den Docker-Build
+  nicht ausführen).
+
+---
+
 ## 🎯 Stand 2026-07-17 (#99 — eingebauter Docker-Healthcheck)
 
 - **Zuletzt aktualisiert:** 2026-07-17
