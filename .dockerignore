@@ -15,4 +15,10 @@ README.md
 CLAUDE.md
 docs/
 crates/*/tests/
-crates/*/benches/
+# NB: benches/ must NOT be excluded from the Docker build context. firefly-eval
+# declares an explicit [[bench]] in its Cargo.toml, so cargo needs the source
+# file present to parse the workspace manifest during `docker build` — even
+# though the bench itself is never compiled for firefly-server. Excluding it
+# broke `cargo build` with "can't find `load` bench" (CAP.1 regression, fixed
+# 2026-07-19). Integration tests (crates/*/tests/) stay excluded: they are
+# auto-discovered, so their absence does not fail manifest parsing.
